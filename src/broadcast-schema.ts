@@ -9,6 +9,20 @@ import { Broadcast, BroadcastSchemaProps, Schedule } from "./types";
  *  - Weekday names in first row
  *  - Broadcast names in first column
  *  - Additional info for each broadcast can be added to any non-weekday-column
+ *
+ * Syntax for each schedule:
+ * "M:[1-12]" each month
+ * "M:[1,3,5]" e.g. only in Jan, Mar and May
+ * "D:[1-5]" each nth weekday (from column) of month
+ * "D:[1,3,5]" e.g. each first, third and fifth weekday of month
+ * "D:[-1]" e.g. each last weekday (from column) of month
+ * "H:[20,21]" e.g. starting at 20:00 and 21:00 (duration as given in this.gridSize)
+ * "R:12" number of hours to set a repeat of broadcast
+ * "I:"Add Info"" Additional info to print out
+ * "O:true" Overrides all other broadcasts in timeslot
+ *
+ * Schedule parts must be comma separated,
+ * Schedule blocks must be semicolon separated.
  */
 export default class BroadcastSchema {
   // path & filename of xlsx-schema file

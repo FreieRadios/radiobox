@@ -1,3 +1,9 @@
+# Files
+json/*
+mp3/*
+schema/*
+!schema/example.xlsx
+
 # Logs
 logs
 *.log

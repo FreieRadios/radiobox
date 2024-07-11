@@ -35,19 +35,22 @@ export default class BroadcastExport {
   convert() {
     switch (this.mode) {
       case "welocal-json":
-        return this.getGrid().map((slot) => {
-          const broadcast = slot.matches[0];
-          const localeStartDate = slot.start.setLocale("de");
-          const localeEndDate = slot.end.setLocale("de");
-          return {
-            day: localeStartDate.toLocaleString(DateTime.DATE_SHORT),
-            block: broadcast.name,
-            start: localeStartDate.toLocaleString(DateTime.TIME_24_SIMPLE),
-            end: localeEndDate.toLocaleString(DateTime.TIME_24_SIMPLE),
-            short: broadcast.toString(),
-            long: slot.broadcast?.info.join(" | ") || this.schedule.repeatLong,
-          };
-        }) as TimeGridJson;
+        return this.getGrid()
+          .filter((slot) => slot.matches.length > 0)
+          .map((slot) => {
+            const broadcast = slot.matches[0];
+            const localeStartDate = slot.start.setLocale("de");
+            const localeEndDate = slot.end.setLocale("de");
+            return {
+              day: localeStartDate.toLocaleString(DateTime.DATE_SHORT),
+              block: broadcast.name,
+              start: localeStartDate.toLocaleString(DateTime.TIME_24_SIMPLE),
+              end: localeEndDate.toLocaleString(DateTime.TIME_24_SIMPLE),
+              short: broadcast.toString(),
+              long:
+                slot.broadcast?.info.join(" | ") || this.schedule.repeatLong,
+            };
+          }) as TimeGridJson;
       default:
         return;
     }
