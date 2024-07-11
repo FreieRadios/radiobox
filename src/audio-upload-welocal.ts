@@ -134,13 +134,12 @@ export default class AudioUploadWelocal {
   }
 
   getPostTitle(slot: TimeSlot) {
-    return (
-      slot.broadcast.name +
-      " am " +
-      slot.start.toLocaleString(DateTime.DATE_SHORT) +
-      " " +
-      slot.start.toLocaleString(DateTime.TIME_24_SIMPLE)
-    );
+    return [
+      slot.broadcast.name,
+      slot.start.toLocaleString(DateTime.DATE_SHORT),
+      slot.start.toLocaleString(DateTime.TIME_24_SIMPLE),
+      slot.broadcast.info[0],
+    ].join(" 🢒 ");
   }
 
   getTargetName(slot: TimeSlot) {
