@@ -2,6 +2,18 @@ import { DateTime } from "luxon";
 import BroadcastSchema from "./broadcast-schema";
 import BroadcastSchedule from "./broadcast-schedule";
 
+export type BroadcastRecorderProps = {
+  schedule: BroadcastSchedule;
+  // skip to record all scheduled
+  dateStart?: string;
+  // skip to record all scheduled
+  dateEnd?: string;
+  streamUrl: string;
+  outDir?: string;
+  filenamePrefix?: string;
+  ignoreRepeats?: boolean;
+};
+
 export type BroadcastSchemaProps = {
   schemaFile: string;
   weekdayColNames?: string[];
@@ -17,7 +29,7 @@ export type BroadcastScheduleProps = {
   repeatPadding?: number;
 };
 
-export type BroadcastExportProps = {
+export type ScheduleExportProps = {
   schedule: BroadcastSchedule;
   mode: "welocal-json";
   outDir?: string;
@@ -84,6 +96,8 @@ export type Schedule = {
 export type TimeSlot = {
   start: DateTime;
   end: DateTime;
+  // number of slots (1h default)
+  duration: number;
   broadcast?: Broadcast;
   matches: Schedule[];
   wasMerged?: boolean;

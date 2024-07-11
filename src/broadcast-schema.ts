@@ -1,9 +1,8 @@
 import { dataFromXlsx } from "./helper/files";
-import { parseJsonBlock, replaceRangeArrays } from "./helper/helper";
 import { Broadcast, BroadcastSchemaProps, Schedule } from "./types";
 
 /*
- * Class read a schema xlsx-file
+ * Class to read a schema xlsx-file
  *
  * It requires an xlsx file with
  *  - Weekday names in first row
@@ -92,8 +91,8 @@ export default class BroadcastSchema {
   parseCellJson(cell: string, weekday: number, name: string): Schedule[] {
     const blocks = cell
       .split(";")
-      .map((block: string) => replaceRangeArrays(block))
-      .map((block: string) => parseJsonBlock(block))
+      .map((block: string) => this.replaceRangeArrays(block))
+      .map((block: string) => this.parseJsonBlock(block))
       .map((block: Schedule) => {
         block.name = name;
         block.weekday = weekday;
@@ -101,4 +100,27 @@ export default class BroadcastSchema {
       });
     return blocks;
   }
+
+  replaceRangeArrays = (block: string) => {
+    return block
+      .replace("[1-12]", "[1,2,3,4,5,6,7,8,9,10,11,12]")
+      .replace("[1-5]", "[1,2,3,4,5]")
+      .replace("M:", '"monthsOfYear": ')
+      .replace("D:", '"nthWeekdaysOfMonth": ')
+      .replace("H:", '"hoursOfDay": ')
+      .replace("R:", '"repeatOffset": ')
+      .replace("I:", '"info": ')
+      .replace("O:", '"overrides": ');
+  };
+
+  parseJsonBlock = (block: string) => {
+    let json = {};
+    try {
+      json = JSON.parse("{" + block + "}");
+    } catch (e) {
+      console.error(e);
+      console.error(block);
+    }
+    return json as Schedule;
+  };
 }

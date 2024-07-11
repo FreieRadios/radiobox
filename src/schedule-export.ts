@@ -1,18 +1,18 @@
 import { writeJsonFile } from "./helper/files";
 import { DateTime } from "luxon";
-import { BroadcastExportProps, TimeGridJson } from "./types";
+import { ScheduleExportProps, TimeGridJson } from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
 
 /*
  * Class to export a schedule schema to json
  */
-export default class BroadcastExport {
+export default class ScheduleExport {
   schedule: BroadcastSchedule;
   outDir: string;
   filenamePrefix: string;
-  mode: BroadcastExportProps["mode"];
+  mode: ScheduleExportProps["mode"];
 
-  constructor(props: BroadcastExportProps) {
+  constructor(props: ScheduleExportProps) {
     this.schedule = props.schedule;
     this.mode = props.mode;
     this.outDir = props.outDir;

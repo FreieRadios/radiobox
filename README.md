@@ -1,9 +1,11 @@
 # RADIOBOX
+
 ### A box of tools for free radio stations
 
 This library provides a set of simple typescript classes to help community radio stations.
 
 ## How to use
+
 This library can only be used on the server-side and requires a [Node.js](https://nodejs.org/en/download/package-manager/) environment.
 
 If you want to see how it works and you like to run own tests, you can clone this repository and install the dependencies:
@@ -15,20 +17,25 @@ $ yarn install
 ```
 
 You can now run
+
 ```
 $ yarn play
 ```
+
 and play around with the functionality.
 
 ## BroadcastSchema
+
 You can define a broadcasting schedule schema for your station in an `.xlsx` file. See `schema/example.xlsx` for an example.
 
 It requires an xlsx file with:
+
 - Weekday names in first row
 - Broadcast names in first column
 - Additional info for each broadcasting can be added to any non-weekday-column
 
 Syntax for each schedule:
+
 - `M:[1-12]` each month
 - `M:[1,3,5]` e.g. only in Jan, Mar and May
 - `D:[1-5]` each weekday (from column) of month
@@ -44,6 +51,7 @@ Syntax for each schedule:
 * Default size of a time slot is 60min.
 
 Example usage:
+
 ```ts
 import BroadcastSchema from "./src/broadcast-schema";
 
@@ -56,20 +64,22 @@ console.log(schema.getBroadcasts());
 ```
 
 ## BroadcastSchedule
+
 Take your `BroadcastSchema` and pass it to a `BroadcastSchedule` instance. It will return an object consisting of timeslots with one matching broadcasting per slot.
 
 Example usage:
-```ts 
+
+```ts
 import BroadcastSchedule from "./src/broadcast-schedule";
 
 const schedule = new BroadcastSchedule({
   // This is where your schema goes:
   schema: schema,
-  
+
   // Define a period
   dateStart: "2024-07-29T00:00:00",
   dateEnd: "2024-08-01T00:00:00",
-  
+
   // You might need to start slot calculation
   // 1d earlier to pull repeats:
   repeatPadding: 1,
@@ -82,13 +92,15 @@ const schedule = new BroadcastSchedule({
 const errors = schedule.checkIntegrity(true);
 ```
 
-## BroadcastExport
+## ScheduleExport
+
 The `schedule` object can be used to create a `json` file designed to be exported to an API. Currently, `welocal-json` is the only supported format.
 
 Example usage:
-```ts 
-import BroadcastExport from './src/broadcast-export';
-const exporter = new BroadcastExport({
+
+```ts
+import ScheduleExport from "./src/schedule-export";
+const exporter = new ScheduleExport({
   schedule,
   mode: "welocal-json",
   outDir: "json",
@@ -101,11 +113,35 @@ exporter.write();
 // other slots are filled with 'unknown'.
 ```
 
+## BroadcastRecorder
+
+A `schedule` can also be used to record a stream and store well named and sliced files.
+This will also respect broadcastings exceeding the default time slot (2 hours or more).
+
+`BroadcastRecorder` will run until dateEnd is reached and store each broadcasting into a separete `.mp3` file.
+
+```ts
+const recorder = new BroadcastRecorder({
+  schedule,
+  dateStart: "2024-07-10T00:00:00",
+  dateEnd: "2024-07-13T05:00:00",
+  ignoreRepeats: false,
+  streamUrl: process.env.RECORDER_STREAM_URL,
+  filenamePrefix: "radioz-stream",
+});
+
+recorder.start().then((resp) => {
+  console.log("Recording has finished!");
+});
+```
+
 ## AudioUploadWelocal
+
 Use the `schedule` object to synchronize your local `.mp3` folder with `welocal` api.
 
 Example usage:
-```ts 
+
+```ts
 import AudioUploadWelocal from "./src/audio-upload-welocal";
 const uploader = new AudioUploadWelocal({
   schedule,

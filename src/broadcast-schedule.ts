@@ -1,4 +1,4 @@
-import { isLastOfMonth, nthOfMonth } from "./helper/helper";
+import { isLastOfMonth, nthOfMonth, vd } from "./helper/helper";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -62,11 +62,11 @@ export default class BroadcastSchedule {
   setGrid = () => {
     const broadcasts = this.schema.getBroadcasts();
 
-    const timeGrid = this.getTimeGrid();
-    const calendar = this.matchBroadcasts(broadcasts, timeGrid);
+    const emptyGrid = this.getTimeGrid();
+    const timeGrid = this.matchBroadcasts(broadcasts, emptyGrid);
 
-    this.addRepeats(calendar);
-    this.sliceRepeatPadding(calendar);
+    this.addRepeats(timeGrid);
+    this.trimGrid(timeGrid);
   };
 
   getGrid() {
@@ -85,6 +85,7 @@ export default class BroadcastSchedule {
       grid.push({
         start: current,
         end: end,
+        duration: 1,
         matches: [],
       });
       current = end;
@@ -142,9 +143,9 @@ export default class BroadcastSchedule {
   findScheduledBroadcast(schedules: Schedule[], timeSlot: DateTime) {
     return schedules.find(
       (schedule) =>
-        schedule.monthsOfYear.includes(timeSlot.c.month) &&
+        schedule.monthsOfYear.includes(timeSlot.month) &&
         schedule.weekday === timeSlot.weekday &&
-        schedule.hoursOfDay.includes(timeSlot.c.hour) &&
+        schedule.hoursOfDay.includes(timeSlot.hour) &&
         this.checkNthOfMonth(timeSlot, schedule.nthWeekdaysOfMonth)
     );
   }
@@ -165,11 +166,14 @@ export default class BroadcastSchedule {
       timeSlot.matches
         .filter((schedule) => schedule.isRepeat === false)
         .forEach((schedule) => {
-          const repeatTarget = timeSlot.start.plus({
-            hours: schedule.repeatOffset,
-          }).ts;
+          const repeatTarget = timeSlot.start
+            .plus({
+              hours: schedule.repeatOffset,
+            })
+            .toUnixInteger();
           const targetSlot = timeGrid.find(
-            (existingSlot) => existingSlot.start.ts === repeatTarget
+            (existingSlot) =>
+              existingSlot.start.toUnixInteger() === repeatTarget
           );
           if (repeatTarget && targetSlot) {
             targetSlot.broadcast = timeSlot.broadcast;
@@ -180,11 +184,31 @@ export default class BroadcastSchedule {
     return timeGrid;
   };
 
-  sliceRepeatPadding(timeGrid: TimeGrid) {
+  /*
+   * This is required to remove repeat padding.
+   */
+  trimGrid(timeGrid: TimeGrid) {
     const lastSlotInPadding = this.dateStart;
     this._grid = timeGrid.filter((slot) => {
-      return slot.start.ts >= lastSlotInPadding.ts;
+      return slot.start >= lastSlotInPadding && slot.end <= this.dateEnd;
     });
+  }
+
+  sliceGrid(dateStart: string, dateEnd: string) {
+    const dateTimeStart = DateTime.fromISO(dateStart);
+    const dateTimeEnd = DateTime.fromISO(dateEnd);
+    this._grid = this._grid.filter((slot) => {
+      return slot.start >= dateTimeStart && slot.end <= dateTimeEnd;
+    });
+  }
+
+  /*
+   * Merges two or more adjacent time slots if they contain the same
+   * broadcasting; useful if broadcastings exceed time grid.
+   */
+  mergeSlots() {
+    this._grid = this.mergeTimeSlots(this._grid);
+    return this;
   }
 
   mergeTimeSlots(grid: TimeGrid) {
@@ -197,6 +221,7 @@ export default class BroadcastSchedule {
           return;
         } else {
           slot.end = grid[sMin].end;
+          slot.duration++;
           grid[sMin].wasMerged = true;
         }
       }
@@ -204,6 +229,32 @@ export default class BroadcastSchedule {
 
     return grid.filter((slot) => {
       return !slot.wasMerged;
+    });
+  }
+
+  filter(callback: (slot: TimeSlot) => boolean) {
+    this._grid = this._grid.filter((slot) => {
+      return callback(slot);
+    });
+    return this;
+  }
+
+  findByDateStart(dateStart: DateTime) {
+    const nextIndex = this._grid.findIndex((slot) => {
+      return slot.start > dateStart;
+    });
+    return this._grid[nextIndex - 1];
+  }
+
+  toArray() {
+    return this._grid.map((slot) => {
+      return {
+        start: slot.start.toFormat("yyyy-MM-dd HH:mm"),
+        end: slot.end.toFormat("yyyy-MM-dd HH:mm"),
+        isRepeat: slot.matches[0].isRepeat,
+        duration: slot.duration,
+        name: slot.matches.map((map) => map.toString()).join(", "),
+      };
     });
   }
 
