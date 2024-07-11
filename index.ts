@@ -21,14 +21,14 @@ const schedule = new BroadcastSchedule({
 
 const errors = schedule.checkIntegrity(true);
 
-const exporter = new BroadcastExport({
-  schedule,
-  mode: "welocal-json",
-  outDir: "json",
-  filenamePrefix: "program_schema_mystation",
-});
-
-exporter.write();
+// const exporter = new BroadcastExport({
+//   schedule,
+//   mode: "welocal-json",
+//   outDir: "json",
+//   filenamePrefix: "program_schema_mystation",
+// });
+//
+// exporter.write();
 
 // const uploader = new AudioUploadWelocal({
 //   token: "xxx",

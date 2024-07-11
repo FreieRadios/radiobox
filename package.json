@@ -11,11 +11,11 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "nodemon -e ts --exec 'ts-node' index.ts"
+    "run": "nodemon -e ts --exec 'ts-node' index.ts",
+    "dev": "nodemon -e ts --exec 'ts-node' dev.ts"
   },
   "dependencies": {
     "axios": "^1.7.2",
-    "form-data": "^4.0.0",
     "luxon": "^3.4.4",
     "node-xlsx": "^0.24.0"
   },

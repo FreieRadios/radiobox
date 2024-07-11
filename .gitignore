@@ -4,6 +4,9 @@ mp3/*
 schema/*
 !schema/example.xlsx
 
+# Dev only
+dev.ts
+
 # Logs
 logs
 *.log
