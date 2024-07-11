@@ -1,0 +1,257 @@
+import { isLastOfMonth, nthOfMonth } from "./helper/helper";
+import { DateTime } from "luxon";
+import {
+  Broadcast,
+  BroadcastScheduleProps,
+  Schedule,
+  TimeGrid,
+  TimeGridError,
+  TimeSlot,
+} from "./types";
+import BroadcastSchema from "./broadcast-schema";
+
+/*
+ * Class to build a schedule schema
+ *
+ * Syntax for each schedule:
+ * "M:[1-12]" each month
+ * "M:[1,3,5]" e.g. only in Jan, Mar and May
+ * "D:[1-5]" each nth weekday (from column) of month
+ * "D:[1,3,5]" e.g. each first, third and fifth weekday of month
+ * "D:[-1]" e.g. each last weekday (from column) of month
+ * "H:[20,21]" e.g. starting at 20:00 and 21:00 (duration as given in this.gridSize)
+ * "R:12" number of hours to set a repeat of broadcast
+ * "I:"Add Info"" Additional info to print out
+ * "O:true" Overrides all other broadcasts in timeslot
+ *
+ * Schedule parts must be comma separated,
+ * Schedule blocks must be semicolon separated.
+ */
+export default class BroadcastSchedule {
+  // First day of Calendar export
+  dateStart: DateTime;
+  // Last day of Calendar export
+  dateEnd: DateTime;
+  // Location of the .xlsx schema file
+  schema: BroadcastSchema;
+  // Weekday names are required in first row of xlsx schema file
+  weekdayColNames: string[] = [];
+  // Required to calculate repeats on first day of grid;
+  // The prepended day will be sliced before return
+  repeatPadding: number;
+  // Maximum number of timeslots for the result grid
+  maxGridLength: number;
+  // Number of minutes to define the default lenght of a time slot
+  // in Minutes
+  gridSize: number;
+  repeatShort: string;
+  repeatLong: string;
+  outDir: string;
+  locale: string;
+  _grid: TimeGrid;
+
+  constructor(props: BroadcastScheduleProps) {
+    this.schema = props.schema;
+    this.weekdayColNames = this.schema.weekdayColNames;
+
+    this.repeatPadding =
+      props.repeatPadding !== undefined ? props.repeatPadding : 1;
+    this.dateStart = DateTime.fromISO(props.dateStart);
+    this.dateEnd = DateTime.fromISO(props.dateEnd);
+    this.gridSize = 60;
+    this.maxGridLength = 10000;
+
+    this.locale = props.locale || "de";
+    this.repeatShort = props.repeatShort || "(rep.)";
+    this.repeatLong = props.repeatLong || "Repeat";
+
+    this.setGrid();
+  }
+
+  /*
+   * Initial function to create an empty time grid and match
+   * fitting broadcasts by schema definition.
+   */
+  setGrid = () => {
+    const broadcasts = this.schema.getBroadcasts();
+
+    const timeGrid = this.getTimeGrid();
+    const calendar = this.matchBroadcasts(broadcasts, timeGrid);
+
+    this.addRepeats(calendar);
+    this.sliceRepeatPadding(calendar);
+  };
+
+  getGrid() {
+    return this._grid;
+  }
+
+  getTimeGrid(): TimeGrid {
+    const grid = <TimeGrid>[];
+    let current = this.dateStart.minus({
+      days: this.repeatPadding,
+    });
+    const dateEnd = this.dateEnd.plus({ days: this.repeatPadding });
+
+    for (let i = 0; i <= this.maxGridLength; i++) {
+      const end = current.plus({ minutes: this.gridSize });
+      grid.push({
+        start: current,
+        end: end,
+        matches: [],
+      });
+      current = end;
+      if (current >= dateEnd) {
+        return grid;
+      }
+    }
+
+    return grid;
+  }
+
+  matchBroadcasts = (broadcasts: Broadcast[], timeGrid: TimeGrid) => {
+    timeGrid.forEach((timeSlot) => {
+      broadcasts.forEach((broadcast) => {
+        const match = this.findScheduledBroadcast(
+          broadcast.schedules,
+          timeSlot.start
+        );
+        if (match) {
+          timeSlot.broadcast = broadcast;
+          this.pushMatches(timeSlot.matches, match, false);
+        }
+      });
+    });
+    return timeGrid;
+  };
+
+  pushMatches(matches: Schedule[], schedule: Schedule, isRepeat: boolean) {
+    if (schedule.overrides) {
+      matches.length = 0;
+    } else if (matches.find((match) => match.overrides)) {
+      return;
+    }
+    matches.push(this.broadcastFactory(schedule, isRepeat));
+  }
+
+  broadcastFactory(schedule: Schedule, isRepeat: boolean): Schedule {
+    return {
+      ...schedule,
+      isRepeat,
+      toString: () => {
+        const info = [schedule.name];
+        if (schedule.info) {
+          info.push(schedule.info);
+        }
+        if (isRepeat) {
+          info.push(this.repeatShort);
+        }
+
+        return info.join(" ");
+      },
+    };
+  }
+
+  findScheduledBroadcast(schedules: Schedule[], timeSlot: DateTime) {
+    return schedules.find(
+      (schedule) =>
+        schedule.monthsOfYear.includes(timeSlot.c.month) &&
+        schedule.weekday === timeSlot.weekday &&
+        schedule.hoursOfDay.includes(timeSlot.c.hour) &&
+        this.checkNthOfMonth(timeSlot, schedule.nthWeekdaysOfMonth)
+    );
+  }
+
+  checkNthOfMonth(timeSlot: DateTime, nthWeekdays: number[]) {
+    const matches = [];
+    if (nthWeekdays.includes(-1)) {
+      matches.push(isLastOfMonth(timeSlot));
+    }
+    if (nthWeekdays.filter((nth) => nth > 0).length > 0) {
+      matches.push(nthWeekdays.includes(nthOfMonth(timeSlot)));
+    }
+    return !matches.includes(false);
+  }
+
+  addRepeats = (timeGrid: TimeGrid) => {
+    timeGrid.forEach((timeSlot) => {
+      timeSlot.matches
+        .filter((schedule) => schedule.isRepeat === false)
+        .forEach((schedule) => {
+          const repeatTarget = timeSlot.start.plus({
+            hours: schedule.repeatOffset,
+          }).ts;
+          const targetSlot = timeGrid.find(
+            (existingSlot) => existingSlot.start.ts === repeatTarget
+          );
+          if (repeatTarget && targetSlot) {
+            targetSlot.broadcast = timeSlot.broadcast;
+            this.pushMatches(targetSlot.matches, schedule, true);
+          }
+        });
+    });
+    return timeGrid;
+  };
+
+  sliceRepeatPadding(timeGrid: TimeGrid) {
+    const lastSlotInPadding = this.dateStart;
+    this._grid = timeGrid.filter((slot) => {
+      return slot.start.ts >= lastSlotInPadding.ts;
+    });
+  }
+
+  mergeTimeSlots(grid: TimeGrid) {
+    grid.forEach((slot, s) => {
+      for (let sMin = s + 1; sMin < grid.length; sMin++) {
+        if (!grid[sMin] || !grid[sMin].broadcast) {
+          return;
+        }
+        if (grid[sMin].broadcast !== slot.broadcast) {
+          return;
+        } else {
+          slot.end = grid[sMin].end;
+          grid[sMin].wasMerged = true;
+        }
+      }
+    });
+
+    return grid.filter((slot) => {
+      return !slot.wasMerged;
+    });
+  }
+
+  checkIntegrity = (autofix?: boolean) => {
+    const errors = <TimeGridError[]>[];
+    const getTimeString = (slot: TimeSlot) => {
+      return slot.start.setLocale("de").toLocaleString(DateTime.DATETIME_HUGE);
+    };
+    const grid = this.getGrid() as TimeGrid;
+    grid.forEach((slot, s) => {
+      if (slot.matches.length === 0) {
+        errors.push({
+          timeSlot: slot,
+          reason: "No broadcast matches " + getTimeString(slot),
+        });
+        if (autofix) {
+          this.pushMatches(
+            slot.matches,
+            {
+              name: "TBA",
+              info: "Die Sendung ist noch nicht bekannt",
+            } as any,
+            false
+          );
+        }
+      } else if (slot.matches.length > 1) {
+        errors.push({
+          timeSlot: slot,
+          reason: "Multiple matches " + getTimeString(slot),
+        });
+        if (autofix) {
+          slot.matches = [slot.matches[0]];
+        }
+      }
+    });
+    return errors;
+  };
+}
