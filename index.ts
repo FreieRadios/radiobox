@@ -1,3 +1,4 @@
+import "dotenv/config";
 import BroadcastSchema from "./src/broadcast-schema";
 import BroadcastSchedule from "./src/broadcast-schedule";
 import AudioUploadWelocal from "./src/audio-upload-welocal";
@@ -30,14 +31,15 @@ const exporter = new BroadcastExport({
 
 exporter.write();
 
-// const uploader = new AudioUploadWelocal({
-//   token: "xxx",
-//   uploadFilePath: "mp3/",
-//   logFile: "upload-welocal",
-//   filePrefix: "radioz-stream",
-//   fileSuffix: ".mp3",
-//   schedule,
-// });
+const uploader = new AudioUploadWelocal({
+  token: process.env.WELOCAL_API_TOKEN,
+  baseUrl: process.env.WELOCAL_API_URL,
+  uploadFilePath: "mp3/",
+  logFile: "upload-welocal",
+  filePrefix: "radioz-stream",
+  fileSuffix: ".mp3",
+  schedule,
+});
 
 // uploader.uploadNewFiles().then((resp) => {
 //   console.log("all uploads finished!");

@@ -25,6 +25,7 @@ export type BroadcastExportProps = {
 };
 
 export type AudioUploadProps = {
+  baseUrl: string;
   token: string;
   uploadFilePath: string;
   filePrefix: string;

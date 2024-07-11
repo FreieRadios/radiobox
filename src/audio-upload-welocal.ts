@@ -16,7 +16,7 @@ import { vd } from "./helper/helper";
 
 export default class AudioUploadWelocal {
   token: string;
-  baseUrl = "https://radio-z.prod.welocal.cloud/cmms-api/v3.0";
+  baseUrl: string;
   prepareUploadRoute = "/media/upload/prepare/";
   finalizeUploadRoute = "/media/upload/finalize/";
   setMediaStatusRoute = "/media/status/set/:public_media_id/";
@@ -33,6 +33,7 @@ export default class AudioUploadWelocal {
   fileSuffix: string;
 
   constructor(props: AudioUploadProps) {
+    this.baseUrl = props.baseUrl;
     this.schedule = props.schedule;
     this.uploadFilePath = props.uploadFilePath;
     this.filePrefix = props.filePrefix;
@@ -119,7 +120,7 @@ export default class AudioUploadWelocal {
       if (doUpload) {
         uploadFiles.push({
           sourceFile: sourceFile,
-          targetName: this.getTargetName(slot),
+          targetName: this.getTargetName(sourceFile),
           postTitle: this.getPostTitle(slot),
           uploadCategories: [
             ...slot.broadcast.info[1].split(" "),
@@ -142,30 +143,8 @@ export default class AudioUploadWelocal {
     ].join(" 🢒 ");
   }
 
-  getTargetName(slot: TimeSlot) {
-    return (
-      (
-        slot.broadcast.name +
-        " am " +
-        slot.start.toLocaleString(DateTime.DATE_SHORT) +
-        " " +
-        slot.start.toLocaleString(DateTime.TIME_24_SIMPLE)
-      )
-        .replaceAll("ä", "ae")
-        .replaceAll("Ö", "Oe")
-        .replaceAll("ö", "oe")
-        .replaceAll("ü", "ue")
-        .replaceAll("ß", "ss")
-        .replaceAll("'", "-")
-        .replaceAll(".", "-")
-        .replaceAll(":", "-")
-        .replaceAll("/", "-")
-        .replaceAll(" ", "_")
-        .replaceAll(",", "-")
-        .replaceAll("+", "-")
-        .replaceAll("!", "_")
-        .replaceAll("&", "-") + ".mp3"
-    );
+  getTargetName(sourceFile: string) {
+    return sourceFile.replaceAll("/", "-");
   }
 
   checkUpload(sourceFile: string) {
