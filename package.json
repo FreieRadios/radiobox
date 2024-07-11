@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "run": "nodemon -e ts --exec 'ts-node' index.ts",
+    "play": "nodemon -e ts --exec 'ts-node' index.ts",
     "dev": "nodemon -e ts --exec 'ts-node' dev.ts"
   },
   "dependencies": {

@@ -16,9 +16,9 @@ $ yarn install
 
 You can now run
 ```
-$ yarn start
+$ yarn play
 ```
-and play.
+and play around with the functionality.
 
 ## BroadcastSchema
 You can define a broadcasting schedule schema for your station in an `.xlsx` file. See `schema/example.xlsx` for an example.

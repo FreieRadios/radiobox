@@ -12,6 +12,7 @@ import BroadcastSchedule from "./broadcast-schedule";
 import { fileExistsSync, writeJsonFile } from "./helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
+import { vd } from "./helper/helper";
 
 export default class AudioUploadWelocal {
   token: string;
@@ -85,6 +86,7 @@ export default class AudioUploadWelocal {
     for (const file of files) {
       const uploadSlot = await this.prepareUpload(
         file.targetName,
+        file.postTitle,
         file.uploadCategories
       );
       console.log("Upload started: " + file.sourceFile);
@@ -94,6 +96,7 @@ export default class AudioUploadWelocal {
           this.logs.push({
             sourceFile: file.sourceFile,
             targetFile: file.targetName,
+            postTitle: file.postTitle,
             broadcastName: file.broadcast.name,
             uploadDateTime: response.headers?.date,
             broadcastDateTime: file.slot.start.toString(),
@@ -116,12 +119,8 @@ export default class AudioUploadWelocal {
       if (doUpload) {
         uploadFiles.push({
           sourceFile: sourceFile,
-          targetName:
-            slot.broadcast.name +
-            " am " +
-            slot.start.toLocaleString(DateTime.DATE_SHORT) +
-            " " +
-            slot.start.toLocaleString(DateTime.TIME_24_SIMPLE),
+          targetName: this.getTargetName(slot),
+          postTitle: this.getPostTitle(slot),
           uploadCategories: [
             ...slot.broadcast.info[1].split(" "),
             slot.broadcast.name,
@@ -132,6 +131,42 @@ export default class AudioUploadWelocal {
       }
     }
     return uploadFiles;
+  }
+
+  getPostTitle(slot: TimeSlot) {
+    return (
+      slot.broadcast.name +
+      " am " +
+      slot.start.toLocaleString(DateTime.DATE_SHORT) +
+      " " +
+      slot.start.toLocaleString(DateTime.TIME_24_SIMPLE)
+    );
+  }
+
+  getTargetName(slot: TimeSlot) {
+    return (
+      (
+        slot.broadcast.name +
+        " am " +
+        slot.start.toLocaleString(DateTime.DATE_SHORT) +
+        " " +
+        slot.start.toLocaleString(DateTime.TIME_24_SIMPLE)
+      )
+        .replaceAll("ä", "ae")
+        .replaceAll("Ö", "Oe")
+        .replaceAll("ö", "oe")
+        .replaceAll("ü", "ue")
+        .replaceAll("ß", "ss")
+        .replaceAll("'", "-")
+        .replaceAll(".", "-")
+        .replaceAll(":", "-")
+        .replaceAll("/", "-")
+        .replaceAll(" ", "_")
+        .replaceAll(",", "-")
+        .replaceAll("+", "-")
+        .replaceAll("!", "_")
+        .replaceAll("&", "-") + ".mp3"
+    );
   }
 
   checkUpload(sourceFile: string) {
@@ -161,10 +196,12 @@ export default class AudioUploadWelocal {
 
   prepareUpload = async (
     targetFile: string,
+    postTitle: string,
     uploadCategories: string[]
   ): Promise<UploadSlot> => {
     const postData = {
       file_name: targetFile,
+      post_title: postTitle,
       post_status: "publish",
       metadata: {
         categories: uploadCategories,

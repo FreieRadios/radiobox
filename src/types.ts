@@ -40,6 +40,7 @@ export type UploadConfig = {
 export type UploadFile = {
   sourceFile: string;
   targetName: string;
+  postTitle: string;
   uploadCategories: string[];
   broadcast: Broadcast;
   slot: TimeSlot;
@@ -48,6 +49,7 @@ export type UploadFile = {
 export type UploadLogEntry = {
   sourceFile: string;
   targetFile: string;
+  postTitle: string;
   broadcastName: string;
   uploadDateTime: string;
   broadcastDateTime: string;
