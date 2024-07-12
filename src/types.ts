@@ -2,12 +2,14 @@ import { DateTime } from "luxon";
 import BroadcastSchema from "./broadcast-schema";
 import BroadcastSchedule from "./broadcast-schedule";
 
+export type DateTimeInput = string | DateTime;
+
 export type BroadcastRecorderProps = {
   schedule: BroadcastSchedule;
   // skip to record all scheduled
-  dateStart?: string;
+  dateStart?: DateTimeInput;
   // skip to record all scheduled
-  dateEnd?: string;
+  dateEnd?: DateTimeInput;
   streamUrl: string;
   outDir?: string;
   filenamePrefix?: string;
@@ -21,8 +23,8 @@ export type BroadcastSchemaProps = {
 
 export type BroadcastScheduleProps = {
   schema: BroadcastSchema;
-  dateStart: string;
-  dateEnd: string;
+  dateStart: DateTimeInput;
+  dateEnd: DateTimeInput;
   locale?: string;
   repeatShort?: string;
   repeatLong?: string;
@@ -96,11 +98,11 @@ export type Schedule = {
 export type TimeSlot = {
   start: DateTime;
   end: DateTime;
-  // number of slots (1h default)
-  duration: number;
   broadcast?: Broadcast;
   matches: Schedule[];
   wasMerged?: boolean;
+  // number of slots (1h default) after merging
+  duration: number;
 };
 
 export type TimeGrid = TimeSlot[];
@@ -118,3 +120,8 @@ export type TimeGridJson = {
   short: string;
   long: string;
 }[];
+
+export type FilenamePattern = {
+  mode: "DateTime" | "string" | "number";
+  param: string | number;
+};

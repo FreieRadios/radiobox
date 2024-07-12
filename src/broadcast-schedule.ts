@@ -1,14 +1,16 @@
-import { isLastOfMonth, nthOfMonth, vd } from "./helper/helper";
+import { isLastOfMonth, nthOfMonth, timeFormats } from "./helper/helper";
 import { DateTime } from "luxon";
 import {
   Broadcast,
   BroadcastScheduleProps,
+  DateTimeInput,
   Schedule,
   TimeGrid,
   TimeGridError,
   TimeSlot,
 } from "./types";
 import BroadcastSchema from "./broadcast-schema";
+import { toDateTime } from "./helper/date-time";
 
 /*
  * Class to build a schedule schema
@@ -42,8 +44,8 @@ export default class BroadcastSchedule {
 
     this.repeatPadding =
       props.repeatPadding !== undefined ? props.repeatPadding : 1;
-    this.dateStart = DateTime.fromISO(props.dateStart);
-    this.dateEnd = DateTime.fromISO(props.dateEnd);
+    this.dateStart = toDateTime(props.dateStart);
+    this.dateEnd = toDateTime(props.dateEnd);
     this.gridSize = 60;
     this.maxGridLength = 10000;
 
@@ -194,9 +196,9 @@ export default class BroadcastSchedule {
     });
   }
 
-  sliceGrid(dateStart: string, dateEnd: string) {
-    const dateTimeStart = DateTime.fromISO(dateStart);
-    const dateTimeEnd = DateTime.fromISO(dateEnd);
+  sliceGrid(dateStart: DateTimeInput, dateEnd: DateTimeInput) {
+    const dateTimeStart = toDateTime(dateStart);
+    const dateTimeEnd = toDateTime(dateEnd);
     this._grid = this._grid.filter((slot) => {
       return slot.start >= dateTimeStart && slot.end <= dateTimeEnd;
     });
@@ -249,8 +251,8 @@ export default class BroadcastSchedule {
   toArray() {
     return this._grid.map((slot) => {
       return {
-        start: slot.start.toFormat("yyyy-MM-dd HH:mm"),
-        end: slot.end.toFormat("yyyy-MM-dd HH:mm"),
+        start: slot.start.toFormat(timeFormats.human),
+        end: slot.end.toFormat(timeFormats.human),
         isRepeat: slot.matches[0].isRepeat,
         duration: slot.duration,
         name: slot.matches.map((map) => map.toString()).join(", "),

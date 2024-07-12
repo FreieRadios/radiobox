@@ -21,3 +21,7 @@ export const sleep = (ms: number) => {
     setTimeout(resolve, ms);
   });
 };
+export const timeFormats = {
+  machine: "yyyyMMdd-HHmmss",
+  human: "yyyy-MM-dd HH:mm",
+};

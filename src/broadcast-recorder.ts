@@ -2,7 +2,9 @@ import { DateTime } from "luxon";
 import { BroadcastRecorderProps } from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
 import ffmpeg from "fluent-ffmpeg";
-import { sleep } from "./helper/helper";
+import { sleep, vd } from "./helper/helper";
+import { getFilename } from "./helper/files";
+import { toDateTime } from "./helper/date-time";
 
 /*
  * Class to store stream data to files
@@ -16,16 +18,18 @@ export default class BroadcastRecorder {
   dateStart: DateTime;
   // End recording at (optional)
   dateEnd: DateTime;
+  filenameSuffix = ".mp3";
+  pollingInterval = 1000; //ms
 
   constructor(props: BroadcastRecorderProps) {
     this.schedule = props.schedule;
-    this.outDir = props.outDir;
+    this.outDir = props.outDir || "mp3/";
     this.streamUrl = props.streamUrl;
     this.filenamePrefix = props.filenamePrefix;
-    this.dateStart = DateTime.fromISO(props.dateStart);
-    this.dateEnd = DateTime.fromISO(props.dateEnd);
 
-    if (this.dateStart && this.dateEnd) {
+    if (props.dateStart && props.dateEnd) {
+      this.dateStart = toDateTime(props.dateStart);
+      this.dateEnd = toDateTime(props.dateEnd);
       this.schedule.sliceGrid(props.dateStart, props.dateEnd);
     } else {
       this.dateStart = this.schedule.dateStart;
@@ -42,13 +46,11 @@ export default class BroadcastRecorder {
   async start() {
     await this.waitUntilStart();
 
-    const pollingInterval = 1000;
     const startTime = this.dateStart.toUnixInteger();
     const endTime = this.dateEnd.toUnixInteger();
 
-    for (let i = startTime; i <= endTime; i += pollingInterval) {
+    for (let i = startTime; i <= endTime; i += this.pollingInterval) {
       await this.checkRecording();
-      await sleep(pollingInterval);
     }
   }
 
@@ -59,22 +61,28 @@ export default class BroadcastRecorder {
       const remaining = now.until(currentBroadcast.end);
       const seconds = remaining.length("seconds");
       if (seconds > 0) {
-        const outputFile = "mp3/" + currentBroadcast.broadcast.name + ".mp3";
-        console.log(
-          "Recording " +
-            outputFile +
-            " " +
-            Math.round(seconds / 60) +
-            "min left"
+        const outputFile = getFilename(
+          this.outDir,
+          this.filenamePrefix,
+          currentBroadcast,
+          this.filenameSuffix
         );
         this.writeStreamToFile(outputFile, seconds);
+        this.logMessage(outputFile, seconds);
         await sleep(seconds * 1000);
       }
+    } else {
+      await sleep(this.pollingInterval);
     }
   }
 
+  logMessage(outputFile: string, seconds: number) {
+    console.log(
+      `[ffmpeg] recording "${outputFile}" (${Math.round(seconds / 60)}min left)`
+    );
+  }
+
   writeStreamToFile(targetFile: string, seconds: number) {
-    // const stream = fs.createWriteStream(targetFile);
     ffmpeg(this.streamUrl)
       .outputOptions("-ss 00:00:00")
       .outputOptions(`-t ${seconds}`)
@@ -94,7 +102,11 @@ export default class BroadcastRecorder {
     const waitUntilStart = DateTime.now().until(this.dateStart);
     const waitFor = waitUntilStart.length("milliseconds");
     if (waitFor > 0) {
-      console.log("Still " + Math.round(waitFor / 1000) + "s to wait....");
+      console.log(
+        "[Recorder] Going to wait for " +
+          Math.round(waitFor / 1000) +
+          "s now...."
+      );
       await sleep(waitFor);
     }
   }

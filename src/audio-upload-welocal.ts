@@ -9,7 +9,7 @@ import {
   UploadSlot,
 } from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
-import { fileExistsSync, writeJsonFile } from "./helper/files";
+import { fileExistsSync, getFilename, writeJsonFile } from "./helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
 import { vd } from "./helper/helper";
@@ -71,14 +71,11 @@ export default class AudioUploadWelocal {
   }
 
   getTargetStartDateTimeString(slot: TimeSlot) {
-    return (
-      this.uploadFilePath +
-      ([
-        this.filePrefix,
-        slot.start.toISODate({ format: "basic" }),
-        slot.start.setLocale("de").toFormat("HHmmss"),
-      ].join("-") +
-        this.fileSuffix)
+    return getFilename(
+      this.uploadFilePath,
+      this.filePrefix,
+      slot,
+      this.fileSuffix
     );
   }
 

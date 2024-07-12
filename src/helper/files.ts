@@ -1,5 +1,9 @@
 import * as fs from "fs";
 import nodeXlsx from "node-xlsx";
+import { FilenamePattern, TimeSlot } from "../types";
+import { DateTime } from "luxon";
+import slugify from "slugify";
+import { timeFormats } from "./helper";
 
 export const dataFromXlsx = (
   file: string,
@@ -40,5 +44,22 @@ export const writeJsonFile = (outDir, filename, data) => {
       }
       console.log(`${outDir}/${filename}.json was saved!`);
     }
+  );
+};
+
+export const getFilename = (
+  uploadFilePath: string,
+  filePrefix: string,
+  slot: TimeSlot,
+  fileSuffix: string
+) => {
+  return (
+    uploadFilePath +
+    ([
+      filePrefix,
+      slot.start.toFormat(timeFormats.machine),
+      slugify(slot.broadcast.name.slice(0, 50)),
+    ].join("-") +
+      fileSuffix)
   );
 };

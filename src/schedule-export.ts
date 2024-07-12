@@ -38,7 +38,7 @@ export default class ScheduleExport {
         return this.getGrid()
           .filter((slot) => slot.matches.length > 0)
           .map((slot) => {
-            const broadcast = slot.matches[0];
+            const broadcast = slot.broadcast;
             const localeStartDate = slot.start.setLocale("de");
             const localeEndDate = slot.end.setLocale("de");
             return {

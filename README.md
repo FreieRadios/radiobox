@@ -120,6 +120,8 @@ This will also respect broadcastings exceeding the default time slot (2 hours or
 
 `BroadcastRecorder` will run until dateEnd is reached and store each broadcasting into a separete `.mp3` file.
 
+Note: [ffmpeg](https://ffmpeg.org/download.html) is required to run the recoder on your system.
+
 ```ts
 const recorder = new BroadcastRecorder({
   schedule,
@@ -133,6 +135,11 @@ const recorder = new BroadcastRecorder({
 recorder.start().then((resp) => {
   console.log("Recording has finished!");
 });
+```
+
+To start a recording session for today and the given settings in `.env`, run: 
+```
+$ yarn record
 ```
 
 ## AudioUploadWelocal
@@ -158,4 +165,28 @@ const uploader = new AudioUploadWelocal({
 uploader.uploadNewFiles().then((resp) => {
   console.log("all uploads finished!");
 });
+```
+
+# Environment Variables
+Also see `.env.example` for example values.
+
+```dotenv
+# Locale schema to use for schedule slots 
+SCHEDULE_LOCALE="en"
+# location of schema xlsx file
+BROADCAST_SCHEMA_FILE="schema/example.xlsx"
+# prefix for output mp3 files
+FILENAME_PREFIX="example-stream"
+# stream url for recording
+RECORDER_STREAM_URL="http://example.net:8000/live"
+# at what time to start recording each day
+RECORDER_START_TIME="140000"
+# how long to record the stream
+RECORDER_DURATION=12
+# Abbreviation for repeats
+REPEAT_SHORT="(Wdh.)"
+
+# Required to sync mp3 with welocal API
+WELOCAL_API_TOKEN=xxx
+WELOCAL_API_URL="xxx"
 ```
