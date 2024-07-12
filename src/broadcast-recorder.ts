@@ -5,6 +5,7 @@ import ffmpeg from "fluent-ffmpeg";
 import { sleep, vd } from "./helper/helper";
 import { getFilename } from "./helper/files";
 import { toDateTime } from "./helper/date-time";
+import * as fs from "node:fs";
 
 /*
  * Class to store stream data to files
@@ -68,7 +69,6 @@ export default class BroadcastRecorder {
           this.filenameSuffix
         );
         this.writeStreamToFile(outputFile, seconds);
-        this.logMessage(outputFile, seconds);
         await sleep(seconds * 1000);
       }
     } else {
@@ -76,24 +76,26 @@ export default class BroadcastRecorder {
     }
   }
 
-  logMessage(outputFile: string, seconds: number) {
-    console.log(
-      `[ffmpeg] recording "${outputFile}" (${Math.round(seconds / 60)}min left)`
-    );
-  }
-
   writeStreamToFile(targetFile: string, seconds: number) {
+    const partSuffix = "-part.mp3";
+    console.log(
+      `[ffmpeg] recording "${targetFile + partSuffix}" (${Math.round(
+        seconds / 60
+      )}min left)`
+    );
+
     ffmpeg(this.streamUrl)
       .outputOptions("-ss 00:00:00")
       .outputOptions(`-t ${seconds}`)
       .outputOptions("-vol 256")
       .outputOptions("-hide_banner")
-      .output(targetFile)
+      .output(targetFile + partSuffix)
       .on("end", function () {
-        console.log("Finished recording " + targetFile);
+        console.log("[ffmpeg] Finished recording " + targetFile + partSuffix);
+        fs.renameSync(targetFile + partSuffix, targetFile);
       })
       .on("error", function (err, stdout, stderr) {
-        console.log("Cannot process: " + err.message);
+        console.log("[ffmpeg] Cannot process: " + err.message);
       })
       .run();
   }

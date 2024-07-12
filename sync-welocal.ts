@@ -10,7 +10,8 @@ const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
 });
 
-const dateStart = DateTime.now().minus({ hours: 1 });
+const maxBroadcastingLength = 5; // look back max hrs
+const dateStart = DateTime.now().minus({ hours: maxBroadcastingLength });
 const dateEnd = DateTime.now();
 
 const schedule = new BroadcastSchedule({
