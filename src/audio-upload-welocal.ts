@@ -12,7 +12,6 @@ import BroadcastSchedule from "./broadcast-schedule";
 import { fileExistsSync, getFilename, writeJsonFile } from "./helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
-import { vd } from "./helper/helper";
 
 export default class AudioUploadWelocal {
   token: string;
@@ -87,10 +86,10 @@ export default class AudioUploadWelocal {
         file.postTitle,
         file.uploadCategories
       );
-      console.log("Upload started: " + file.sourceFile);
+      console.log("[welocal] Upload started: " + file.sourceFile);
       await this.upload(file.sourceFile, uploadSlot)
         .then((response) => {
-          console.log("Upload finished: " + file.sourceFile);
+          console.log("[welocal] Upload finished: " + file.sourceFile);
           this.logs.push({
             sourceFile: file.sourceFile,
             targetFile: file.targetName,
@@ -137,7 +136,7 @@ export default class AudioUploadWelocal {
       slot.start.toLocaleString(DateTime.DATE_SHORT),
       slot.start.toLocaleString(DateTime.TIME_24_SIMPLE),
       slot.broadcast.info[0],
-    ].join(" 🢒 ");
+    ].join(" > ");
   }
 
   getTargetName(sourceFile: string) {
@@ -215,7 +214,7 @@ export default class AudioUploadWelocal {
   };
 
   finalizeUpload = async (mediaId) => {
-    console.log("Finalize " + mediaId);
+    console.log("[welocal] Finalize media id" + mediaId);
     return axios.post(
       this.baseUrl + this.finalizeUploadRoute,
       {

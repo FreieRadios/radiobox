@@ -44,8 +44,8 @@ export default class BroadcastSchedule {
 
     this.repeatPadding =
       props.repeatPadding !== undefined ? props.repeatPadding : 1;
-    this.dateStart = toDateTime(props.dateStart);
-    this.dateEnd = toDateTime(props.dateEnd);
+    this.dateStart = toDateTime(props.dateStart, true);
+    this.dateEnd = toDateTime(props.dateEnd, true);
     this.gridSize = 60;
     this.maxGridLength = 10000;
 
