@@ -1,5 +1,10 @@
 import { DateTime } from "luxon";
-import { BroadcastRecorderProps } from "./types";
+import {
+  BroadcastRecorderEventListener,
+  BroadcastRecorderEvents,
+  BroadcastRecorderProps,
+  TimeSlot,
+} from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
 import ffmpeg from "fluent-ffmpeg";
 import { sleep, vd } from "./helper/helper";
@@ -21,6 +26,9 @@ export default class BroadcastRecorder {
   dateEnd: DateTime;
   filenameSuffix = ".mp3";
   pollingInterval = 1000; //ms
+  events: BroadcastRecorderEvents = {
+    finished: [],
+  };
 
   constructor(props: BroadcastRecorderProps) {
     this.schedule = props.schedule;
@@ -55,20 +63,28 @@ export default class BroadcastRecorder {
     }
   }
 
+  on(
+    type: keyof BroadcastRecorderEvents,
+    listener: BroadcastRecorderEventListener
+  ) {
+    this.events[type].push(listener);
+    return this;
+  }
+
   async checkRecording() {
     const now = DateTime.now();
-    const currentBroadcast = this.schedule.findByDateStart(now);
-    if (currentBroadcast) {
-      const remaining = now.until(currentBroadcast.end);
+    const currentSlot = this.schedule.findByDateStart(now);
+    if (currentSlot) {
+      const remaining = now.until(currentSlot.end);
       const seconds = remaining.length("seconds");
       if (seconds > 0) {
         const outputFile = getFilename(
           this.outDir,
           this.filenamePrefix,
-          currentBroadcast,
+          currentSlot,
           this.filenameSuffix
         );
-        this.writeStreamToFile(outputFile, seconds);
+        this.writeStreamToFile(outputFile, currentSlot, now, seconds);
         await sleep(seconds * 1000);
       }
     } else {
@@ -76,7 +92,12 @@ export default class BroadcastRecorder {
     }
   }
 
-  writeStreamToFile(targetFile: string, seconds: number) {
+  writeStreamToFile(
+    targetFile: string,
+    currentSlot: TimeSlot,
+    now: DateTime,
+    seconds: number
+  ) {
     const partSuffix = "-part.mp3";
     console.log(
       `[ffmpeg] recording "${targetFile + partSuffix}" (${Math.round(
@@ -90,14 +111,26 @@ export default class BroadcastRecorder {
       .outputOptions("-vol 256")
       .outputOptions("-hide_banner")
       .output(targetFile + partSuffix)
-      .on("end", function () {
+      .on("end", async () => {
         console.log("[ffmpeg] Finished recording " + targetFile + partSuffix);
         fs.renameSync(targetFile + partSuffix, targetFile);
+        await this.onFinished(targetFile, currentSlot, now, seconds);
       })
       .on("error", function (err, stdout, stderr) {
         console.log("[ffmpeg] Cannot process: " + err.message);
       })
       .run();
+  }
+
+  async onFinished(
+    outputFile: string,
+    currentSlot: TimeSlot,
+    startedAt: DateTime,
+    seconds: number
+  ) {
+    for (const listener of this.events.finished) {
+      await listener(outputFile, currentSlot, startedAt, seconds, this);
+    }
   }
 
   async waitUntilStart() {

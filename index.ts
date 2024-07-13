@@ -1,7 +1,7 @@
 import "dotenv/config";
 import BroadcastSchema from "./src/broadcast-schema";
 import BroadcastSchedule from "./src/broadcast-schedule";
-import AudioUploadWelocal from "./src/audio-upload-welocal";
+import ApiConnectorWelocal from "./src/api-connector-welocal";
 import { vd } from "./src/helper/helper";
 import ScheduleExport from "./src/schedule-export";
 import BroadcastRecorder from "./src/broadcast-recorder";

@@ -4,7 +4,7 @@ import BroadcastRecorder from "./src/broadcast-recorder";
 import { DateTime } from "luxon";
 import "dotenv/config";
 import { timeFormats, vd } from "./src/helper/helper";
-import AudioUploadWelocal from "./src/audio-upload-welocal";
+import ApiConnectorWelocal from "./src/api-connector-welocal";
 
 const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
@@ -22,7 +22,7 @@ const schedule = new BroadcastSchedule({
   repeatShort: process.env.REPEAT_SHORT,
 });
 
-const uploader = new AudioUploadWelocal({
+const uploader = new ApiConnectorWelocal({
   schedule,
   token: process.env.WELOCAL_API_TOKEN,
   baseUrl: process.env.WELOCAL_API_URL,

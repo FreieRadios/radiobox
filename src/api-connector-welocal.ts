@@ -13,7 +13,7 @@ import { fileExistsSync, getFilename, writeJsonFile } from "./helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
 
-export default class AudioUploadWelocal {
+export default class ApiConnectorWelocal {
   token: string;
   baseUrl: string;
   prepareUploadRoute = "/media/upload/prepare/";
@@ -81,29 +81,7 @@ export default class AudioUploadWelocal {
   async uploadNewFiles() {
     const files = this.getFileList();
     for (const file of files) {
-      const uploadSlot = await this.prepareUpload(
-        file.targetName,
-        file.postTitle,
-        file.uploadCategories
-      );
-      console.log("[welocal] Upload started: " + file.sourceFile);
-      await this.upload(file.sourceFile, uploadSlot)
-        .then((response) => {
-          console.log("[welocal] Upload finished: " + file.sourceFile);
-          this.logs.push({
-            sourceFile: file.sourceFile,
-            targetFile: file.targetName,
-            postTitle: file.postTitle,
-            broadcastName: file.broadcast.name,
-            uploadDateTime: response.headers?.date,
-            broadcastDateTime: file.slot.start.toString(),
-            mediaId: uploadSlot.mediaId,
-          });
-          this.updateLogs();
-        })
-        .catch((e) => {
-          console.error(e);
-        });
+      await this.upload(file);
     }
   }
 
@@ -114,20 +92,50 @@ export default class AudioUploadWelocal {
       const sourceFile = this.getTargetStartDateTimeString(slot);
       const doUpload = this.checkUpload(sourceFile);
       if (doUpload) {
-        uploadFiles.push({
-          sourceFile: sourceFile,
-          targetName: this.getTargetName(sourceFile),
-          postTitle: this.getPostTitle(slot),
-          uploadCategories: [
-            ...slot.broadcast.info[1].split(" "),
-            slot.broadcast.name,
-          ],
-          broadcast: slot.broadcast,
-          slot: slot,
-        });
+        uploadFiles.push(this.getUploadFileInfo(sourceFile, slot));
       }
     }
     return uploadFiles;
+  }
+
+  getUploadFileInfo(sourceFile: string, slot: TimeSlot) {
+    return {
+      sourceFile: sourceFile,
+      targetName: this.getTargetName(sourceFile),
+      postTitle: this.getPostTitle(slot),
+      uploadCategories: [
+        ...slot.broadcast.info[1].split(" "),
+        slot.broadcast.name,
+      ],
+      broadcast: slot.broadcast,
+      slot: slot,
+    };
+  }
+
+  async upload(file: UploadFile) {
+    const uploadSlot = await this.prepareUpload(
+      file.targetName,
+      file.postTitle,
+      file.uploadCategories
+    );
+    console.log("[welocal] Upload started: " + file.sourceFile);
+    await this.doUpload(file.sourceFile, uploadSlot)
+      .then((response) => {
+        console.log("[welocal] Upload finished: " + file.sourceFile);
+        this.logs.push({
+          sourceFile: file.sourceFile,
+          targetFile: file.targetName,
+          postTitle: file.postTitle,
+          broadcastName: file.broadcast.name,
+          uploadDateTime: response.headers?.date,
+          broadcastDateTime: file.slot.start.toString(),
+          mediaId: uploadSlot.mediaId,
+        });
+        this.updateLogs();
+      })
+      .catch((e) => {
+        console.error(e);
+      });
   }
 
   getPostTitle(slot: TimeSlot) {
@@ -140,7 +148,7 @@ export default class AudioUploadWelocal {
   }
 
   getTargetName(sourceFile: string) {
-    return sourceFile.replaceAll("/", "-");
+    return sourceFile.replaceAll(this.uploadFilePath, "");
   }
 
   checkUpload(sourceFile: string) {
@@ -154,7 +162,7 @@ export default class AudioUploadWelocal {
     return true;
   }
 
-  upload = async (sourceFile: string, uploadSlot: UploadSlot) => {
+  doUpload = async (sourceFile: string, uploadSlot: UploadSlot) => {
     await this.uploadFileToUrl(sourceFile, uploadSlot.uploadUrl).catch(
       (err) => {
         throw err.message;

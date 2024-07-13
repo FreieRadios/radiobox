@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import BroadcastSchema from "./broadcast-schema";
 import BroadcastSchedule from "./broadcast-schedule";
+import BroadcastRecorder from "./broadcast-recorder";
 
 export type DateTimeInput = string | DateTime;
 
@@ -14,6 +15,17 @@ export type BroadcastRecorderProps = {
   outDir?: string;
   filenamePrefix?: string;
   ignoreRepeats?: boolean;
+};
+
+export type BroadcastRecorderEventListener = (
+  outputFile: string,
+  currentSlot: TimeSlot,
+  startedAt: DateTime,
+  seconds: number,
+  parent: BroadcastRecorder
+) => Promise<void>;
+export type BroadcastRecorderEvents = {
+  finished: BroadcastRecorderEventListener[];
 };
 
 export type BroadcastSchemaProps = {

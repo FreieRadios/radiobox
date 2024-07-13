@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc",
     "play": "nodemon -e ts --exec 'ts-node' index.ts",
-    "record": "nodemon -e ts --exec 'ts-node' 'record.ts'",
+    "record": "ts-node record.ts",
+    "autopilot": "ts-node autopilot.ts",
     "sync": "nodemon -e ts --exec 'ts-node' 'sync-welocal.ts'",
     "dev": "nodemon -e ts --exec 'ts-node' dev.ts"
   },

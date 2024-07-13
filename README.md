@@ -74,7 +74,7 @@ import BroadcastSchedule from "./src/broadcast-schedule";
 
 const schedule = new BroadcastSchedule({
   // This is where your schema goes:
-  schema: schema,
+  schema,
 
   // Define a period
   dateStart: "2024-07-29T00:00:00",
@@ -115,12 +115,12 @@ exporter.write();
 
 ## BroadcastRecorder
 
-A `schedule` can also be used to record a stream and store well named and sliced files.
-This will also respect broadcastings exceeding the default time slot (2 hours or more).
+A `schedule` can also be used to record from a stream and store well named and sliced files.
+This will also respect broadcasts exceeding the default time slot (2 hours or more).
 
 `BroadcastRecorder` will run until dateEnd is reached and store each broadcasting into a separete `.mp3` file.
 
-Note: [ffmpeg](https://ffmpeg.org/download.html) is required to run the recoder on your system.
+Note: [ffmpeg](https://ffmpeg.org/download.html) is required to run the recorder on your system.
 
 ```ts
 const recorder = new BroadcastRecorder({
@@ -142,15 +142,23 @@ To start a recording session for today and the given settings in `.env`, run:
 $ yarn record
 ```
 
-## AudioUploadWelocal
+Use `.on()` to register an event listener:
+```ts
+recorder.on("finished", async (sourceFile, slot) => {
+  // Do something after broadcast recording has finished for this time slot.
+  // This is only called once, even if broadcasting took longer than 1h.
+});
+```
+
+## ApiConnectorWelocal
 
 Use the `schedule` object to synchronize your local `.mp3` folder with `welocal` api.
 
 Example usage:
 
 ```ts
-import AudioUploadWelocal from "./src/audio-upload-welocal";
-const uploader = new AudioUploadWelocal({
+import ApiConnectorWelocal from "./src/api-connector-welocal";
+const connector = new ApiConnectorWelocal({
   schedule,
   // you will need a welocal API token
   token: "xxxxxx",
@@ -162,10 +170,19 @@ const uploader = new AudioUploadWelocal({
   logFile: "upload-welocal",
 });
 
-uploader.uploadNewFiles().then((resp) => {
+connector.uploadNewFiles().then((resp) => {
   console.log("all uploads finished!");
 });
 ```
+
+## Autopilot
+You can combine `BroadcastSchema`, `BroadcastSchedule`, `BroadcastRecorder` and `ApiConnectorWelocal` to feed a welocal instance automatically from an audio stream.
+
+To start an autopilot session for the settings given in `.env`, run:
+```
+$ yarn autopilot
+```
+
 
 # Environment Variables
 Also see `.env.example` for example values.
