@@ -17,7 +17,8 @@
     "record": "ts-node record.ts",
     "autopilot": "ts-node autopilot.ts",
     "sync": "nodemon -e ts --exec 'ts-node' 'sync-welocal.ts'",
-    "dev": "nodemon -e ts --exec 'ts-node' dev.ts"
+    "dev": "nodemon -e ts --exec 'ts-node' dev.ts",
+    "dev:autopilot": "nodemon -e ts --exec 'ts-node' autopilot.ts"
   },
   "dependencies": {
     "axios": "^1.7.2",

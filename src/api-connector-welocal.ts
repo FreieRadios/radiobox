@@ -113,6 +113,11 @@ export default class ApiConnectorWelocal {
   }
 
   async upload(file: UploadFile) {
+    const doUpload = this.checkUpload(file.sourceFile);
+    if (!doUpload) {
+      return;
+    }
+
     const uploadSlot = await this.prepareUpload(
       file.targetName,
       file.postTitle,
@@ -144,7 +149,7 @@ export default class ApiConnectorWelocal {
       slot.start.toLocaleString(DateTime.DATE_SHORT),
       slot.start.toLocaleString(DateTime.TIME_24_SIMPLE),
       slot.broadcast.info[0],
-    ].join(" > ");
+    ].join(" - ");
   }
 
   getTargetName(sourceFile: string) {

@@ -55,12 +55,15 @@ export default class BroadcastRecorder {
   async start() {
     await this.waitUntilStart();
 
-    const startTime = this.dateStart.toUnixInteger();
-    const endTime = this.dateEnd.toUnixInteger();
-
-    for (let i = startTime; i <= endTime; i += this.pollingInterval) {
-      await this.checkRecording();
+    const log = {
+      isRunning: false,
+      count: 0,
+      recorded: [],
+    };
+    while (DateTime.now() <= this.dateEnd) {
+      await this.checkRecording(log);
     }
+    return log;
   }
 
   on(
@@ -71,20 +74,21 @@ export default class BroadcastRecorder {
     return this;
   }
 
-  async checkRecording() {
+  async checkRecording(log) {
     const now = DateTime.now();
     const currentSlot = this.schedule.findByDateStart(now);
-    if (currentSlot) {
+    if (currentSlot && !log.isRunning) {
       const remaining = now.until(currentSlot.end);
       const seconds = remaining.length("seconds");
       if (seconds > 0) {
         const outputFile = getFilename(
           this.outDir,
-          this.filenamePrefix,
+          this.filenamePrefix + "_" + now.toUnixInteger(),
           currentSlot,
           this.filenameSuffix
         );
-        this.writeStreamToFile(outputFile, currentSlot, now, seconds);
+        log.isRunning = true;
+        this.writeStreamToFile(outputFile, currentSlot, now, seconds, log);
         await sleep(seconds * 1000);
       }
     } else {
@@ -96,22 +100,27 @@ export default class BroadcastRecorder {
     targetFile: string,
     currentSlot: TimeSlot,
     now: DateTime,
-    seconds: number
+    seconds: number,
+    log
   ) {
     const partSuffix = "-part.mp3";
-    console.log(
-      `[ffmpeg] recording "${targetFile + partSuffix}" (${Math.round(
-        seconds / 60
-      )}min left)`
-    );
 
+    log.isRunning = true;
     ffmpeg(this.streamUrl)
       .outputOptions("-ss 00:00:00")
       .outputOptions(`-t ${seconds}`)
       .outputOptions("-vol 256")
       .outputOptions("-hide_banner")
       .output(targetFile + partSuffix)
+      .on("start", async () => {
+        console.log(
+          `[ffmpeg] recording "${targetFile + partSuffix}" (${Math.round(
+            seconds / 60
+          )}min left)`
+        );
+      })
       .on("end", async () => {
+        log.isRunning = false;
         console.log("[ffmpeg] Finished recording " + targetFile + partSuffix);
         fs.renameSync(targetFile + partSuffix, targetFile);
         await this.onFinished(targetFile, currentSlot, now, seconds);

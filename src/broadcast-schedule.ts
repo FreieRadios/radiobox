@@ -1,4 +1,4 @@
-import { isLastOfMonth, nthOfMonth, timeFormats } from "./helper/helper";
+import { isLastOfMonth, nthOfMonth, timeFormats, vd } from "./helper/helper";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -242,10 +242,9 @@ export default class BroadcastSchedule {
   }
 
   findByDateStart(dateStart: DateTime) {
-    const nextIndex = this._grid.findIndex((slot) => {
-      return slot.start > dateStart;
+    return this._grid.find((slot) => {
+      return slot.start <= dateStart && slot.end > dateStart;
     });
-    return this._grid[nextIndex - 1];
   }
 
   toArray() {
