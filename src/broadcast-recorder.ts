@@ -83,7 +83,7 @@ export default class BroadcastRecorder {
       if (seconds > 0) {
         const outputFile = getFilename(
           this.outDir,
-          this.filenamePrefix + "_" + now.toUnixInteger(),
+          this.filenamePrefix,
           currentSlot,
           this.filenameSuffix
         );
