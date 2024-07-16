@@ -33,6 +33,38 @@ export type BroadcastSchemaProps = {
   weekdayColNames?: string[];
 };
 
+export type BroadcastArchiveProps = {
+  inputFile: string;
+  outDir: string;
+  fallbackStrip: string;
+  parserMapping: BroadcastArchiveMapping;
+  skip: string[];
+};
+
+export type BroadcastArchiveRecord = {
+  id: string | number;
+  title: string;
+  description: string;
+  date: string;
+  time: string;
+  broadcast: string;
+  category: string;
+  url: string[];
+  body: string[];
+};
+
+export type BroadcastArchiveMapping = {
+  primaryId: string;
+  url: string;
+  title: string;
+  description: string;
+  body: string;
+  date: string;
+  time: string;
+  broadcast: string;
+  category: string;
+};
+
 export type BroadcastScheduleProps = {
   schema: BroadcastSchema;
   dateStart: DateTimeInput;
