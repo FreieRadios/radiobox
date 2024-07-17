@@ -121,24 +121,13 @@ export default class BroadcastSchedule {
     } else if (matches.find((match) => match.overrides)) {
       return;
     }
-    matches.push(this.broadcastFactory(schedule, isRepeat));
+    matches.push(this.scheduleFactory(schedule, isRepeat));
   }
 
-  broadcastFactory(schedule: Schedule, isRepeat: boolean): Schedule {
+  scheduleFactory(schedule: Schedule, isRepeat: boolean): Schedule {
     return {
       ...schedule,
       isRepeat,
-      toString: () => {
-        const info = [schedule.name];
-        if (schedule.info) {
-          info.push(schedule.info);
-        }
-        if (isRepeat) {
-          info.push(this.repeatShort);
-        }
-
-        return info.join(" ");
-      },
     };
   }
 

@@ -63,6 +63,8 @@ export type BroadcastArchiveMapping = {
   time: string;
   broadcast: string;
   category: string;
+  forename: string;
+  surname: string;
 };
 
 export type BroadcastScheduleProps = {
@@ -136,7 +138,6 @@ export type Schedule = {
   hoursOfDay: number[];
   repeatOffset: number;
   isRepeat: boolean;
-  toString: () => string;
 };
 
 export type TimeSlot = {

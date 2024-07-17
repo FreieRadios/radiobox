@@ -17,7 +17,16 @@ export default class BroadcastArchive {
   outDir: string;
   skip: string[];
   parserMapping: BroadcastArchiveMapping;
-  single = ["title", "description", "date", "time", "broadcast", "category"];
+  single = [
+    "title",
+    "description",
+    "date",
+    "time",
+    "broadcast",
+    "category",
+    "forename",
+    "surname",
+  ];
   multiple = ["body", "url"];
   importRecords: BroadcastArchiveRecord[] = [];
   fallbackStrip: string;
@@ -58,14 +67,11 @@ export default class BroadcastArchive {
     });
 
     this.importRecords = Object.values(importData);
-    return importData;
+
+    return this;
   }
 
-  clearContents(cell: string): string {
-    return cell.replaceAll("\n", "").replaceAll("\r", "").replaceAll("\t", "");
-  }
-
-  async import(from: DateTime, to: DateTime) {
+  async downloadFiles(from: DateTime, to: DateTime) {
     for (const record of Object.values(this.importRecords)) {
       const dateTime = DateTime.fromISO(record.date);
       if (dateTime >= from && dateTime <= to) {
@@ -74,20 +80,30 @@ export default class BroadcastArchive {
           const targetFile =
             this.outDir + "/" + record.id + "-" + info[info.length - 1];
 
-          if (fileExistsSync(targetFile)) {
-            return;
+          console.log(`[Archive] try to download ${url}`);
+          await this.storeUrlToFile(url, targetFile).catch(async (error) => {
+            console.error(`[Archive] error downloading ${url}`);
+          });
+
+          if (url.includes(this.fallbackStrip)) {
+            const fallback = url.replace(this.fallbackStrip, "");
+            await this.storeUrlToFile(fallback, targetFile).catch(
+              async (error) => {
+                console.error(`[Archive] error downloading fallback ${url}`);
+              }
+            );
           }
-
-          console.log(`[Archive] downloading ${url}`);
-
-          await this.storeUrlToFile(url, targetFile);
         }
       }
     }
   }
 
   async storeUrlToFile(url: string, outFile: string) {
-    axios({
+    if (fileExistsSync(outFile)) {
+      return;
+    }
+
+    await axios({
       url: url,
       method: "GET",
       responseType: "stream",
@@ -97,14 +113,12 @@ export default class BroadcastArchive {
           console.log(`[Archive] finished ${url}`);
         });
       })
-      .catch(async (error) => {
-        if (url.includes(this.fallbackStrip)) {
-          const fallback = url.replace(this.fallbackStrip, "");
-          console.error(`[Archive] trying fallback ${fallback}`);
-          await this.storeUrlToFile(fallback, outFile);
-        } else {
-          console.error(`[Archive] error downloading ${url}`);
-        }
+      .catch((err) => {
+        console.log(`[Archive] failed ${url}`);
       });
+  }
+
+  clearContents(cell: string): string {
+    return cell.replaceAll("\n", "").replaceAll("\r", "").replaceAll("\t", "");
   }
 }

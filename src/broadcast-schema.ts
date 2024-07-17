@@ -1,5 +1,5 @@
 import { dataFromXlsx } from "./helper/files";
-import { Broadcast, BroadcastSchemaProps, Schedule } from "./types";
+import { Broadcast, BroadcastSchemaProps, Schedule, TimeSlot } from "./types";
 
 /*
  * Class to read a schema xlsx-file
@@ -54,17 +54,22 @@ export default class BroadcastSchema {
       .filter((row, r) => r > 0)
       .forEach((cols) => {
         if (cols.length > 1) {
-          broadcasts.push({
-            name: cols[0],
-            info: cols.filter(
-              (cell, colId) => colId > 0 && !this.weekdayColIds.includes(colId)
-            ),
-            schedules: this.getSchedules(cols, cols[0]),
-          });
+          broadcasts.push(this.broadcastFactory(cols));
         }
       });
 
     return broadcasts;
+  }
+
+  broadcastFactory(cols: string[]): Broadcast {
+    const broadcast = {
+      name: cols[0],
+      info: cols.filter(
+        (cell, colId) => colId > 0 && !this.weekdayColIds.includes(colId)
+      ),
+      schedules: this.getSchedules(cols, cols[0]),
+    };
+    return broadcast;
   }
 
   setWeekdayColIds(header: string[]) {

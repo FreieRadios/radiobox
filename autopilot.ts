@@ -5,13 +5,39 @@ import { DateTime } from "luxon";
 import "dotenv/config";
 import { sleep, timeFormats, vd } from "./src/helper/helper";
 import ApiConnectorWelocal from "./src/api-connector-welocal";
-
+import ScheduleExport from "./src/schedule-export";
+import { Client } from "basic-ftp";
 const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
 });
 
+const now = DateTime.now();
+
+if (now.weekday === 1) {
+  // Each Monday, we would like to export the schedule to FTP
+  const exporter = new ScheduleExport({
+    schedule: new BroadcastSchedule({
+      dateStart: now.plus({ days: 21 }),
+      dateEnd: now.plus({ days: 27 }),
+      schema: schema,
+      locale: process.env.SCHEDULE_LOCALE,
+      repeatShort: process.env.REPEAT_SHORT,
+      repeatLong: process.env.REPEAT_LONG,
+    }),
+    mode: "welocal-json",
+    outDir: "json",
+    filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
+  });
+  exporter
+    .write()
+    .toFTP()
+    .then((response) => {
+      console.log("[Export] exported to FTP");
+    });
+}
+
 const dataStartString = [
-  DateTime.now().toFormat("yyyy-MM-dd"),
+  now.toFormat("yyyy-MM-dd"),
   "T",
   process.env.RECORDER_START_TIME,
 ].join("");
@@ -26,6 +52,7 @@ const schedule = new BroadcastSchedule({
   schema: schema,
   locale: process.env.SCHEDULE_LOCALE,
   repeatShort: process.env.REPEAT_SHORT,
+  repeatLong: process.env.REPEAT_LONG,
 });
 
 const recorder = new BroadcastRecorder({

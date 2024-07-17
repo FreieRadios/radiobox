@@ -150,6 +150,10 @@ recorder.on("finished", async (sourceFile, slot) => {
 });
 ```
 
+## BroadcastArchive
+`BroadcastArchive` is used to batch download audio files from the web.
+You need to provide a json file with one record per item
+
 ## ApiConnectorWelocal
 
 Use the `schedule` object to synchronize your local `.mp3` folder with `welocal` api.
