@@ -18,6 +18,7 @@ import * as process from "node:process";
 export default class ScheduleExport {
   schedule: BroadcastSchedule;
   outDir: string;
+  blockName: string;
   filenamePrefix: string;
   mode: ScheduleExportProps["mode"];
 
@@ -25,12 +26,12 @@ export default class ScheduleExport {
     this.schedule = props.schedule;
     this.mode = props.mode;
     this.outDir = props.outDir;
+    this.blockName = props.blockName;
     this.filenamePrefix = props.filenamePrefix;
   }
 
   getGrid() {
-    const grid = this.schedule.getGrid();
-    return this.schedule.mergeTimeSlots(grid);
+    return this.schedule.getGrid();
   }
 
   getFilename() {
@@ -53,7 +54,7 @@ export default class ScheduleExport {
             const localeEndDate = slot.end.setLocale("de");
             return {
               day: localeStartDate.toLocaleString(DateTime.DATE_SHORT),
-              block: broadcast.name,
+              block: this.blockName || broadcast.name,
               start: localeStartDate.toLocaleString(DateTime.TIME_24_SIMPLE),
               end: localeEndDate.toLocaleString(DateTime.TIME_24_SIMPLE),
               short: this.getShortInfo(broadcast, schedule),
@@ -106,7 +107,7 @@ export default class ScheduleExport {
         password: process.env.FTP_PASSWORD,
         secure: process.env.FTP_SECURE === "true",
       });
-      console.log(await client.list());
+      // console.log(await client.list());
       await client.uploadFrom(sourceFile, targetFile);
     } catch (err) {
       console.log(err);

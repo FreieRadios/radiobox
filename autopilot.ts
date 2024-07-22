@@ -27,6 +27,7 @@ if (now.weekday === 1) {
     mode: "welocal-json",
     outDir: "json",
     filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
+    blockName: process.env.EXPORTER_BLOCK_NAME,
   });
   exporter
     .write()

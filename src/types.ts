@@ -80,6 +80,7 @@ export type BroadcastScheduleProps = {
 export type ScheduleExportProps = {
   schedule: BroadcastSchedule;
   mode: "welocal-json";
+  blockName?: string;
   outDir?: string;
   filenamePrefix?: string;
 };
