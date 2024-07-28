@@ -75,12 +75,20 @@ export type BroadcastScheduleProps = {
   repeatShort?: string;
   repeatLong?: string;
   repeatPadding?: number;
+  strings?: {
+    each: string;
+    last: string;
+    and: string;
+    monthly: string;
+    always: string;
+    from: string;
+    oclock: string;
+  };
 };
 
 export type ScheduleExportProps = {
   schedule: BroadcastSchedule;
   mode: "welocal-json";
-  blockName?: string;
   outDir?: string;
   filenamePrefix?: string;
 };
@@ -149,6 +157,8 @@ export type TimeSlot = {
   wasMerged?: boolean;
   // number of slots (1h default) after merging
   duration: number;
+  // slot count in duration (e.g. 1 of 2h means 'first hour of two hours')
+  nOfmax: number;
 };
 
 export type TimeGrid = TimeSlot[];

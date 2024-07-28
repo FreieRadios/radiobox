@@ -5,6 +5,7 @@ import {
   Schedule,
   ScheduleExportProps,
   TimeGridJson,
+  TimeSlot,
 } from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
 import { vd } from "./helper/helper";
@@ -18,7 +19,6 @@ import * as process from "node:process";
 export default class ScheduleExport {
   schedule: BroadcastSchedule;
   outDir: string;
-  blockName: string;
   filenamePrefix: string;
   mode: ScheduleExportProps["mode"];
 
@@ -26,7 +26,6 @@ export default class ScheduleExport {
     this.schedule = props.schedule;
     this.mode = props.mode;
     this.outDir = props.outDir;
-    this.blockName = props.blockName;
     this.filenamePrefix = props.filenamePrefix;
   }
 
@@ -53,11 +52,11 @@ export default class ScheduleExport {
             const localeStartDate = slot.start.setLocale("de");
             const localeEndDate = slot.end.setLocale("de");
             return {
-              day: localeStartDate.toLocaleString(DateTime.DATE_SHORT),
-              block: this.blockName || broadcast.name,
+              day: localeStartDate.toFormat("dd.MM.yyyy"),
+              block: this.getTitleInfo(broadcast, schedule, slot),
               start: localeStartDate.toLocaleString(DateTime.TIME_24_SIMPLE),
               end: localeEndDate.toLocaleString(DateTime.TIME_24_SIMPLE),
-              short: this.getShortInfo(broadcast, schedule),
+              short: this.getShortInfo(broadcast, schedule, slot),
               long: this.getLongInfo(broadcast, schedule),
             };
           }) as TimeGridJson;
@@ -66,14 +65,36 @@ export default class ScheduleExport {
     }
   }
 
-  getShortInfo(broadcast: Broadcast, schedule: Schedule) {
+  getTitleInfo(broadcast: Broadcast, schedule: Schedule, slot: TimeSlot) {
     if (!broadcast) {
       return "Unknown broadcast";
     }
-    const info = [broadcast.name];
+    const info = [];
+
+    info.push(broadcast.name);
+    if (slot.duration > 1) {
+      info.push(" (" + slot.duration + "h)");
+    }
+
     if (schedule.isRepeat) {
       info.push(this.schedule.repeatShort);
     }
+
+    return info.join("");
+  }
+
+  getShortInfo(broadcast: Broadcast, schedule: Schedule, slot: TimeSlot) {
+    if (!broadcast) {
+      return "Unknown broadcast";
+    }
+    const info = [];
+
+    if (schedule.isRepeat) {
+      info.push(this.schedule.repeatInfoToString(schedule, slot));
+    } else {
+      info.push(this.schedule.scheduleInfoToString(schedule, slot));
+    }
+
     return info.join("");
   }
 

@@ -1,4 +1,4 @@
-import { isLastOfMonth, nthOfMonth, timeFormats, vd } from "./helper/helper";
+import { isLastOfMonth, nthOfMonth, timeFormats } from "./helper/helper";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -11,6 +11,7 @@ import {
 } from "./types";
 import BroadcastSchema from "./broadcast-schema";
 import { toDateTime } from "./helper/date-time";
+import * as process from "node:process";
 
 /*
  * Class to build a schedule schema
@@ -36,6 +37,7 @@ export default class BroadcastSchedule {
   repeatLong: string;
   outDir: string;
   locale: string;
+  strings: BroadcastScheduleProps["strings"];
   _grid: TimeGrid;
 
   constructor(props: BroadcastScheduleProps) {
@@ -52,6 +54,15 @@ export default class BroadcastSchedule {
     this.locale = props.locale || "de";
     this.repeatShort = props.repeatShort || "(rep.)";
     this.repeatLong = props.repeatLong || "Repeat";
+    this.strings = props.strings || {
+      each: "Each",
+      last: "last",
+      and: "and",
+      monthly: "of month",
+      always: "always",
+      from: "from",
+      oclock: "O'clock",
+    };
 
     this._grid = [];
     this.setGrid();
@@ -88,6 +99,7 @@ export default class BroadcastSchedule {
         start: current,
         end: end,
         duration: 1,
+        nOfmax: 1,
         matches: [],
       });
       current = end;
@@ -203,24 +215,32 @@ export default class BroadcastSchedule {
   }
 
   mergeTimeSlots(grid: TimeGrid) {
-    grid.forEach((slot, s) => {
-      for (let sMin = s + 1; sMin < grid.length; sMin++) {
-        if (!grid[sMin] || !grid[sMin].broadcast) {
-          return;
-        }
-        if (grid[sMin].broadcast !== slot.broadcast) {
-          return;
-        } else {
-          slot.end = grid[sMin].end;
-          slot.duration++;
-          grid[sMin].wasMerged = true;
-        }
-      }
-    });
-
+    this.setMergeInfo(true);
     return grid.filter((slot) => {
       return !slot.wasMerged;
     });
+  }
+
+  setMergeInfo(updateEnd?: boolean) {
+    this._grid.forEach((slot, s) => {
+      for (let sMin = s + 1; sMin < this._grid.length; sMin++) {
+        if (!this._grid[sMin] || !this._grid[sMin].broadcast) {
+          return;
+        }
+        if (this._grid[sMin].broadcast !== slot.broadcast) {
+          return;
+        } else {
+          if (updateEnd) {
+            slot.end = this._grid[sMin].end;
+          }
+          // TODO: calculate properly; find all repeats from here
+          slot.duration++;
+          slot.nOfmax = slot.duration;
+          this._grid[sMin].wasMerged = true;
+        }
+      }
+    });
+    return this;
   }
 
   filter(callback: (slot: TimeSlot) => boolean) {
@@ -247,6 +267,52 @@ export default class BroadcastSchedule {
       };
     });
   }
+
+  repeatInfoToString = (schedule: Schedule, slot: TimeSlot) => {
+    const info = [
+      this.repeatLong,
+      " (",
+      slot.start
+        .minus({ hours: schedule.repeatOffset })
+        .toFormat(process.env.REPEAT_DATE_FORMAT),
+      ")",
+    ];
+    return info.join("");
+  };
+
+  scheduleInfoToString = (schedule: Schedule, slot: TimeSlot) => {
+    const info = [];
+    const weekdays = [];
+    if (schedule.nthWeekdaysOfMonth.length < 5) {
+      weekdays.push(this.strings.each + " ");
+      schedule.nthWeekdaysOfMonth.forEach((weekday, i) => {
+        if (weekday === -1) {
+          weekdays.push(this.strings.last);
+        } else {
+          weekdays.push(String(weekday) + ".");
+        }
+        if (schedule.nthWeekdaysOfMonth[i + 1]) {
+          if (schedule.nthWeekdaysOfMonth[i + 2]) {
+            weekdays.push(", ");
+          } else {
+            weekdays.push(" " + this.strings.and + " ");
+          }
+        }
+      });
+      weekdays.push(" " + slot.start.weekdayLong + " " + this.strings.monthly);
+    } else {
+      weekdays.push(this.strings.always + " ");
+      weekdays.push(slot.start.weekdayLong.toLowerCase() + "s");
+    }
+    info.push(weekdays.join(""));
+    info.push(" " + this.strings.from + " ");
+    info.push(
+      slot.start.toLocaleString(DateTime.TIME_24_SIMPLE) +
+        " " +
+        this.strings.oclock
+    );
+    return info.join("");
+  };
 
   checkIntegrity = (autofix?: boolean) => {
     const errors = <TimeGridError[]>[];
