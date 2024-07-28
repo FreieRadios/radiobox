@@ -3,10 +3,10 @@ import BroadcastSchedule from "./src/broadcast-schedule";
 import BroadcastRecorder from "./src/broadcast-recorder";
 import { DateTime } from "luxon";
 import "dotenv/config";
-import { sleep, timeFormats, vd } from "./src/helper/helper";
+import { timeFormats } from "./src/helper/helper";
 import ApiConnectorWelocal from "./src/api-connector-welocal";
 import ScheduleExport from "./src/schedule-export";
-import { Client } from "basic-ftp";
+
 const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
 });
@@ -23,11 +23,19 @@ if (now.weekday === 1) {
       locale: process.env.SCHEDULE_LOCALE,
       repeatShort: process.env.REPEAT_SHORT,
       repeatLong: process.env.REPEAT_LONG,
+      strings: {
+        each: process.env.SCHEDULE_INFO_EACH,
+        last: process.env.SCHEDULE_INFO_LAST,
+        and: process.env.SCHEDULE_INFO_AND,
+        monthly: process.env.SCHEDULE_INFO_MONTHLY,
+        always: process.env.SCHEDULE_INFO_ALWAYS,
+        from: process.env.SCHEDULE_INFO_FROM,
+        oclock: process.env.SCHEDULE_INFO_HOUR,
+      },
     }),
     mode: "welocal-json",
     outDir: "json",
     filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
-    blockName: process.env.EXPORTER_BLOCK_NAME,
   });
   exporter
     .write()

@@ -88,7 +88,12 @@ export default class BroadcastRecorder {
           this.filenameSuffix
         );
         log.isRunning = true;
-        this.writeStreamToFile(outputFile, currentSlot, now, seconds, log);
+        try {
+          this.writeStreamToFile(outputFile, currentSlot, now, seconds, log);
+        } catch (e) {
+          throw "Could not write stream to file";
+        }
+
         await sleep(seconds * 1000);
       }
     } else {
@@ -109,7 +114,7 @@ export default class BroadcastRecorder {
     ffmpeg(this.streamUrl)
       .outputOptions("-ss 00:00:00")
       .outputOptions(`-t ${seconds}`)
-      .outputOptions("-vol 256")
+      .outputOptions("-v 256")
       .outputOptions("-hide_banner")
       .output(targetFile + partSuffix)
       .on("start", async () => {
@@ -126,7 +131,7 @@ export default class BroadcastRecorder {
         await this.onFinished(targetFile, currentSlot, now, seconds);
       })
       .on("error", function (err, stdout, stderr) {
-        console.log("[ffmpeg] Cannot process: " + err.message);
+        throw "[ffmpeg] Cannot process: " + err.message;
       })
       .run();
   }
