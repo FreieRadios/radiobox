@@ -20,6 +20,7 @@ if (now.weekday === 1) {
       dateStart: now.plus({ days: 21 }),
       dateEnd: now.plus({ days: 27 }),
       schema: schema,
+      repeatPadding: 1,
       locale: process.env.SCHEDULE_LOCALE,
       repeatShort: process.env.REPEAT_SHORT,
       repeatLong: process.env.REPEAT_LONG,
