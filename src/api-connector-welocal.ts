@@ -158,7 +158,7 @@ export default class ApiConnectorWelocal {
   }
 
   getPostStatus(slot: TimeSlot) {
-    if (slot.broadcast.info[2].length) {
+    if (slot.broadcast.info[2]?.length) {
       return "draft";
     }
     return "publish";
