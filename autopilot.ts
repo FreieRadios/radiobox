@@ -17,8 +17,18 @@ if (now.weekday === 1) {
   // Each Monday, we would like to export the schedule to FTP
   const exporter = new ScheduleExport({
     schedule: new BroadcastSchedule({
-      dateStart: now.plus({ days: 21 }),
-      dateEnd: now.plus({ days: 27 }),
+      dateStart: now.plus({ days: 21 }).set({
+        hour: 0,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+      }),
+      dateEnd: now.plus({ days: 28 }).set({
+        hour: 0,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+      }),
       schema: schema,
       repeatPadding: 1,
       locale: process.env.SCHEDULE_LOCALE,
