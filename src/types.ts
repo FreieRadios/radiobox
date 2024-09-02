@@ -111,6 +111,7 @@ export type UploadFile = {
   sourceFile: string;
   targetName: string;
   postTitle: string;
+  postStatus: "draft" | "publish";
   uploadCategories: string[];
   broadcast: Broadcast;
   slot: TimeSlot;

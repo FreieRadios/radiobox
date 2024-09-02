@@ -98,11 +98,12 @@ export default class ApiConnectorWelocal {
     return uploadFiles;
   }
 
-  getUploadFileInfo(sourceFile: string, slot: TimeSlot) {
+  getUploadFileInfo(sourceFile: string, slot: TimeSlot): UploadFile {
     return {
       sourceFile: sourceFile,
       targetName: this.getTargetName(sourceFile),
       postTitle: this.getPostTitle(slot),
+      postStatus: this.getPostStatus(slot),
       uploadCategories: [
         ...slot.broadcast.info[1].split(" "),
         slot.broadcast.name,
@@ -121,6 +122,7 @@ export default class ApiConnectorWelocal {
     const uploadSlot = await this.prepareUpload(
       file.targetName,
       file.postTitle,
+      file.postStatus,
       file.uploadCategories
     );
     console.log("[welocal] Upload started: " + file.sourceFile);
@@ -155,6 +157,13 @@ export default class ApiConnectorWelocal {
       .replaceAll("&", "+");
   }
 
+  getPostStatus(slot: TimeSlot) {
+    if (slot.broadcast.info[2].length) {
+      return "draft";
+    }
+    return "publish";
+  }
+
   getTargetName(sourceFile: string) {
     return sourceFile.replaceAll(this.uploadFilePath, "");
   }
@@ -187,12 +196,13 @@ export default class ApiConnectorWelocal {
   prepareUpload = async (
     targetFile: string,
     postTitle: string,
+    postStatus: string,
     uploadCategories: string[]
   ): Promise<UploadSlot> => {
     const postData = {
       file_name: targetFile,
       post_title: postTitle,
-      post_status: "publish",
+      post_status: postStatus,
       metadata: {
         categories: uploadCategories,
       },
