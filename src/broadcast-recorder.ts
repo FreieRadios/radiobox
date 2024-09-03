@@ -118,7 +118,7 @@ export default class BroadcastRecorder {
       .outputOptions(`-t ${seconds}`)
       .outputOptions("-v 256")
       .outputOptions("-hide_banner")
-      .output(targetFile + "delay" + delay + partSuffix);
+      .output(targetFile + partSuffix);
 
     tmpFfmpeg
       .on("start", async () => {
