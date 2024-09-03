@@ -1,4 +1,4 @@
-import { isLastOfMonth, nthOfMonth, timeFormats } from "./helper/helper";
+import { isLastOfMonth, nthOfMonth, timeFormats, vd } from "./helper/helper";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -119,21 +119,23 @@ export default class BroadcastSchedule {
           timeSlot.start
         );
         if (match) {
-          timeSlot.broadcast = broadcast;
-          this.pushMatches(timeSlot.matches, match, false);
+          if (this.pushMatches(timeSlot, match, false)) {
+            timeSlot.broadcast = broadcast;
+          }
         }
       });
     });
     return timeGrid;
   };
 
-  pushMatches(matches: Schedule[], schedule: Schedule, isRepeat: boolean) {
+  pushMatches(slot: TimeSlot, schedule: Schedule, isRepeat: boolean) {
     if (schedule.overrides) {
-      matches.length = 0;
-    } else if (matches.find((match) => match.overrides)) {
+      slot.matches = [];
+    } else if (slot.matches.find((match) => match.overrides)) {
       return;
     }
-    matches.push(this.scheduleFactory(schedule, isRepeat));
+    slot.matches.push(this.scheduleFactory(schedule, isRepeat));
+    return true;
   }
 
   scheduleFactory(schedule: Schedule, isRepeat: boolean): Schedule {
@@ -179,8 +181,9 @@ export default class BroadcastSchedule {
               existingSlot.start.toUnixInteger() === repeatTarget
           );
           if (repeatTarget && targetSlot) {
-            targetSlot.broadcast = timeSlot.broadcast;
-            this.pushMatches(targetSlot.matches, schedule, true);
+            if (this.pushMatches(targetSlot, schedule, true)) {
+              targetSlot.broadcast = timeSlot.broadcast;
+            }
           }
         });
     });
@@ -328,7 +331,7 @@ export default class BroadcastSchedule {
         });
         if (autofix) {
           this.pushMatches(
-            slot.matches,
+            slot,
             {
               name: "TBA",
               info: "Unknown",
