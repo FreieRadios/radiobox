@@ -15,6 +15,7 @@ export type BroadcastRecorderProps = {
   outDir?: string;
   filenamePrefix?: string;
   ignoreRepeats?: boolean;
+  delay?: number;
 };
 
 export type BroadcastRecorderEventListener = (

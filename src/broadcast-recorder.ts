@@ -7,7 +7,7 @@ import {
 } from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
 import ffmpeg from "fluent-ffmpeg";
-import { sleep, vd } from "./helper/helper";
+import { sleep, timeFormats } from "./helper/helper";
 import { getFilename } from "./helper/files";
 import { toDateTime } from "./helper/date-time";
 import * as fs from "node:fs";
@@ -26,6 +26,8 @@ export default class BroadcastRecorder {
   dateEnd: DateTime;
   filenameSuffix = ".mp3";
   pollingInterval = 1000; //ms
+  // delay each recording by
+  delay = 0; // seconds
   events: BroadcastRecorderEvents = {
     finished: [],
   };
@@ -49,21 +51,18 @@ export default class BroadcastRecorder {
       this.schedule.filter((slot) => slot.matches && !slot.matches[0].isRepeat);
     }
 
+    if (props.delay) {
+      this.delay = props.delay;
+    }
+
     this.schedule.mergeSlots();
   }
 
   async start() {
     await this.waitUntilStart();
-
-    const log = {
-      isRunning: false,
-      count: 0,
-      recorded: [],
-    };
     while (DateTime.now() <= this.dateEnd) {
-      await this.checkRecording(log);
+      await this.checkRecording();
     }
-    return log;
   }
 
   on(
@@ -74,12 +73,13 @@ export default class BroadcastRecorder {
     return this;
   }
 
-  async checkRecording(log) {
+  async checkRecording() {
     const now = DateTime.now();
     const currentSlot = this.schedule.findByDateStart(now);
-    if (currentSlot && !log.isRunning) {
+    if (currentSlot) {
       const remaining = now.until(currentSlot.end);
       const seconds = remaining.length("seconds");
+
       if (seconds > 0) {
         const outputFile = getFilename(
           this.outDir,
@@ -87,9 +87,13 @@ export default class BroadcastRecorder {
           currentSlot,
           this.filenameSuffix
         );
-        log.isRunning = true;
         try {
-          this.writeStreamToFile(outputFile, currentSlot, now, seconds, log);
+          this.writeStreamToFile(
+            outputFile,
+            currentSlot,
+            now,
+            Math.round(seconds)
+          );
         } catch (e) {
           throw "Could not write stream to file";
         }
@@ -105,35 +109,39 @@ export default class BroadcastRecorder {
     targetFile: string,
     currentSlot: TimeSlot,
     now: DateTime,
-    seconds: number,
-    log
+    seconds: number
   ) {
+    const delay = this.delay || 0;
     const partSuffix = "-part.mp3";
-
-    log.isRunning = true;
-    ffmpeg(this.streamUrl)
-      .outputOptions("-ss 00:00:00")
+    const tmpFfmpeg = ffmpeg(this.streamUrl)
+      .outputOptions(`-ss ${delay}`)
       .outputOptions(`-t ${seconds}`)
       .outputOptions("-v 256")
       .outputOptions("-hide_banner")
-      .output(targetFile + partSuffix)
+      .output(targetFile + "delay" + delay + partSuffix);
+
+    tmpFfmpeg
       .on("start", async () => {
+        const _now = DateTime.now().toFormat(timeFormats.machine);
         console.log(
-          `[ffmpeg] recording "${targetFile + partSuffix}" (${Math.round(
-            seconds / 60
-          )}min left)`
+          `[ffmpeg] ${_now} recording "${
+            targetFile + partSuffix
+          }" (${Math.round(seconds / 60)}min left; ${seconds}s)`
         );
       })
       .on("end", async () => {
-        log.isRunning = false;
-        console.log("[ffmpeg] Finished recording " + targetFile + partSuffix);
+        const _now = DateTime.now().toFormat(timeFormats.machine);
+        console.log(
+          `[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix
+        );
         fs.renameSync(targetFile + partSuffix, targetFile);
         await this.onFinished(targetFile, currentSlot, now, seconds);
       })
       .on("error", function (err, stdout, stderr) {
         throw "[ffmpeg] Cannot process: " + err.message;
-      })
-      .run();
+      });
+
+    tmpFfmpeg.run();
   }
 
   async onFinished(

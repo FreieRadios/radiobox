@@ -80,6 +80,7 @@ const recorder = new BroadcastRecorder({
   outDir: process.env.MP3_PATH,
   streamUrl: process.env.RECORDER_STREAM_URL,
   filenamePrefix: process.env.FILENAME_PREFIX,
+  delay: 5,
 });
 
 console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));

@@ -3,16 +3,26 @@ import BroadcastSchedule from "./src/broadcast-schedule";
 import BroadcastRecorder from "./src/broadcast-recorder";
 import { DateTime } from "luxon";
 import "dotenv/config";
-import { timeFormats } from "./src/helper/helper";
+import { timeFormats, vd } from "./src/helper/helper";
+
+// const dataStartString = [
+//   DateTime.now().toFormat("yyyy-MM-dd"),
+//   "T",
+//   process.env.RECORDER_START_TIME,
+// ].join("");
+// const dateStart = DateTime.fromISO(dataStartString);
+// const dateEnd = dateStart.plus({
+//   hours: Number(process.env.RECORDER_DURATION),
+// });
 
 const dataStartString = [
   DateTime.now().toFormat("yyyy-MM-dd"),
   "T",
-  process.env.RECORDER_START_TIME,
+  "120000",
 ].join("");
 const dateStart = DateTime.fromISO(dataStartString);
 const dateEnd = dateStart.plus({
-  hours: Number(process.env.RECORDER_DURATION),
+  seconds: 7200,
 });
 
 const schedule = new BroadcastSchedule({
@@ -29,6 +39,7 @@ const recorder = new BroadcastRecorder({
   schedule,
   streamUrl: process.env.RECORDER_STREAM_URL,
   filenamePrefix: process.env.FILENAME_PREFIX,
+  delay: 5,
 });
 
 console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
