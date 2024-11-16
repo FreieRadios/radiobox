@@ -6,6 +6,7 @@ import "dotenv/config";
 import { timeFormats } from "./src/helper/helper";
 import ApiConnectorWelocal from "./src/api-connector-welocal";
 import ScheduleExport from "./src/schedule-export";
+import { TimeGridPlaylist } from "./src/types";
 
 const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
@@ -13,22 +14,19 @@ const schema = new BroadcastSchema({
 
 const now = DateTime.now();
 
+const midnight = {
+  hour: 0,
+  minute: 0,
+  second: 0,
+  millisecond: 0,
+};
+
 if (now.weekday === 1) {
   // Each Monday, we would like to export the schedule to FTP
   const exporter = new ScheduleExport({
     schedule: new BroadcastSchedule({
-      dateStart: now.plus({ days: 21 }).set({
-        hour: 0,
-        minute: 0,
-        second: 0,
-        millisecond: 0,
-      }),
-      dateEnd: now.plus({ days: 28 }).set({
-        hour: 0,
-        minute: 0,
-        second: 0,
-        millisecond: 0,
-      }),
+      dateStart: now.plus({ days: 21 }).set(midnight),
+      dateEnd: now.plus({ days: 28 }).set(midnight),
       schema: schema,
       repeatPadding: 1,
       locale: process.env.SCHEDULE_LOCALE,
@@ -55,6 +53,28 @@ if (now.weekday === 1) {
       console.log("[Export] exported to FTP");
     });
 }
+
+// Each Day, we would like to export the repeats to txt
+// to pass this list to liquidsoap and manage repeats.
+const exporter = new ScheduleExport({
+  schedule: new BroadcastSchedule({
+    dateStart: now.plus({ days: 0 }).set(midnight),
+    dateEnd: now.plus({ days: 1 }).set(midnight),
+    schema: schema,
+    repeatPadding: 1,
+  }).mergeSlots(),
+  mode: "txt",
+  outDir: "json",
+  filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
+  mp3Path: process.env.MP3_PATH,
+});
+
+exporter.write((data: TimeGridPlaylist) =>
+  data
+    .filter((slot) => slot.repeatFrom)
+    .map((slot) => slot.repeatFrom)
+    .join(`\n`)
+);
 
 const dataStartString = [
   now.toFormat("yyyy-MM-dd"),

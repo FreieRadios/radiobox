@@ -58,7 +58,7 @@ export default class ApiConnectorWelocal {
           logFilePath,
           logFilePath + ".corrupted-" + crypto.randomUUID()
         );
-        console.error("Can\t read logfile.");
+        console.error("Can't read logfile.");
       }
     } else {
       writeJsonFile(this.logPath, this.logFile, []);

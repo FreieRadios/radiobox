@@ -183,6 +183,7 @@ export default class BroadcastSchedule {
           if (repeatTarget && targetSlot) {
             if (this.pushMatches(targetSlot, schedule, true)) {
               targetSlot.broadcast = timeSlot.broadcast;
+              targetSlot.repeatFrom = timeSlot;
             }
           }
         });

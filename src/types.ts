@@ -89,9 +89,10 @@ export type BroadcastScheduleProps = {
 
 export type ScheduleExportProps = {
   schedule: BroadcastSchedule;
-  mode: "welocal-json";
+  mode: "welocal-json" | "txt";
   outDir?: string;
   filenamePrefix?: string;
+  mp3Path?: string;
 };
 
 export type AudioUploadProps = {
@@ -161,6 +162,7 @@ export type TimeSlot = {
   duration: number;
   // slot count in duration (e.g. 1 of 2h means 'first hour of two hours')
   nOfmax: number;
+  repeatFrom?: TimeSlot;
 };
 
 export type TimeGrid = TimeSlot[];
@@ -170,7 +172,12 @@ export type TimeGridError = {
   reason: string;
 };
 
-export type TimeGridJson = {
+export type TimeGridPlaylist = {
+  filename: string;
+  repeatFrom?: string;
+}[];
+
+export type TimeGridJsonWelocal = {
   day: string;
   block: string;
   start: string;

@@ -1,10 +1,11 @@
-import { writeJsonFile } from "./helper/files";
+import { getFilename, writeFile, writeJsonFile } from "./helper/files";
 import { DateTime } from "luxon";
 import {
   Broadcast,
   Schedule,
   ScheduleExportProps,
-  TimeGridJson,
+  TimeGridJsonWelocal,
+  TimeGridPlaylist,
   TimeSlot,
 } from "./types";
 import BroadcastSchedule from "./broadcast-schedule";
@@ -20,6 +21,7 @@ export default class ScheduleExport {
   schedule: BroadcastSchedule;
   outDir: string;
   filenamePrefix: string;
+  mp3Path: string;
   mode: ScheduleExportProps["mode"];
 
   constructor(props: ScheduleExportProps) {
@@ -27,6 +29,7 @@ export default class ScheduleExport {
     this.mode = props.mode;
     this.outDir = props.outDir;
     this.filenamePrefix = props.filenamePrefix;
+    this.mp3Path = props.mp3Path;
   }
 
   getGrid() {
@@ -43,6 +46,29 @@ export default class ScheduleExport {
 
   convert() {
     switch (this.mode) {
+      case "txt":
+        return this.getGrid()
+          .filter((slot) => slot.matches.length > 0)
+          .map((slot) => {
+            const ret = {
+              filename: getFilename(
+                this.mp3Path,
+                this.filenamePrefix,
+                slot,
+                ".mp3"
+              ),
+              repeatFrom: null,
+            };
+            if (slot.repeatFrom) {
+              ret.repeatFrom = getFilename(
+                this.mp3Path,
+                this.filenamePrefix,
+                slot.repeatFrom,
+                ".mp3"
+              );
+            }
+            return ret;
+          }) as TimeGridPlaylist;
       case "welocal-json":
         return this.getGrid()
           .filter((slot) => slot.matches.length > 0)
@@ -59,7 +85,7 @@ export default class ScheduleExport {
               short: this.getShortInfo(broadcast, schedule, slot),
               long: this.getLongInfo(broadcast, schedule),
             };
-          }) as TimeGridJson;
+          }) as TimeGridJsonWelocal;
       default:
         return;
     }
@@ -109,8 +135,19 @@ export default class ScheduleExport {
     return info.join(" | ");
   }
 
-  write() {
-    writeJsonFile(this.outDir, this.getFilename(), this.convert());
+  write(cb?) {
+    const data = this.convert();
+    const writeData = cb ? cb(data) : data;
+    switch (this.mode) {
+      case "welocal-json":
+        writeJsonFile(this.outDir, this.getFilename(), writeData);
+        break;
+      case "txt":
+        writeFile(this.outDir, this.getFilename(), writeData, "txt");
+        break;
+      default:
+        break;
+    }
     return this;
   }
 
