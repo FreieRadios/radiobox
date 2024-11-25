@@ -4,9 +4,9 @@ import BroadcastRecorder from "./src/broadcast-recorder";
 import { DateTime } from "luxon";
 import "dotenv/config";
 import { timeFormats } from "./src/helper/helper";
-import ApiConnectorWelocal from "./src/api-connector-welocal";
 import ScheduleExport from "./src/schedule-export";
-import { TimeGridPlaylist } from "./src/types";
+import ApiConnectorWelocal from "./src/api-connector-welocal";
+import ApiConnectorNextcloud from "./src/api-connector-nextcloud";
 
 const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
@@ -56,25 +56,25 @@ if (now.weekday === 1) {
 
 // Each Day, we would like to export the repeats to txt
 // to pass this list to liquidsoap and manage repeats.
-const exporter = new ScheduleExport({
-  schedule: new BroadcastSchedule({
-    dateStart: now.plus({ days: 0 }).set(midnight),
-    dateEnd: now.plus({ days: 1 }).set(midnight),
-    schema: schema,
-    repeatPadding: 1,
-  }).mergeSlots(),
-  mode: "txt",
-  outDir: "json",
-  filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
-  mp3Path: process.env.MP3_PATH,
-});
-
-exporter.write((data: TimeGridPlaylist) =>
-  data
-    .filter((slot) => slot.repeatFrom)
-    .map((slot) => slot.repeatFrom)
-    .join(`\n`)
-);
+// const exporter = new ScheduleExport({
+//   schedule: new BroadcastSchedule({
+//     dateStart: now.plus({ days: 0 }).set(midnight),
+//     dateEnd: now.plus({ days: 1 }).set(midnight),
+//     schema: schema,
+//     repeatPadding: 1,
+//   }).mergeSlots(),
+//   mode: "txt",
+//   outDir: "json",
+//   filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
+//   mp3Path: process.env.MP3_PATH,
+// });
+//
+// exporter.write((data: TimeGridPlaylist) =>
+//   data
+//     .filter((slot) => slot.repeatFrom)
+//     .map((slot) => slot.repeatFrom)
+//     .join(`\n`)
+// );
 
 const dataStartString = [
   now.toFormat("yyyy-MM-dd"),
@@ -106,7 +106,7 @@ const recorder = new BroadcastRecorder({
 console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
 console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
 
-const uploader = new ApiConnectorWelocal({
+const uploaderWelocal = new ApiConnectorWelocal({
   token: process.env.WELOCAL_API_TOKEN,
   baseUrl: process.env.WELOCAL_API_URL,
   uploadFilePath: process.env.MP3_PATH,
@@ -116,10 +116,20 @@ const uploader = new ApiConnectorWelocal({
   schedule,
 });
 
+const uploaderNextcloud = new ApiConnectorNextcloud({
+  baseUrl: process.env.NEXTCLOUD_WEBDAV_URL,
+  username: process.env.NEXTCLOUD_WEBDAV_USER,
+  password: process.env.NEXTCLOUD_WEBDAV_PASSWORD,
+  targetDirectory: process.env.NEXTCLOUD_WEBDAV_DIRECTORY,
+});
+
 recorder.on("finished", async (sourceFile, slot) => {
-  const uploadFile = uploader.getUploadFileInfo(sourceFile, slot);
-  uploader.upload(uploadFile).then((resp) => {
+  const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+  uploaderWelocal.upload(uploadFile).then((resp) => {
     console.log("[welocal] upload finished!");
+  });
+  uploaderNextcloud.upload(uploadFile).then((resp) => {
+    console.log("[nextcloud] upload finished!");
   });
 });
 

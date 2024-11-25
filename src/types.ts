@@ -105,6 +105,13 @@ export type AudioUploadProps = {
   logFile: string;
 };
 
+export type AudioUploadNextcloudProps = {
+  baseUrl: string;
+  targetDirectory: string;
+  username: string;
+  password: string;
+};
+
 export type UploadConfig = {
   headers: Record<string, string>;
 };
