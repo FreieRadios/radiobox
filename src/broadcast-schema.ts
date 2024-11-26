@@ -1,5 +1,7 @@
 import { dataFromXlsx } from "./helper/files";
-import { Broadcast, BroadcastSchemaProps, Schedule } from "./types";
+import { Broadcast, BroadcastSchemaProps, Schedule, TimeSlot } from "./types";
+import { DateTime } from "luxon";
+import { vd } from "./helper/helper";
 
 /*
  * Class to read a schema xlsx-file
@@ -26,6 +28,8 @@ import { Broadcast, BroadcastSchemaProps, Schedule } from "./types";
 export default class BroadcastSchema {
   // path & filename of xlsx-schema file
   schemaFile: string;
+  // name of the station for info & titles
+  stationName: string;
   // Weekday names are required in first row of xlsx schema file
   weekdayColNames: string[] = [];
   // mapped internally
@@ -33,6 +37,7 @@ export default class BroadcastSchema {
 
   constructor(props: BroadcastSchemaProps) {
     this.schemaFile = props.schemaFile;
+    this.stationName = props.stationName;
     this.weekdayColNames =
       props.weekdayColNames !== undefined
         ? props.weekdayColNames
@@ -69,9 +74,67 @@ export default class BroadcastSchema {
         (cell, colId) => colId > 0 && !this.weekdayColIds.includes(colId)
       ),
       schedules: this.getSchedules(cols, cols[0]),
+      getTitle: (slot?: TimeSlot, schema?: string[], glue?: string) => {
+        glue = glue || " - ";
+        return this.getTitle(broadcast, slot, schema)
+          .filter((part) => part?.length > 0)
+          .join(glue);
+      },
     };
     return broadcast;
   }
+
+  getTitle = (broadcast: Broadcast, slot?: TimeSlot, schema?: string[]) => {
+    const parts = [];
+    schema = schema || ["name", "startEndTime", "info_0"];
+    schema.forEach((schemaKey) => {
+      let part = "";
+      switch (schemaKey) {
+        case "name":
+          part = broadcast.name;
+          break;
+        case "startTime":
+          part = slot?.start.toLocaleString(DateTime.TIME_24_SIMPLE);
+          break;
+        case "startEndTime":
+          part =
+            slot?.start.toLocaleString(DateTime.TIME_24_SIMPLE) +
+            "-" +
+            slot?.end.toLocaleString(DateTime.TIME_24_SIMPLE);
+          break;
+        case "endTime":
+          part = slot?.end.toLocaleString(DateTime.TIME_24_SIMPLE);
+          break;
+        case "startDate":
+          part = slot?.start.toLocaleString(DateTime.DATE_SHORT);
+          break;
+        case "endDate":
+          part = slot?.end.toLocaleString(DateTime.DATE_SHORT);
+          break;
+        case "date":
+          part = slot?.start.toFormat("yyyy-MM-dd");
+          break;
+        case "info_0":
+          part = broadcast.info[0];
+          break;
+        case "info_1":
+          part = broadcast.info[1];
+          break;
+        case "info_2":
+          part = broadcast.info[2];
+          break;
+        case "station":
+          part = this.stationName;
+          break;
+        default:
+          part = schemaKey;
+          break;
+      }
+      parts.push(part);
+    });
+
+    return parts;
+  };
 
   setWeekdayColIds(header: string[]) {
     const colIds = [];

@@ -146,15 +146,8 @@ export default class ApiConnectorWelocal {
   }
 
   getPostTitle(slot: TimeSlot) {
-    return [
-      slot.broadcast.name,
-      slot.start.toLocaleString(DateTime.TIME_24_SIMPLE) +
-        "-" +
-        slot.end.toLocaleString(DateTime.TIME_24_SIMPLE),
-      slot.broadcast.info[0],
-    ]
-      .join(" - ")
-      .replaceAll("&", "+");
+    const title = slot.broadcast.getTitle(slot);
+    return title.replaceAll("&", "+");
   }
 
   getPostStatus(slot: TimeSlot) {

@@ -11,6 +11,7 @@ import { sleep, timeFormats } from "./helper/helper";
 import { getFilename } from "./helper/files";
 import { toDateTime } from "./helper/date-time";
 import * as fs from "node:fs";
+import slugify from "slugify";
 
 /*
  * Class to store stream data to files
@@ -113,9 +114,25 @@ export default class BroadcastRecorder {
   ) {
     const delay = this.delay || 0;
     const partSuffix = "-part.mp3";
+
+    const title = currentSlot.broadcast.getTitle(currentSlot, [
+      "name",
+      "startEndTime",
+      "startDate",
+    ]);
+    const genre = currentSlot.broadcast.getTitle(currentSlot, ["info_1"]);
+    const album = currentSlot.broadcast.getTitle(currentSlot, ["info_0"]);
+    const date = currentSlot.broadcast.getTitle(currentSlot, ["date"]);
+    const artist = currentSlot.broadcast.getTitle(currentSlot, ["station"]);
+
     const tmpFfmpeg = ffmpeg(this.streamUrl)
       .outputOptions(`-ss ${delay}`)
       .outputOptions(`-t ${seconds}`)
+      .outputOptions("-metadata", "title=" + title)
+      .outputOptions("-metadata", "album=" + album)
+      .outputOptions("-metadata", "genre=" + genre)
+      .outputOptions("-metadata", "date=" + date)
+      .outputOptions("-metadata", "artist=" + artist)
       .outputOptions("-v 256")
       .outputOptions("-hide_banner")
       .output(targetFile + partSuffix);

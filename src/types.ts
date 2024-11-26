@@ -31,6 +31,7 @@ export type BroadcastRecorderEvents = {
 
 export type BroadcastSchemaProps = {
   schemaFile: string;
+  stationName?: string;
   weekdayColNames?: string[];
 };
 
@@ -144,6 +145,7 @@ export type UploadSlot = {
 export type Broadcast = {
   name: string;
   info: string[];
+  getTitle: (slot?: TimeSlot, schema?: string[], glue?: string) => string;
   schedules: Schedule[];
 };
 

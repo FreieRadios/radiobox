@@ -19,7 +19,7 @@ $ yarn install
 You can now run
 
 ```
-$ yarn play
+$ yarn dev
 ```
 
 and play around with the functionality.

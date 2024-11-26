@@ -36,7 +36,8 @@ const run = async () => {
 
   const { dateStart, dateEnd } = getDateStartEnd(
     now.toFormat("yyyy-MM-dd"),
-    process.env.RECORDER_START_TIME,
+    // process.env.RECORDER_START_TIME,
+    "120000",
     Number(process.env.RECORDER_DURATION)
   );
   console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
@@ -50,12 +51,12 @@ const run = async () => {
 
   recorder.on("finished", async (sourceFile, slot) => {
     const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-    uploaderWelocal.upload(uploadFile).then((resp) => {
-      console.log("[welocal] upload finished!");
-    });
-    uploaderNextcloud.upload(uploadFile).then((resp) => {
-      console.log("[nextcloud] upload finished!");
-    });
+    // uploaderWelocal.upload(uploadFile).then((resp) => {
+    //   console.log("[welocal] upload finished!");
+    // });
+    // uploaderNextcloud.upload(uploadFile).then((resp) => {
+    //   console.log("[nextcloud] upload finished!");
+    // });
   });
 
   recorder.start().then((resp) => {

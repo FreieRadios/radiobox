@@ -32,6 +32,7 @@ export const getWelocal = (schedule) => {
 export const getSchema = () => {
   return new BroadcastSchema({
     schemaFile: process.env.BROADCAST_SCHEMA_FILE,
+    stationName: process.env.STATION_NAME,
   });
 };
 
