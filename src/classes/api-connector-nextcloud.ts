@@ -1,6 +1,10 @@
 import * as fs from "node:fs";
 import axios from "axios";
-import { AudioUploadNextcloudProps, UploadConfig, UploadFile } from "./types";
+import {
+  AudioUploadNextcloudProps,
+  UploadConfig,
+  UploadFile,
+} from "../types/types";
 import path from "node:path";
 
 export default class ApiConnectorNextcloud {

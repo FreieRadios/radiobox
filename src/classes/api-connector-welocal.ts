@@ -7,9 +7,9 @@ import {
   UploadFile,
   UploadLogEntry,
   UploadSlot,
-} from "./types";
+} from "../types/types";
 import BroadcastSchedule from "./broadcast-schedule";
-import { fileExistsSync, getFilename, writeJsonFile } from "./helper/files";
+import { fileExistsSync, getFilename, writeJsonFile } from "../helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
 

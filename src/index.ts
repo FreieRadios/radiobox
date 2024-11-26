@@ -1,12 +1,12 @@
 import "dotenv/config";
 
-import BroadcastSchema from "./src/broadcast-schema";
-import BroadcastSchedule from "./src/broadcast-schedule";
-import ScheduleExport from "./src/schedule-export";
-import BroadcastRecorder from "./src/broadcast-recorder";
-import ApiConnectorNextcloud from "./src/api-connector-nextcloud";
-import ApiConnectorWelocal from "./src/api-connector-welocal";
-import { DateTimeInput } from "./src/types";
+import BroadcastSchema from "./classes/broadcast-schema";
+import BroadcastSchedule from "./classes/broadcast-schedule";
+import ScheduleExport from "./classes/schedule-export";
+import BroadcastRecorder from "./classes/broadcast-recorder";
+import ApiConnectorNextcloud from "./classes/api-connector-nextcloud";
+import ApiConnectorWelocal from "./classes/api-connector-welocal";
+import { DateTimeInput } from "./types/types";
 
 export const getNextcloud = () => {
   return new ApiConnectorNextcloud({

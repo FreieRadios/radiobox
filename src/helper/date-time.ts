@@ -1,5 +1,5 @@
 import { DateTime } from "luxon";
-import { DateTimeInput } from "../types";
+import { DateTimeInput } from "../types/types";
 
 export const toDateTime = (arg: DateTimeInput, round?: boolean): DateTime => {
   const dateTime = typeof arg === "string" ? DateTime.fromISO(arg) : arg;

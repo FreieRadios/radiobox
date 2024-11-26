@@ -1,4 +1,4 @@
-import { getFilename, writeFile, writeJsonFile } from "./helper/files";
+import { getFilename, writeFile, writeJsonFile } from "../helper/files";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -7,9 +7,9 @@ import {
   TimeGridJsonWelocal,
   TimeGridPlaylist,
   TimeSlot,
-} from "./types";
+} from "../types/types";
 import BroadcastSchedule from "./broadcast-schedule";
-import { vd } from "./helper/helper";
+import { vd } from "../helper/helper";
 import { Client } from "basic-ftp";
 import "dotenv/config";
 import * as process from "node:process";

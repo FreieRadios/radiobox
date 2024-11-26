@@ -1,7 +1,7 @@
 {
   "name": "zapi",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "src/index.ts",
   "license": "MIT",
   "devDependencies": {
     "@types/fluent-ffmpeg": "^2.1.24",
@@ -16,13 +16,14 @@
   },
   "scripts": {
     "build": "tsc",
-    "play": "nodemon -e ts --exec 'ts-node' index.ts",
-    "record": "ts-node record.ts",
-    "autopilot": "ts-node autopilot.ts",
-    "schedule": "ts-node export-schedule.ts",
-    "sync": "nodemon -e ts --exec 'ts-node' 'sync-welocal.ts'",
+    "play": "nodemon -e ts --exec 'ts-node' src/index.ts",
+    "record": "ts-node src/examples/record.ts",
+    "autopilot": "ts-node src/autopilot.ts",
+    "schedule": "ts-node src/examples/export-schedule.ts",
+    "sync": "nodemon -e ts --exec 'ts-node' 'src/examples/sync-welocal.ts'",
     "dev": "nodemon -e ts --exec 'ts-node' dev.ts",
-    "dev:autopilot": "nodemon -e ts --exec 'ts-node' autopilot.ts",
+    "dev:autopilot": "nodemon -e ts --exec 'ts-node' src/autopilot.ts",
+    "start:autopilot": "node dist/autopilot",
     "test": "npx jest",
     "test-coverage": "npx jest --coverage"
   },

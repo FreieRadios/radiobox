@@ -4,12 +4,12 @@ import {
   BroadcastRecorderEvents,
   BroadcastRecorderProps,
   TimeSlot,
-} from "./types";
+} from "../types/types";
 import BroadcastSchedule from "./broadcast-schedule";
 import ffmpeg from "fluent-ffmpeg";
-import { sleep, timeFormats } from "./helper/helper";
-import { getFilename } from "./helper/files";
-import { toDateTime } from "./helper/date-time";
+import { sleep, timeFormats } from "../helper/helper";
+import { getFilename } from "../helper/files";
+import { toDateTime } from "../helper/date-time";
 import * as fs from "node:fs";
 import slugify from "slugify";
 

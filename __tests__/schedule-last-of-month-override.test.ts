@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
-import BroadcastSchedule from "../src/broadcast-schedule";
-import BroadcastSchema from "../src/broadcast-schema";
+import BroadcastSchedule from "../src/classes/broadcast-schedule";
+import BroadcastSchema from "../src/classes/broadcast-schema";
 import "dotenv/config";
 
 test("test scheduler for override while being last of month", () => {

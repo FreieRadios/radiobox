@@ -1,9 +1,9 @@
 import "dotenv/config";
 
-import BroadcastSchema from "./src/broadcast-schema";
-import BroadcastSchedule from "./src/broadcast-schedule";
-import ScheduleExport from "./src/schedule-export";
-import { TimeGridPlaylist } from "./src/types";
+import BroadcastSchema from "./src/classes/broadcast-schema";
+import BroadcastSchedule from "./src/classes/broadcast-schedule";
+import ScheduleExport from "./src/classes/schedule-export";
+import { TimeGridPlaylist } from "./src/types/types";
 import { DateTime } from "luxon";
 
 const schema = new BroadcastSchema({

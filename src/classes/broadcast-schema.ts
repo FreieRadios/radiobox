@@ -1,7 +1,12 @@
-import { dataFromXlsx } from "./helper/files";
-import { Broadcast, BroadcastSchemaProps, Schedule, TimeSlot } from "./types";
+import { dataFromXlsx } from "../helper/files";
+import {
+  Broadcast,
+  BroadcastSchemaProps,
+  Schedule,
+  TimeSlot,
+} from "../types/types";
 import { DateTime } from "luxon";
-import { vd } from "./helper/helper";
+import { vd } from "../helper/helper";
 
 /*
  * Class to read a schema xlsx-file

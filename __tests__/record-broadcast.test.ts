@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
-import BroadcastSchedule from "../src/broadcast-schedule";
-import BroadcastSchema from "../src/broadcast-schema";
-import BroadcastRecorder from "../src/broadcast-recorder";
+import BroadcastSchedule from "../src/classes/broadcast-schedule";
+import BroadcastSchema from "../src/classes/broadcast-schema";
+import BroadcastRecorder from "../src/classes/broadcast-recorder";
 import { timeFormats, vd } from "../src/helper/helper";
 import "dotenv/config";
 

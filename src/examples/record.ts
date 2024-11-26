@@ -1,9 +1,9 @@
-import BroadcastSchema from "./src/broadcast-schema";
-import BroadcastSchedule from "./src/broadcast-schedule";
-import BroadcastRecorder from "./src/broadcast-recorder";
+import BroadcastSchema from "../classes/broadcast-schema";
+import BroadcastSchedule from "../classes/broadcast-schedule";
+import BroadcastRecorder from "../classes/broadcast-recorder";
 import { DateTime } from "luxon";
 import "dotenv/config";
-import { timeFormats, vd } from "./src/helper/helper";
+import { timeFormats, vd } from "../helper/helper";
 
 // const dataStartString = [
 //   DateTime.now().toFormat("yyyy-MM-dd"),

@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import nodeXlsx from "node-xlsx";
-import { TimeSlot } from "../types";
+import { TimeSlot } from "../types/types";
 import slugify from "slugify";
 import { timeFormats } from "./helper";
 

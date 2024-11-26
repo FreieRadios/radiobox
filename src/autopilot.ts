@@ -1,8 +1,7 @@
 import { DateTime } from "luxon";
 import "dotenv/config";
-import { timeFormats, vd } from "./src/helper/helper";
+import { timeFormats } from "./helper/helper";
 import {
-  dumpScheduleErrors,
   fetchSchemaFromNextcloud,
   getExporter,
   getNextcloud,
@@ -11,7 +10,7 @@ import {
   getSchema,
   getWelocal,
 } from "./index";
-import { getDateStartEnd, midnight } from "./src/helper/date-time";
+import { getDateStartEnd, midnight } from "./helper/date-time";
 
 const run = async () => {
   await fetchSchemaFromNextcloud();
@@ -51,12 +50,12 @@ const run = async () => {
 
   recorder.on("finished", async (sourceFile, slot) => {
     const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-    // uploaderWelocal.upload(uploadFile).then((resp) => {
-    //   console.log("[welocal] upload finished!");
-    // });
-    // uploaderNextcloud.upload(uploadFile).then((resp) => {
-    //   console.log("[nextcloud] upload finished!");
-    // });
+    uploaderWelocal.upload(uploadFile).then((resp) => {
+      console.log("[welocal] upload finished!");
+    });
+    uploaderNextcloud.upload(uploadFile).then((resp) => {
+      console.log("[nextcloud] upload finished!");
+    });
   });
 
   recorder.start().then((resp) => {

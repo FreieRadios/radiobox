@@ -1,8 +1,8 @@
 import "dotenv/config";
-import BroadcastSchema from "./src/broadcast-schema";
-import BroadcastSchedule from "./src/broadcast-schedule";
-import ScheduleExport from "./src/schedule-export";
-import { vd } from "./src/helper/helper";
+import BroadcastSchema from "../classes/broadcast-schema";
+import BroadcastSchedule from "../classes/broadcast-schedule";
+import ScheduleExport from "../classes/schedule-export";
+import { vd } from "../helper/helper";
 
 const schedule = new BroadcastSchedule({
   schema: new BroadcastSchema({

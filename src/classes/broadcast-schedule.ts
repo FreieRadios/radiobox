@@ -1,4 +1,4 @@
-import { isLastOfMonth, nthOfMonth, timeFormats, vd } from "./helper/helper";
+import { isLastOfMonth, nthOfMonth, timeFormats, vd } from "../helper/helper";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -8,9 +8,9 @@ import {
   TimeGrid,
   TimeGridError,
   TimeSlot,
-} from "./types";
+} from "../types/types";
 import BroadcastSchema from "./broadcast-schema";
-import { toDateTime } from "./helper/date-time";
+import { toDateTime } from "../helper/date-time";
 import * as process from "node:process";
 
 /*

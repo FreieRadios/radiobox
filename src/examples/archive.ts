@@ -1,5 +1,5 @@
-import BroadcastArchive from "./src/broadcast-archive";
-import { toDateTime } from "./src/helper/date-time";
+import BroadcastArchive from "../classes/broadcast-archive";
+import { toDateTime } from "../helper/date-time";
 
 // This is used to batch download audio files from the web.
 // You need to provide a json file with one record per item

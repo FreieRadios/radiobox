@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
-import BroadcastSchema from "./broadcast-schema";
-import BroadcastSchedule from "./broadcast-schedule";
-import BroadcastRecorder from "./broadcast-recorder";
+import BroadcastSchema from "../classes/broadcast-schema";
+import BroadcastSchedule from "../classes/broadcast-schedule";
+import BroadcastRecorder from "../classes/broadcast-recorder";
 
 export type DateTimeInput = string | DateTime;
 

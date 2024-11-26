@@ -2,12 +2,12 @@ import {
   BroadcastArchiveMapping,
   BroadcastArchiveProps,
   BroadcastArchiveRecord,
-} from "./types";
+} from "../types/types";
 import * as fs from "node:fs";
-import { vd } from "./helper/helper";
+import { vd } from "../helper/helper";
 import { DateTime } from "luxon";
 import axios from "axios";
-import { fileExistsSync } from "./helper/files";
+import { fileExistsSync } from "../helper/files";
 
 /*
  * Import audio files from URL and combine with information
