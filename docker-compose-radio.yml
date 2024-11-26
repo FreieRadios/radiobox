@@ -1,0 +1,23 @@
+services:
+  icecast:
+    image: moul/icecast
+    volumes:
+      - ./logs:/var/log/icecast2
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - ICECAST_SOURCE_PASSWORD=hackmehackme
+      - ICECAST_ADMIN_PASSWORD=hackmehackme
+      - ICECAST_PASSWORD=hackmehackme
+      - ICECAST_RELAY_PASSWORD=hackmehackme
+      - ICECAST_HOSTNAME=tsing-tux.local
+    ports:
+      - 8800:8000
+
+  liquidsoap:
+    build: ./liquidsoap
+    restart: always
+    volumes:
+      - "./logs:/liquidsoap/radio/logs"
+      - "./mp3:/liquidsoap/radio/mp3"
+      - "./schema:/liquidsoap/radio/schema"
+      - "./json:/liquidsoap/radio/json"

@@ -1,6 +1,7 @@
 # Files
 json/*
 mp3/*
+!mp3/fallback.mp3
 schema/*
 !schema/example.xlsx
 

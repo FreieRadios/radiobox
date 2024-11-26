@@ -88,6 +88,7 @@ export const getExporter = (schedule: BroadcastSchedule, mode) => {
     mode,
     outDir: "json",
     filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
+    mp3Path: getPath(process.env.MP3_PATH),
   });
 };
 

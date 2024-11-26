@@ -5,36 +5,22 @@ import BroadcastSchedule from "./classes/broadcast-schedule";
 import ScheduleExport from "./classes/schedule-export";
 import { TimeGridPlaylist } from "./types/types";
 import { DateTime } from "luxon";
+import { getExporter, getSchedule, getSchema } from "./index";
+import { midnight } from "./helper/date-time";
 
-const schema = new BroadcastSchema({
-  schemaFile: process.env.BROADCAST_SCHEMA_FILE,
-});
+const schema = getSchema();
 
 const now = DateTime.now();
 
 // Play around with repeat filename export
-const exporter = new ScheduleExport({
-  schedule: new BroadcastSchedule({
-    dateStart: now.plus({ days: 0 }).set({
-      hour: 0,
-      minute: 0,
-      second: 0,
-      millisecond: 0,
-    }),
-    dateEnd: now.plus({ days: 1 }).set({
-      hour: 0,
-      minute: 0,
-      second: 0,
-      millisecond: 0,
-    }),
-    schema: schema,
-    repeatPadding: 1,
-  }).mergeSlots(),
-  mode: "txt",
-  outDir: "json",
-  filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
-  mp3Path: process.env.MP3_PATH,
-});
+const exporter = getExporter(
+  getSchedule(
+    schema,
+    now.plus({ days: 0 }).set(midnight),
+    now.plus({ days: 1 }).set(midnight)
+  ).mergeSlots(),
+  "txt"
+);
 
 exporter.write((data: TimeGridPlaylist) =>
   data
