@@ -21,7 +21,7 @@
     "autopilot": "ts-node src/autopilot.ts",
     "schedule": "ts-node src/examples/export-schedule.ts",
     "sync": "nodemon -e ts --exec 'ts-node' 'src/examples/sync-welocal.ts'",
-    "dev": "nodemon -e ts --exec 'ts-node' dev.ts",
+    "dev": "nodemon -e ts --exec 'ts-node' src/dev.ts",
     "dev:autopilot": "nodemon -e ts --exec 'ts-node' src/autopilot.ts",
     "start:autopilot": "node dist/autopilot",
     "test": "npx jest",

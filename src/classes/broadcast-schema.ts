@@ -1,11 +1,11 @@
-import { dataFromXlsx } from "../helper/files";
+import { dataFromXlsx, getPath } from "../helper/files";
 import {
   Broadcast,
   BroadcastSchemaProps,
   Schedule,
   TimeSlot,
 } from "../types/types";
-import { DateTime } from "luxon";
+import { DateTime, Settings } from "luxon";
 import { vd } from "../helper/helper";
 
 /*
@@ -41,7 +41,7 @@ export default class BroadcastSchema {
   weekdayColIds: number[] = [];
 
   constructor(props: BroadcastSchemaProps) {
-    this.schemaFile = props.schemaFile;
+    this.schemaFile = getPath(props.schemaFile);
     this.stationName = props.stationName;
     this.weekdayColNames =
       props.weekdayColNames !== undefined
@@ -111,10 +111,14 @@ export default class BroadcastSchema {
           part = slot?.end.toLocaleString(DateTime.TIME_24_SIMPLE);
           break;
         case "startDate":
-          part = slot?.start.toLocaleString(DateTime.DATE_SHORT);
+          part = slot?.start
+            .setLocale(process.env.SCHEDULE_LOCALE)
+            .toLocaleString(DateTime.DATE_SHORT);
           break;
         case "endDate":
-          part = slot?.end.toLocaleString(DateTime.DATE_SHORT);
+          part = slot?.end
+            .setLocale(process.env.SCHEDULE_LOCALE)
+            .toLocaleString(DateTime.DATE_SHORT);
           break;
         case "date":
           part = slot?.start.toFormat("yyyy-MM-dd");

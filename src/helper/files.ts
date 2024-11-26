@@ -3,6 +3,14 @@ import nodeXlsx from "node-xlsx";
 import { TimeSlot } from "../types/types";
 import slugify from "slugify";
 import { timeFormats } from "./helper";
+import * as process from "node:process";
+
+export const getPath = (file) => {
+  if (process.env.RADIOBOX_BASEDIR) {
+    return process.env.RADIOBOX_BASEDIR + "/" + file;
+  }
+  return file;
+};
 
 export const dataFromXlsx = (
   file: string,

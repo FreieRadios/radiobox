@@ -1,4 +1,9 @@
-import { getFilename, writeFile, writeJsonFile } from "../helper/files";
+import {
+  getFilename,
+  getPath,
+  writeFile,
+  writeJsonFile,
+} from "../helper/files";
 import { DateTime } from "luxon";
 import {
   Broadcast,
@@ -27,9 +32,9 @@ export default class ScheduleExport {
   constructor(props: ScheduleExportProps) {
     this.schedule = props.schedule;
     this.mode = props.mode;
-    this.outDir = props.outDir;
+    this.outDir = getPath(props.outDir);
     this.filenamePrefix = props.filenamePrefix;
-    this.mp3Path = props.mp3Path;
+    this.mp3Path = getPath(props.mp3Path);
   }
 
   getGrid() {

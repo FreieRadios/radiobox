@@ -1,4 +1,4 @@
-import { DateTime } from "luxon";
+import { DateTime, Settings } from "luxon";
 import {
   BroadcastRecorderEventListener,
   BroadcastRecorderEvents,
@@ -7,11 +7,10 @@ import {
 } from "../types/types";
 import BroadcastSchedule from "./broadcast-schedule";
 import ffmpeg from "fluent-ffmpeg";
-import { sleep, timeFormats } from "../helper/helper";
-import { getFilename } from "../helper/files";
+import { sleep, timeFormats, vd } from "../helper/helper";
+import { getFilename, getPath } from "../helper/files";
 import { toDateTime } from "../helper/date-time";
 import * as fs from "node:fs";
-import slugify from "slugify";
 
 /*
  * Class to store stream data to files
@@ -35,7 +34,7 @@ export default class BroadcastRecorder {
 
   constructor(props: BroadcastRecorderProps) {
     this.schedule = props.schedule;
-    this.outDir = props.outDir || "mp3/";
+    this.outDir = getPath(props.outDir || "mp3/");
     this.streamUrl = props.streamUrl;
     this.filenamePrefix = props.filenamePrefix;
 

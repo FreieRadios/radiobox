@@ -7,6 +7,7 @@ import BroadcastRecorder from "./classes/broadcast-recorder";
 import ApiConnectorNextcloud from "./classes/api-connector-nextcloud";
 import ApiConnectorWelocal from "./classes/api-connector-welocal";
 import { DateTimeInput } from "./types/types";
+import { getPath } from "./helper/files";
 
 export const getNextcloud = () => {
   return new ApiConnectorNextcloud({
@@ -91,11 +92,17 @@ export const getExporter = (schedule: BroadcastSchedule, mode) => {
 };
 
 export const fetchSchemaFromNextcloud = async () => {
+  console.log(
+    "[nextcloud] Fetching schema.... " +
+      process.env.NEXTCLOUD_WEBDAV_SCHEMA_FILE +
+      " from " +
+      process.env.NEXTCLOUD_WEBDAV_SCHEMA_DIRECTORY
+  );
   return getNextcloud()
     .downloadFileFromNextcloud(
       process.env.NEXTCLOUD_WEBDAV_SCHEMA_DIRECTORY,
       process.env.NEXTCLOUD_WEBDAV_SCHEMA_FILE,
-      process.env.BROADCAST_SCHEMA_FILE
+      getPath(process.env.BROADCAST_SCHEMA_FILE)
     )
     .then((resp) => {
       console.log(
@@ -104,5 +111,6 @@ export const fetchSchemaFromNextcloud = async () => {
     })
     .catch((e) => {
       console.error(e);
+      console.error("[nextcloud] Error fetching schema!");
     });
 };

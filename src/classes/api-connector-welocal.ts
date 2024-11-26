@@ -9,7 +9,12 @@ import {
   UploadSlot,
 } from "../types/types";
 import BroadcastSchedule from "./broadcast-schedule";
-import { fileExistsSync, getFilename, writeJsonFile } from "../helper/files";
+import {
+  fileExistsSync,
+  getFilename,
+  getPath,
+  writeJsonFile,
+} from "../helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
 
@@ -49,7 +54,7 @@ export default class ApiConnectorWelocal {
   }
 
   linkLogfile() {
-    const logFilePath = this.logPath + "/" + this.logFile + ".json";
+    const logFilePath = getPath(this.logPath) + "/" + this.logFile + ".json";
     if (fileExistsSync(logFilePath)) {
       try {
         this.logs = JSON.parse(fs.readFileSync(logFilePath).toString());

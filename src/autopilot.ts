@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import "dotenv/config";
-import { timeFormats } from "./helper/helper";
+import { timeFormats, vd } from "./helper/helper";
 import {
   fetchSchemaFromNextcloud,
   getExporter,
@@ -11,8 +11,10 @@ import {
   getWelocal,
 } from "./index";
 import { getDateStartEnd, midnight } from "./helper/date-time";
+import { Settings } from "luxon";
 
 const run = async () => {
+  console.log(`[autopilot] Current dir is ${__dirname}`);
   await fetchSchemaFromNextcloud();
 
   const now = DateTime.now();
@@ -35,8 +37,7 @@ const run = async () => {
 
   const { dateStart, dateEnd } = getDateStartEnd(
     now.toFormat("yyyy-MM-dd"),
-    // process.env.RECORDER_START_TIME,
-    "120000",
+    process.env.RECORDER_START_TIME,
     Number(process.env.RECORDER_DURATION)
   );
   console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
