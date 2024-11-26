@@ -28,7 +28,7 @@
     "test-coverage": "npx jest --coverage"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.7.4",
     "basic-ftp": "^5.0.5",
     "dotenv": "^16.4.5",
     "fluent-ffmpeg": "^2.1.3",
