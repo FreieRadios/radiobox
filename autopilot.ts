@@ -1,138 +1,69 @@
-import BroadcastSchema from "./src/broadcast-schema";
-import BroadcastSchedule from "./src/broadcast-schedule";
-import BroadcastRecorder from "./src/broadcast-recorder";
 import { DateTime } from "luxon";
 import "dotenv/config";
-import { timeFormats } from "./src/helper/helper";
-import ScheduleExport from "./src/schedule-export";
-import ApiConnectorWelocal from "./src/api-connector-welocal";
-import ApiConnectorNextcloud from "./src/api-connector-nextcloud";
+import { timeFormats, vd } from "./src/helper/helper";
+import {
+  dumpScheduleErrors,
+  fetchSchemaFromNextcloud,
+  getExporter,
+  getNextcloud,
+  getRecorder,
+  getSchedule,
+  getSchema,
+  getWelocal,
+} from "./index";
+import { getDateStartEnd, midnight } from "./src/helper/date-time";
 
-const schema = new BroadcastSchema({
-  schemaFile: process.env.BROADCAST_SCHEMA_FILE,
-});
+const run = async () => {
+  await fetchSchemaFromNextcloud();
 
-const now = DateTime.now();
+  const now = DateTime.now();
+  const schema = getSchema();
 
-const midnight = {
-  hour: 0,
-  minute: 0,
-  second: 0,
-  millisecond: 0,
+  if (now.weekday === 1) {
+    // Each Monday, we would like to export the schedule to FTP
+    const schedule = getSchedule(
+      schema,
+      now.plus({ days: 21 }).set(midnight),
+      now.plus({ days: 28 }).set(midnight)
+    );
+    getExporter(schedule, "welocal-json")
+      .write()
+      .toFTP()
+      .then((response) => {
+        console.log("[Export] exported to FTP");
+      });
+  }
+
+  const { dateStart, dateEnd } = getDateStartEnd(
+    now.toFormat("yyyy-MM-dd"),
+    process.env.RECORDER_START_TIME,
+    Number(process.env.RECORDER_DURATION)
+  );
+  console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
+  console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
+
+  const schedule = getSchedule(schema, dateStart, dateEnd);
+  const recorder = getRecorder(schedule);
+
+  const uploaderWelocal = getWelocal(schedule);
+  const uploaderNextcloud = getNextcloud();
+
+  recorder.on("finished", async (sourceFile, slot) => {
+    const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+    uploaderWelocal.upload(uploadFile).then((resp) => {
+      console.log("[welocal] upload finished!");
+    });
+    uploaderNextcloud.upload(uploadFile).then((resp) => {
+      console.log("[nextcloud] upload finished!");
+    });
+  });
+
+  recorder.start().then((resp) => {
+    console.log("[Recorder] has finished!");
+  });
 };
 
-if (now.weekday === 1) {
-  // Each Monday, we would like to export the schedule to FTP
-  const exporter = new ScheduleExport({
-    schedule: new BroadcastSchedule({
-      dateStart: now.plus({ days: 21 }).set(midnight),
-      dateEnd: now.plus({ days: 28 }).set(midnight),
-      schema: schema,
-      repeatPadding: 1,
-      locale: process.env.SCHEDULE_LOCALE,
-      repeatShort: process.env.REPEAT_SHORT,
-      repeatLong: process.env.REPEAT_LONG,
-      strings: {
-        each: process.env.SCHEDULE_INFO_EACH,
-        last: process.env.SCHEDULE_INFO_LAST,
-        and: process.env.SCHEDULE_INFO_AND,
-        monthly: process.env.SCHEDULE_INFO_MONTHLY,
-        always: process.env.SCHEDULE_INFO_ALWAYS,
-        from: process.env.SCHEDULE_INFO_FROM,
-        oclock: process.env.SCHEDULE_INFO_HOUR,
-      },
-    }),
-    mode: "welocal-json",
-    outDir: "json",
-    filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
-  });
-  exporter
-    .write()
-    .toFTP()
-    .then((response) => {
-      console.log("[Export] exported to FTP");
-    });
-}
-
-// Each Day, we would like to export the repeats to txt
-// to pass this list to liquidsoap and manage repeats.
-// const exporter = new ScheduleExport({
-//   schedule: new BroadcastSchedule({
-//     dateStart: now.plus({ days: 0 }).set(midnight),
-//     dateEnd: now.plus({ days: 1 }).set(midnight),
-//     schema: schema,
-//     repeatPadding: 1,
-//   }).mergeSlots(),
-//   mode: "txt",
-//   outDir: "json",
-//   filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
-//   mp3Path: process.env.MP3_PATH,
-// });
-//
-// exporter.write((data: TimeGridPlaylist) =>
-//   data
-//     .filter((slot) => slot.repeatFrom)
-//     .map((slot) => slot.repeatFrom)
-//     .join(`\n`)
-// );
-
-const dataStartString = [
-  now.toFormat("yyyy-MM-dd"),
-  "T",
-  process.env.RECORDER_START_TIME,
-].join("");
-const dateStart = DateTime.fromISO(dataStartString);
-const dateEnd = dateStart.plus({
-  hours: Number(process.env.RECORDER_DURATION),
-});
-
-const schedule = new BroadcastSchedule({
-  dateStart: dateStart,
-  dateEnd: dateEnd,
-  schema: schema,
-  locale: process.env.SCHEDULE_LOCALE,
-  repeatShort: process.env.REPEAT_SHORT,
-  repeatLong: process.env.REPEAT_LONG,
-});
-
-const recorder = new BroadcastRecorder({
-  schedule,
-  outDir: process.env.MP3_PATH,
-  streamUrl: process.env.RECORDER_STREAM_URL,
-  filenamePrefix: process.env.FILENAME_PREFIX,
-  delay: 5,
-});
-
-console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
-console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
-
-const uploaderWelocal = new ApiConnectorWelocal({
-  token: process.env.WELOCAL_API_TOKEN,
-  baseUrl: process.env.WELOCAL_API_URL,
-  uploadFilePath: process.env.MP3_PATH,
-  logFile: "upload-welocal",
-  filePrefix: process.env.FILENAME_PREFIX,
-  fileSuffix: ".mp3",
-  schedule,
-});
-
-const uploaderNextcloud = new ApiConnectorNextcloud({
-  baseUrl: process.env.NEXTCLOUD_WEBDAV_URL,
-  username: process.env.NEXTCLOUD_WEBDAV_USER,
-  password: process.env.NEXTCLOUD_WEBDAV_PASSWORD,
-  targetDirectory: process.env.NEXTCLOUD_WEBDAV_DIRECTORY,
-});
-
-recorder.on("finished", async (sourceFile, slot) => {
-  const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-  uploaderWelocal.upload(uploadFile).then((resp) => {
-    console.log("[welocal] upload finished!");
-  });
-  uploaderNextcloud.upload(uploadFile).then((resp) => {
-    console.log("[nextcloud] upload finished!");
-  });
-});
-
-recorder.start().then((resp) => {
-  console.log("[Recorder] has finished!");
+console.log("[autopilot] ... starting ...");
+run().then((resp) => {
+  console.log("[autopilot] Startup completed");
 });

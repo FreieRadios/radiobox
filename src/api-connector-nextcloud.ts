@@ -37,13 +37,7 @@ export default class ApiConnectorNextcloud {
   async uploadToNextcloud(filePath: string) {
     const fileStream = fs.createReadStream(filePath);
     const fileName = path.basename(filePath);
-    const uploadUrl = [
-      this.baseUrl,
-      this.nextcloudUrlPart,
-      this.username,
-      this.targetDirectory,
-      fileName,
-    ].join("/");
+    const uploadUrl = this.getFileUrl(this.targetDirectory, fileName);
 
     return await axios.put(uploadUrl, fileStream, {
       headers: {
@@ -54,5 +48,38 @@ export default class ApiConnectorNextcloud {
         password: this.password,
       },
     });
+  }
+
+  async downloadFileFromNextcloud(
+    dirName: string,
+    fileName: string,
+    savePath: string
+  ) {
+    const fileUrl = this.getFileUrl(dirName, fileName);
+    const response = await axios.get(fileUrl, {
+      responseType: "stream",
+      auth: {
+        username: this.username,
+        password: this.password,
+      },
+    });
+
+    const writer = fs.createWriteStream(savePath);
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
+  }
+
+  getFileUrl(directoryName: string, fileName: string) {
+    return [
+      this.baseUrl,
+      this.nextcloudUrlPart,
+      this.username,
+      directoryName,
+      fileName,
+    ].join("/");
   }
 }

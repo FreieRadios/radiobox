@@ -148,9 +148,9 @@ export default class BroadcastSchedule {
   findScheduledBroadcast(schedules: Schedule[], timeSlot: DateTime) {
     return schedules.find(
       (schedule) =>
-        schedule.monthsOfYear.includes(timeSlot.month) &&
+        schedule.monthsOfYear?.includes(timeSlot.month) &&
         schedule.weekday === timeSlot.weekday &&
-        schedule.hoursOfDay.includes(timeSlot.hour) &&
+        schedule.hoursOfDay?.includes(timeSlot.hour) &&
         this.checkNthOfMonth(timeSlot, schedule.nthWeekdaysOfMonth)
     );
   }

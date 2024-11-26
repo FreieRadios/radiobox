@@ -5,7 +5,7 @@ schema/*
 !schema/example.xlsx
 
 # Dev only
-dev.ts
+# dev.ts
 
 # Logs
 logs

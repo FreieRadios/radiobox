@@ -1,5 +1,5 @@
 import { dataFromXlsx } from "./helper/files";
-import { Broadcast, BroadcastSchemaProps, Schedule, TimeSlot } from "./types";
+import { Broadcast, BroadcastSchemaProps, Schedule } from "./types";
 
 /*
  * Class to read a schema xlsx-file
@@ -54,7 +54,8 @@ export default class BroadcastSchema {
       .filter((row, r) => r > 0)
       .forEach((cols) => {
         if (cols.length > 1) {
-          broadcasts.push(this.broadcastFactory(cols));
+          const broadcast = this.broadcastFactory(cols);
+          broadcasts.push(broadcast);
         }
       });
 
@@ -87,7 +88,12 @@ export default class BroadcastSchema {
     const schedules = <Schedule[]>[];
     this.weekdayColIds.forEach((c, weekday) => {
       if (cols[c] && cols[c].trim().length) {
-        schedules.push(...this.parseCellJson(cols[c], weekday + 1, name));
+        try {
+          const schedule = this.parseCellJson(cols[c], weekday + 1, name);
+          schedules.push(...schedule);
+        } catch (e) {
+          console.error(`Could not parse schedule at "${name}": ${cols[c]}`);
+        }
       }
     });
     return schedules;
@@ -123,8 +129,7 @@ export default class BroadcastSchema {
     try {
       json = JSON.parse("{" + block + "}");
     } catch (e) {
-      console.error(e);
-      console.error(block);
+      throw "JSON parse error";
     }
     return json as Schedule;
   };

@@ -10,3 +10,23 @@ export const toDateTime = (arg: DateTimeInput, round?: boolean): DateTime => {
   }
   return dateTime;
 };
+
+export const midnight = {
+  hour: 0,
+  minute: 0,
+  second: 0,
+  millisecond: 0,
+};
+
+export const getDateStartEnd = (
+  startDay: string,
+  startTime: string,
+  hours: number
+) => {
+  const dataStartString = [startDay, "T", startTime].join("");
+  const dateStart = DateTime.fromISO(dataStartString);
+  const dateEnd = dateStart.plus({
+    hours,
+  });
+  return { dateStart, dateEnd };
+};
