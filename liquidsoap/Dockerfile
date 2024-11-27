@@ -4,8 +4,9 @@ USER root
 
 RUN mkdir -p /home/liquidsoap/radio
 
-COPY radio /home/liquidsoap/radio
-COPY .env /home/liquidsoap/radio
+COPY radiobox.liq /home/liquidsoap/radio
+COPY var.liq /home/liquidsoap/radio
+
 USER liquidsoap
 
 CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox.liq"]

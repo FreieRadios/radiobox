@@ -1,0 +1,15 @@
+services:
+  icecast:
+    image: moul/icecast
+    container_name: icecast2
+    volumes:
+      - ./logs:/var/log/icecast2
+      - /etc/localtime:/etc/localtime:ro
+      - ./icecast.xml:/etc/icecast2/icecast.xml
+    ports:
+      - 8000:8000
+    networks:
+      - radiobox_network
+networks:
+  radiobox_network:
+    driver: bridge

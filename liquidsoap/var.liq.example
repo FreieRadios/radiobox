@@ -1,0 +1,23 @@
+#!/usr/bin/liquidsoap
+
+harbor_port=4444
+harbor_user="user"
+harbor_password="changeme"
+
+radio_name="Radio XYZ"
+radio_desc="Your Free Radio Station"
+radio_genre="freestyle"
+radio_host="example.host.com"
+radio_url="http://#{radio_host}"
+
+# This is the container name
+icecast_host="icecast2"
+icecast_port=8000
+icecast_password="changeme"
+
+home_path="/tmp/liquidsoap"
+# log_path="#{home_path}/radio.log"
+repeats_txt_path="#{home_path}/json/program_repeats.txt"
+default_wav_path="#{home_path}/mp3/fallback.mp3"
+
+log("calling apply_metadata")

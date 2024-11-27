@@ -8,11 +8,6 @@ settings.log.file.path.set("/tmp/<script>.log")
 settings.log.stdout.set(true)
 log.level.set(4)
 
-home_path="/home/liquidsoap/radio"
-log_path="#{home_path}/radio.log"
-repeats_txt_path="#{home_path}/playlists/program_radio-z_repeats.txt"
-default_wav_path="#{home_path}/examples/fallback.mp3"
-
 settings.harbor.bind_addrs.set(["0.0.0.0"])
 
 # configure security input
@@ -45,31 +40,12 @@ live_harbor=blank.strip(
     )
 )
 
-# configure SRT input
-raw_srt_input=input.srt(
-    content_type="application/ffmpeg;format=s16le,channels=2,sample_rate=48000",
-    id="input_srt_master_stream",
-    passphrase=srt_password,
-    enforced_encryption=true,
-    port=srt_port
-)
-
-# process SRT input
-input_srt=blank.strip(
-    id="input_srt_blank_stripper",
-    stereo(
-        id="input_srt_stereo",
-        raw_srt_input
-    )
-)
-
 # main source switcher
 day=fallback(
     id="source_switcher_day",
     track_sensitive=false,
     [
         live_harbor,
-        # input_srt,
         security
     ]
 )

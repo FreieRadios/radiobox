@@ -4,6 +4,8 @@ mp3/*
 !mp3/fallback.mp3
 schema/*
 !schema/example.xlsx
+icecast/icecast.xml
+liquidsoap/var.liq
 
 # Dev only
 # dev.ts

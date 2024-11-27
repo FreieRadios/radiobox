@@ -1,0 +1,16 @@
+services:
+  liquidsoap:
+    build: ./
+    container_name: liquidsoap
+    ports:
+      - 4444:4444
+    restart: always
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - "./../mp3:/tmp/liquidsoap/mp3"
+      - "./../json:/tmp/liquidsoap/json"
+    networks:
+      - icecast_radiobox_network
+networks:
+  icecast_radiobox_network:
+    external: true
