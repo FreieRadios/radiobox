@@ -10,6 +10,8 @@ log.level.set(4)
 
 settings.harbor.bind_addrs.set(["0.0.0.0"])
 
+fallback_stream = mksafe(input.http(fallback_stream_url))
+
 # configure security input
 security = single(
     id="security_single",
@@ -46,11 +48,12 @@ day=fallback(
     track_sensitive=false,
     [
         live_harbor,
+        fallback_stream,
         security
     ]
 )
 
-repeats_playlist = playlist(mode="normal", reload=60, repeats_txt_path)
+repeats_playlist = playlist(mode="normal", reload=60, repeats_txt_file)
 repeats=fallback(
     id="source_switcher_repeats",
     track_sensitive=false,
@@ -60,12 +63,10 @@ repeats=fallback(
     ]
 )
 
-
 source_switcher= switch([
-	({2h-14h}, repeats),
-	({14h-2h}, day)
+	({2h-14h}, day),
+	({14h-2h}, repeats)
 ])
-
 
 # function that makes a safe radio
 def saferadio(radio, n) =

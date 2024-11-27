@@ -1,9 +1,38 @@
 services:
+  icecast:
+    image: moul/icecast
+    container_name: icecast2
+    volumes:
+      - ./icecast/logs:/var/log/icecast2
+      - /etc/localtime:/etc/localtime:ro
+      - ./icecast/icecast.xml:/etc/icecast2/icecast.xml
+    ports:
+      - 8000:8000
+    networks:
+      - radiobox_network
+  liquidsoap:
+    build: ./liquidsoap
+    container_name: liquidsoap
+    ports:
+      - 4444:4444
+    restart: always
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - "./mp3:/tmp/liquidsoap/mp3"
+      - "./json:/tmp/liquidsoap/json"
+    networks:
+      - radiobox_network
   radiobox:
     build: .
+    container_name: radiobox
     restart: always
     volumes:
       - "./logs:/app/logs"
       - "./mp3:/app/mp3"
       - "./schema:/app/schema"
       - "./json:/app/json"
+    networks:
+      - radiobox_network
+networks:
+  radiobox_network:
+    driver: bridge
