@@ -17,6 +17,7 @@ import {
 } from "../helper/files";
 import { DateTime } from "luxon";
 import crypto from "crypto";
+import { vd } from "../helper/helper";
 
 export default class ApiConnectorWelocal {
   token: string;
@@ -49,12 +50,13 @@ export default class ApiConnectorWelocal {
     };
 
     this.logFile = props.logFile;
+    this.logPath = getPath(this.logPath);
     this.logs = [];
     this.linkLogfile();
   }
 
   linkLogfile() {
-    const logFilePath = getPath(this.logPath) + "/" + this.logFile + ".json";
+    const logFilePath = this.logPath + "/" + this.logFile + ".json";
     if (fileExistsSync(logFilePath)) {
       try {
         this.logs = JSON.parse(fs.readFileSync(logFilePath).toString());

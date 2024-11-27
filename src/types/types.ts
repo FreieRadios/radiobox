@@ -93,6 +93,7 @@ export type ScheduleExportProps = {
   mode: "welocal-json" | "txt";
   outDir?: string;
   filenamePrefix?: string;
+  mp3Prefix?: string;
   mp3Path?: string;
 };
 

@@ -12,6 +12,7 @@ import {
 } from "./index";
 import { getDateStartEnd, midnight } from "./helper/date-time";
 import { Settings } from "luxon";
+import { TimeGridPlaylist } from "./types/types";
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -34,6 +35,17 @@ const run = async () => {
         console.log("[Export] exported to FTP");
       });
   }
+
+  // Create a txt file with repeat mp3 files for today
+  console.log("[autopilot] Create mp3 repeats .txt file ...");
+  getExporter(
+    getSchedule(
+      schema,
+      now.plus({ days: 0 }).set(midnight),
+      now.plus({ days: 1 }).set(midnight)
+    ).mergeSlots(),
+    "txt"
+  ).toTxt();
 
   const { dateStart, dateEnd } = getDateStartEnd(
     now.toFormat("yyyy-MM-dd"),

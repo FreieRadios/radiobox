@@ -27,6 +27,7 @@ export default class ScheduleExport {
   outDir: string;
   filenamePrefix: string;
   mp3Path: string;
+  mp3Prefix: string;
   mode: ScheduleExportProps["mode"];
 
   constructor(props: ScheduleExportProps) {
@@ -34,7 +35,8 @@ export default class ScheduleExport {
     this.mode = props.mode;
     this.outDir = getPath(props.outDir);
     this.filenamePrefix = props.filenamePrefix;
-    this.mp3Path = getPath(props.mp3Path);
+    this.mp3Path = props.mp3Path;
+    this.mp3Prefix = props.mp3Prefix;
   }
 
   getGrid() {
@@ -49,6 +51,10 @@ export default class ScheduleExport {
     ].join("_");
   }
 
+  getFilenameStart() {
+    return [this.filenamePrefix, this.schedule.dateStart.toISODate()].join("_");
+  }
+
   convert() {
     switch (this.mode) {
       case "txt":
@@ -56,18 +62,13 @@ export default class ScheduleExport {
           .filter((slot) => slot.matches.length > 0)
           .map((slot) => {
             const ret = {
-              filename: getFilename(
-                this.mp3Path,
-                this.filenamePrefix,
-                slot,
-                ".mp3"
-              ),
+              filename: getFilename(this.mp3Path, this.mp3Prefix, slot, ".mp3"),
               repeatFrom: null,
             };
             if (slot.repeatFrom) {
               ret.repeatFrom = getFilename(
                 this.mp3Path,
-                this.filenamePrefix,
+                this.mp3Prefix,
                 slot.repeatFrom,
                 ".mp3"
               );
@@ -146,13 +147,16 @@ export default class ScheduleExport {
     switch (this.mode) {
       case "welocal-json":
         writeJsonFile(this.outDir, this.getFilename(), writeData);
+        console.log("[export] Written file " + this.getFilename());
         break;
       case "txt":
-        writeFile(this.outDir, this.getFilename(), writeData, "txt");
+        writeFile(this.outDir, this.getFilenameStart(), writeData, "txt");
+        console.log("[export] Written file " + this.getFilenameStart());
         break;
       default:
         break;
     }
+
     return this;
   }
 
@@ -176,5 +180,14 @@ export default class ScheduleExport {
       console.log(err);
     }
     client.close();
+  }
+
+  toTxt() {
+    this.write((data: TimeGridPlaylist) =>
+      data
+        .filter((slot) => slot.repeatFrom)
+        .map((slot) => slot.repeatFrom)
+        .join(`\n`)
+    );
   }
 }

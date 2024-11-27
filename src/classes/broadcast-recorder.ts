@@ -1,4 +1,4 @@
-import { DateTime, Settings } from "luxon";
+import { DateTime } from "luxon";
 import {
   BroadcastRecorderEventListener,
   BroadcastRecorderEvents,
@@ -7,7 +7,7 @@ import {
 } from "../types/types";
 import BroadcastSchedule from "./broadcast-schedule";
 import ffmpeg from "fluent-ffmpeg";
-import { sleep, timeFormats, vd } from "../helper/helper";
+import { sleep, timeFormats } from "../helper/helper";
 import { getFilename, getPath } from "../helper/files";
 import { toDateTime } from "../helper/date-time";
 import * as fs from "node:fs";
@@ -87,6 +87,7 @@ export default class BroadcastRecorder {
           currentSlot,
           this.filenameSuffix
         );
+
         try {
           this.writeStreamToFile(
             outputFile,
@@ -95,12 +96,12 @@ export default class BroadcastRecorder {
             Math.round(seconds)
           );
         } catch (e) {
-          throw "Could not write stream to file";
+          console.error("[recorder] Error while writing stream to file");
         }
-
         await sleep(seconds * 1000);
       }
     } else {
+      console.log("[recorder] sleeping for " + this.pollingInterval);
       await sleep(this.pollingInterval);
     }
   }
@@ -114,13 +115,17 @@ export default class BroadcastRecorder {
     const delay = this.delay || 0;
     const partSuffix = "-part.mp3";
 
-    const title = currentSlot.broadcast.getTitle(currentSlot, [
-      "name",
-      "startEndTime",
-      "startDate",
-    ]);
+    const title = currentSlot.broadcast.getTitle(
+      currentSlot,
+      ["name", "startEndTime", "info_0"],
+      " - "
+    );
     const genre = currentSlot.broadcast.getTitle(currentSlot, ["info_1"]);
-    const album = currentSlot.broadcast.getTitle(currentSlot, ["info_0"]);
+    const album = currentSlot.broadcast.getTitle(
+      currentSlot,
+      ["info_0", "startDate", "startEndTime"],
+      " "
+    );
     const date = currentSlot.broadcast.getTitle(currentSlot, ["date"]);
     const artist = currentSlot.broadcast.getTitle(currentSlot, ["station"]);
 
@@ -153,8 +158,15 @@ export default class BroadcastRecorder {
         fs.renameSync(targetFile + partSuffix, targetFile);
         await this.onFinished(targetFile, currentSlot, now, seconds);
       })
+      // .on("stderr", (line) => console.log(`FFmpeg STDERR: ${line}`))
+      // .on("progress", function (progress) {
+      //   console.log(progress);
+      //   console.log("Processing: " + progress.percent + "% done");
+      // })
       .on("error", function (err, stdout, stderr) {
-        throw "[ffmpeg] Cannot process: " + err.message;
+        console.error(stderr);
+        console.error("[ffmpeg] Cannot process: " + err.message);
+        throw new Error("[ffmpeg] Error during recording");
       });
 
     tmpFfmpeg.run();

@@ -1,8 +1,4 @@
 import "dotenv/config";
-
-import BroadcastSchema from "./classes/broadcast-schema";
-import BroadcastSchedule from "./classes/broadcast-schedule";
-import ScheduleExport from "./classes/schedule-export";
 import { TimeGridPlaylist } from "./types/types";
 import { DateTime } from "luxon";
 import { getExporter, getSchedule, getSchema } from "./index";
