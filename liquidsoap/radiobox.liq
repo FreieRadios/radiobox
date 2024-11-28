@@ -192,4 +192,28 @@ output.icecast(
     start=true
 )
 
-%include "output.liq"
+# Legacy URL
+output.icecast(
+    id="output_icecast_mp3_legacy",
+    %ffmpeg(
+        format="mp3",
+        %audio(
+            codec="libmp3lame",
+            b="320k"
+        )
+    ),
+    radio_mp3,
+    host=icecast_host,
+    port=icecast_port,
+    password=icecast_password,
+    mount="/#{radio_legacy_mount}",
+    name="#{radio_name} (MP3)",
+    genre=radio_genre,
+    description=radio_desc,
+    url="#{radio_url}/#{radio_legacy_mount}",
+    send_icy_metadata=true,
+    encoding="UTF-8",
+    format="audio/mpeg",
+    start=true
+    max_listeners=100
+)
