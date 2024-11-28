@@ -59,13 +59,15 @@ repeats=fallback(
     track_sensitive=false,
     [
         repeats_playlist,
+        live_harbor,
+        fallback_stream,
         security
     ]
 )
 
 source_switcher= switch([
-	({2h-14h}, day),
-	({14h-2h}, repeats)
+	({2h-14h}, repeats),
+	({14h-2h}, day)
 ])
 
 # function that makes a safe radio
