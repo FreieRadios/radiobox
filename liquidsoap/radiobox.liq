@@ -191,3 +191,5 @@ output.icecast(
     format="audio/ogg",
     start=true
 )
+
+%include "output.liq"
