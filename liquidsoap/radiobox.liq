@@ -249,3 +249,37 @@ output.icecast(
     format="audio/mpeg",
     start=true
 )
+
+# Play random file from archive
+radio_archive = playlist(archive_dir)
+live_archive_secure=fallback(
+    id="source_switcher_harbor",
+    [
+        radio_archive,
+        security
+    ]
+)
+
+output.icecast(
+    id="output_icecast_mp3_archive",
+    %ffmpeg(
+        format="mp3",
+        %audio(
+            codec="libmp3lame",
+            b="320k"
+        )
+    ),
+    live_archive_secure,
+    host=icecast_host,
+    port=icecast_port,
+    password=icecast_password,
+    mount="/archive",
+    name="#{radio_name} Archive (MP3)",
+    genre=radio_genre,
+    description=radio_desc,
+    url="#{radio_url}/archive",
+    send_icy_metadata=true,
+    encoding="UTF-8",
+    format="audio/mpeg",
+    start=true
+)

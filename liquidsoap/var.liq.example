@@ -19,6 +19,7 @@ fallback_stream_url="http://xx.xx.xx.xx/service"
 home_path="/tmp/liquidsoap"
 repeats_txt_path="#{home_path}/json/program_repeats.txt"
 default_wav_path="#{home_path}/mp3/fallback.mp3"
+archive_dir="#{home_path}/mp3/Archiv"
 radio_legacy_mount="Radio-XYZ"
 
 # log_path="#{home_path}/radio.log"
