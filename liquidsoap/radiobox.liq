@@ -6,7 +6,7 @@
 # Logging configuration to stdout and to the file
 settings.log.file.path.set("/tmp/<script>.log")
 settings.log.stdout.set(true)
-log.level.set(4)
+log.level.set(2)
 
 settings.harbor.bind_addrs.set(["0.0.0.0"])
 
@@ -59,8 +59,6 @@ repeats=fallback(
     track_sensitive=false,
     [
         repeats_playlist,
-        live_harbor,
-        fallback_stream,
         security
     ]
 )
@@ -213,6 +211,39 @@ output.icecast(
     genre=radio_genre,
     description=radio_desc,
     url="#{radio_url}/#{radio_legacy_mount}",
+    send_icy_metadata=true,
+    encoding="UTF-8",
+    format="audio/mpeg",
+    start=true
+)
+
+# Harbor direct throughput
+live_harbor_secure=fallback(
+    id="source_switcher_harbor",
+    [
+        live_harbor,
+        security
+    ]
+)
+
+output.icecast(
+    id="output_icecast_mp3_harbor",
+    %ffmpeg(
+        format="mp3",
+        %audio(
+            codec="libmp3lame",
+            b="320k"
+        )
+    ),
+    live_harbor_secure,
+    host=icecast_host,
+    port=icecast_port,
+    password=icecast_password,
+    mount="/harbor",
+    name="#{radio_name} Harbor (MP3)",
+    genre=radio_genre,
+    description=radio_desc,
+    url="#{radio_url}/harbor",
     send_icy_metadata=true,
     encoding="UTF-8",
     format="audio/mpeg",
