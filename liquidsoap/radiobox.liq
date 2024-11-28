@@ -215,5 +215,4 @@ output.icecast(
     encoding="UTF-8",
     format="audio/mpeg",
     start=true
-    max_listeners=100
 )
