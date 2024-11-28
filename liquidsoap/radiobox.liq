@@ -6,7 +6,7 @@
 # Logging configuration to stdout and to the file
 settings.log.file.path.set("/tmp/<script>.log")
 settings.log.stdout.set(true)
-log.level.set(2)
+log.level.set(1)
 
 settings.harbor.bind_addrs.set(["0.0.0.0"])
 
