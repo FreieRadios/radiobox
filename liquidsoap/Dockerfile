@@ -9,4 +9,4 @@ COPY var.liq /home/liquidsoap/radio
 
 USER liquidsoap
 
-CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox.liq"]
+CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox-light.liq"]
