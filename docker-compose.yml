@@ -27,6 +27,7 @@ services:
     container_name: radiobox
     restart: always
     volumes:
+      - /etc/localtime:/etc/localtime:ro
       - "./logs:/app/logs"
       - "./mp3:/app/mp3"
       - "./schema:/app/schema"

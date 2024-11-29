@@ -78,6 +78,7 @@ export default class BroadcastRecorder {
     const currentSlot = this.schedule.findByDateStart(now);
     if (currentSlot) {
       const remaining = now.until(currentSlot.end);
+      // const seconds = 10;
       const seconds = remaining.length("seconds");
 
       if (seconds > 0) {
@@ -132,6 +133,7 @@ export default class BroadcastRecorder {
     const tmpFfmpeg = ffmpeg(this.streamUrl)
       .outputOptions(`-ss ${delay}`)
       .outputOptions(`-t ${seconds}`)
+      .outputOptions(`-b:a 256k`)
       .outputOptions("-metadata", "title=" + title)
       .outputOptions("-metadata", "album=" + album)
       .outputOptions("-metadata", "genre=" + genre)

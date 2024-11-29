@@ -37,15 +37,15 @@ const run = async () => {
   }
 
   // Create a txt file with repeat mp3 files for today
-  console.log("[autopilot] Create mp3 repeats .txt file ...");
-  getExporter(
-    getSchedule(
-      schema,
-      now.plus({ days: 0 }).set(midnight),
-      now.plus({ days: 1 }).set(midnight)
-    ).mergeSlots(),
-    "txt"
-  ).toTxt();
+  // console.log("[autopilot] Create mp3 repeats .txt file ...");
+  // getExporter(
+  //   getSchedule(
+  //     schema,
+  //     now.plus({ days: 0 }).set(midnight),
+  //     now.plus({ days: 1 }).set(midnight)
+  //   ).mergeSlots(),
+  //   "txt"
+  // ).toTxt();
 
   const { dateStart, dateEnd } = getDateStartEnd(
     now.toFormat("yyyy-MM-dd"),
@@ -66,9 +66,14 @@ const run = async () => {
     uploaderWelocal.upload(uploadFile).then((resp) => {
       console.log("[welocal] upload finished!");
     });
-    uploaderNextcloud.upload(uploadFile).then((resp) => {
-      console.log("[nextcloud] upload finished!");
-    });
+    uploaderNextcloud
+      .upload(uploadFile)
+      .then((resp) => {
+        console.log("[nextcloud] upload finished!");
+      })
+      .catch((err) => {
+        console.error(err);
+      });
   });
 
   recorder.start().then((resp) => {
