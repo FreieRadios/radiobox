@@ -9,10 +9,9 @@ import {
   getSchedule,
   getSchema,
   getWelocal,
+  updateStreamMeta,
 } from "./index";
 import { getDateStartEnd, midnight } from "./helper/date-time";
-import { Settings } from "luxon";
-import { TimeGridPlaylist } from "./types/types";
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -20,6 +19,8 @@ const run = async () => {
 
   const now = DateTime.now();
   const schema = getSchema();
+
+  updateStreamMeta(schema, 10000);
 
   if (now.weekday === 1) {
     // Each Monday, we would like to export the schedule to FTP

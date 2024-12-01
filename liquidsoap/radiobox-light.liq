@@ -6,7 +6,10 @@
 # Logging configuration to stdout and to the file
 settings.log.file.path.set("/tmp/<script>.log")
 settings.log.stdout.set(true)
-log.level.set(2)
+log.level.set(3)
+
+settings.osc.port.set(44444)
+log(">>>> OSC Port #{settings.osc.port()}")
 
 fallback_stream = mksafe(input.http(fallback_stream_url))
 
@@ -39,6 +42,20 @@ radio_mp3=saferadio(
     "mp3"
 )
 
+# Create a source with a `insert_metadata` method
+radio_mp3_meta = insert_metadata(radio_mp3)
+
+# Handler for OSC events (gets pairs of strings)
+def on_meta(m) =
+  label = fst(m)
+  value = snd(m)
+  radio_mp3_meta.insert_metadata([(label,value)])
+end
+
+# Call the above handler when we have a pair of strings on /metadata
+osc.on_string_pair("/metadata",on_meta)
+
+
 output.icecast(
     id="output_icecast_mp3",
     %ffmpeg(
@@ -48,7 +65,7 @@ output.icecast(
             b="320k"
         )
     ),
-    radio_mp3,
+    radio_mp3_meta,
     host=icecast_host,
     port=icecast_port,
     password=icecast_password,
@@ -73,7 +90,7 @@ output.icecast(
             b="320k"
         )
     ),
-    radio_mp3,
+    radio_mp3_meta,
     host=icecast_host,
     port=icecast_port,
     password=icecast_password,

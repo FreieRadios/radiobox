@@ -8,6 +8,9 @@ import ApiConnectorNextcloud from "./classes/api-connector-nextcloud";
 import ApiConnectorWelocal from "./classes/api-connector-welocal";
 import { DateTimeInput } from "./types/types";
 import { getPath } from "./helper/files";
+import { DateTime } from "luxon";
+import { Client } from "node-osc";
+import slugify from "slugify";
 
 export const getNextcloud = () => {
   return new ApiConnectorNextcloud({
@@ -115,4 +118,59 @@ export const fetchSchemaFromNextcloud = async () => {
       console.error(e);
       console.error("[nextcloud] Error fetching schema!");
     });
+};
+
+/*
+ * Updates stream meta text by interval
+ * Use current broadcast name and caption and sends an ocs request
+ * to liquidsoap
+ *
+ * There's a problem with VLC UTF-8 decoding, need to slugify the string.
+ */
+export const updateStreamMeta = (schema: BroadcastSchema, interval: number) => {
+  const client = new Client("liquidsoap", 44444);
+
+  let count = -1;
+  const claim = process.env.META_STATION_CLAIM;
+  const staticText = [...claim.split(" | "), "dyn:Title"];
+  const max = staticText.length;
+
+  setInterval(() => {
+    const now = DateTime.now();
+    const nowPlaying = getSchedule(schema, now, now.plus({ hours: 1 }));
+    const nowGrid = nowPlaying.getGrid();
+
+    if (nowGrid.length) {
+      count++;
+
+      const nowBroadcast = nowGrid[0].broadcast;
+      const nowTitle = nowBroadcast.name;
+      const nowCaption = nowBroadcast.info[0];
+
+      staticText[max - 1] = nowTitle.replaceAll("-", " ");
+      staticText[max] = nowCaption.replaceAll("-", " ");
+
+      const useString = staticText[count];
+
+      if (count === max) {
+        count = -1;
+      }
+
+      client.send(
+        {
+          address: "/metadata",
+          args: [
+            { type: "string", value: "title" },
+            {
+              type: "string",
+              value: useString,
+            },
+          ],
+        },
+        (err) => {
+          if (err) console.error(err);
+        }
+      );
+    }
+  }, interval);
 };
