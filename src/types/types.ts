@@ -16,6 +16,7 @@ export type BroadcastRecorderProps = {
   filenamePrefix?: string;
   ignoreRepeats?: boolean;
   delay?: number;
+  bitrate?: number;
 };
 
 export type BroadcastRecorderEventListener = (

@@ -62,23 +62,49 @@ output.icecast(
         format="mp3",
         %audio(
             codec="libmp3lame",
-            b="320k"
+            b="256k"
         )
     ),
     radio_mp3_meta,
     host=icecast_host,
     port=icecast_port,
     password=icecast_password,
-    mount="/stream.mp3",
-    name="#{radio_name} (MP3)",
+    mount="/live",
+    name="#{radio_name} #{radio_desc}",
     genre=radio_genre,
     description=radio_desc,
-    url="#{radio_url}/stream.mp3",
+    url="#{radio_url}/live",
     send_icy_metadata=true,
     encoding="UTF-8",
     format="audio/mpeg",
     start=true
 )
+
+
+output.icecast(
+    id="output_icecast_mp3",
+    %ffmpeg(
+        format="mp3",
+        %audio(
+            codec="libmp3lame",
+            b="128k"
+        )
+    ),
+    radio_mp3_meta,
+    host=icecast_host,
+    port=icecast_port,
+    password=icecast_password,
+    mount="/live-128k",
+    name="#{radio_name} #{radio_desc}",
+    genre=radio_genre,
+    description=radio_desc,
+    url="#{radio_url}/live-128k",
+    send_icy_metadata=true,
+    encoding="UTF-8",
+    format="audio/mpeg",
+    start=true
+)
+
 
 # Legacy URL
 output.icecast(
@@ -87,7 +113,7 @@ output.icecast(
         format="mp3",
         %audio(
             codec="libmp3lame",
-            b="320k"
+            b="256k"
         )
     ),
     radio_mp3_meta,

@@ -81,6 +81,7 @@ export const getRecorder = (schedule: BroadcastSchedule) => {
     outDir: process.env.MP3_PATH,
     streamUrl: process.env.RECORDER_STREAM_URL,
     delay: Number(process.env.RECORDER_STREAM_DELAY),
+    bitrate: Number(process.env.RECORDER_BITRATE),
     filenamePrefix: process.env.FILENAME_PREFIX,
   });
 };

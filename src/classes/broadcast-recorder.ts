@@ -26,6 +26,7 @@ export default class BroadcastRecorder {
   dateEnd: DateTime;
   filenameSuffix = ".mp3";
   pollingInterval = 1000; //ms
+  bitrate = 256; //ms
   // delay each recording by
   delay = 0; // seconds
   events: BroadcastRecorderEvents = {
@@ -53,6 +54,9 @@ export default class BroadcastRecorder {
 
     if (props.delay) {
       this.delay = props.delay;
+    }
+    if (props.bitrate) {
+      this.bitrate = props.bitrate;
     }
 
     this.schedule.mergeSlots();
@@ -133,7 +137,7 @@ export default class BroadcastRecorder {
     const tmpFfmpeg = ffmpeg(this.streamUrl)
       .outputOptions(`-ss ${delay}`)
       .outputOptions(`-t ${seconds}`)
-      .outputOptions(`-b:a 256k`)
+      .outputOptions(`-b:a ${this.bitrate}k`)
       .outputOptions("-metadata", "title=" + title)
       .outputOptions("-metadata", "album=" + album)
       .outputOptions("-metadata", "genre=" + genre)
