@@ -10,7 +10,7 @@ import { DateTimeInput } from "./types/types";
 import { getPath } from "./helper/files";
 import { DateTime } from "luxon";
 import { Client } from "node-osc";
-import slugify from "slugify";
+import { midnight } from "./helper/date-time";
 
 export const getNextcloud = () => {
   return new ApiConnectorNextcloud({
@@ -121,14 +121,54 @@ export const fetchSchemaFromNextcloud = async () => {
     });
 };
 
+export const putSchemaToFTP = (
+  schema: BroadcastSchema,
+  now: DateTime,
+  week: number
+) => {
+  const startDay = week * 7;
+  const endDay = startDay + 7;
+  const schedule = getSchedule(
+    schema,
+    now.plus({ days: startDay }).set(midnight),
+    now.plus({ days: endDay }).set(midnight)
+  );
+  getExporter(schedule, "welocal-json")
+    .write()
+    .toFTP()
+    .then((response) => {
+      console.log("[Export] exported to FTP");
+    });
+};
+
+// Create a txt file with repeat mp3 files for today
+// WIP
+export const listRepeats = (
+  schema: BroadcastSchema,
+  now: DateTime,
+  week: number
+) => {
+  console.log("[autopilot] Create mp3 repeats .txt file ...");
+  getExporter(
+    getSchedule(
+      schema,
+      now.plus({ days: 0 }).set(midnight),
+      now.plus({ days: 1 }).set(midnight)
+    ).mergeSlots(),
+    "txt"
+  ).toTxt();
+};
+
 /*
  * Updates stream meta text by interval
  * Use current broadcast name and caption and sends an ocs request
  * to liquidsoap
- *
- * There's a problem with VLC UTF-8 decoding, need to slugify the string.
  */
-export const updateStreamMeta = (schema: BroadcastSchema, interval: number) => {
+export const updateStreamMeta = (
+  schema: BroadcastSchema,
+  interval: number,
+  dateEnd: DateTime
+) => {
   const client = new Client("liquidsoap", 44444);
 
   let count = -1;
@@ -136,8 +176,17 @@ export const updateStreamMeta = (schema: BroadcastSchema, interval: number) => {
   const staticText = [...claim.split(" | "), "dyn:Title"];
   const max = staticText.length;
 
-  setInterval(() => {
+  const updateInterval = setInterval(() => {
     const now = DateTime.now();
+
+    if (now >= dateEnd) {
+      clearInterval(updateInterval);
+      console.log("[autopilot] Stopped OSC update stream meta.");
+      return;
+    } else {
+      console.log(now.toUnixInteger() - dateEnd.toUnixInteger());
+    }
+
     const nowPlaying = getSchedule(schema, now, now.plus({ hours: 1 }));
     const nowGrid = nowPlaying.getGrid();
 

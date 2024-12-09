@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import nodeXlsx from "node-xlsx";
-import { TimeSlot } from "../types/types";
+import { TimeSlot, UploadFile } from "../types/types";
 import slugify from "slugify";
 import { timeFormats } from "./helper";
 import * as process from "node:process";
@@ -78,4 +78,14 @@ export const getFilename = (
     ].join("-") +
       fileSuffix)
   );
+};
+
+export const cleanupFile = (uploadFile: UploadFile) => {
+  fs.unlink(uploadFile.sourceFile, (err) => {
+    if (err) {
+      console.error(err);
+    } else {
+      console.log("[autopilot] upload file was deleted.");
+    }
+  });
 };

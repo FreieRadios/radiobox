@@ -160,9 +160,9 @@ export default class ScheduleExport {
     return this;
   }
 
-  async toFTP() {
+  async toFTP(verbose?) {
     const client = new Client();
-    client.ftp.verbose = true;
+    client.ftp.verbose = verbose || false;
     const sourceFile = `${this.outDir}/${this.getFilename()}.json`;
     const targetFile = `${
       process.env.FTP_REMOTE_PATH
