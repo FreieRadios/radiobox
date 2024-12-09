@@ -130,6 +130,12 @@
 
     <!-- Default settings for all mounts that don't have a specific <mount type="normal">.
     -->
+
+    <mount type="default">
+        <charset>UTF-8</charset>
+        <max-listeners>500</max-listeners>
+    </mount>
+
     <!--
     <mount type="default">
         <public>0</public>
