@@ -183,8 +183,6 @@ export const updateStreamMeta = (
       clearInterval(updateInterval);
       console.log("[autopilot] Stopped OSC update stream meta.");
       return;
-    } else {
-      console.log(now.toUnixInteger() - dateEnd.toUnixInteger());
     }
 
     const nowPlaying = getSchedule(schema, now, now.plus({ hours: 1 }));
