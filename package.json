@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@types/node-osc": "^6.0.3",
-    "axios": "^1.7.4",
+    "axios": "^1.8.2",
     "basic-ftp": "^5.0.5",
     "dotenv": "^16.4.5",
     "fluent-ffmpeg": "^2.1.3",
