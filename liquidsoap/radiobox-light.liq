@@ -4,14 +4,14 @@
 %include "var.liq"
 
 # Logging configuration to stdout and to the file
-settings.log.file.path.set("/tmp/<script>.log")
+settings.log.file.path.set("#{home_path}/logs/<script>.log")
 settings.log.stdout.set(true)
 log.level.set(3)
 
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
 
-fallback_stream = mksafe(input.http(fallback_stream_url))
+main_stream = input.http(main_stream_url, timeout=3.0)
 
 # configure security input
 security = single(
@@ -20,26 +20,13 @@ security = single(
 )
 
 # main source switcher
-day=fallback(
+radio_mp3=fallback(
     id="source_switcher_day",
     track_sensitive=false,
     [
-        fallback_stream,
+        main_stream,
         security
     ]
-)
-
-# function that makes a safe radio
-def saferadio(radio, n) =
-    mksafe(
-        id="radio_mksafe_#{n}",
-        radio
-    )
-end
-
-radio_mp3=saferadio(
-    day,
-    "mp3"
 )
 
 # Create a source with a `insert_metadata` method
@@ -54,7 +41,6 @@ end
 
 # Call the above handler when we have a pair of strings on /metadata
 osc.on_string_pair("/metadata",on_meta)
-
 
 output.icecast(
     id="output_icecast_mp3",

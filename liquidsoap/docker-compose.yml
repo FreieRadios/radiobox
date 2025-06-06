@@ -9,6 +9,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - "./../mp3:/tmp/liquidsoap/mp3"
       - "./../json:/tmp/liquidsoap/json"
+      - "./logs:/tmp/liquidsoap/logs"
     networks:
       - icecast_radiobox_network
 networks:

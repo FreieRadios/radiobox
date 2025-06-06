@@ -10,6 +10,7 @@ services:
       - 8000:8000
     networks:
       - radiobox_network
+    restart: always
   liquidsoap:
     build: ./liquidsoap
     container_name: liquidsoap
@@ -20,6 +21,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - "./mp3:/tmp/liquidsoap/mp3"
       - "./json:/tmp/liquidsoap/json"
+      - "./liquidsoap/logs:/tmp/liquidsoap/logs"
     networks:
       - radiobox_network
   radiobox:
