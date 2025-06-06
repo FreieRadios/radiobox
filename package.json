@@ -8,8 +8,10 @@
     "@types/jest": "^29.5.12",
     "@types/luxon": "^3.4.2",
     "@types/node": "^20.14.9",
+    "@types/prettier": "^3.0.0",
     "jest": "^29.7.0",
     "nodemon": "^3.1.4",
+    "prettier": "^3.5.3",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.3"
@@ -25,7 +27,9 @@
     "dev:autopilot": "nodemon -e ts --exec 'ts-node' src/autopilot.ts",
     "start:autopilot": "node dist/autopilot",
     "test": "npx jest",
-    "test-coverage": "npx jest --coverage"
+    "test-coverage": "npx jest --coverage",
+    "format": "prettier --write \"src/**/*.{js,ts,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{js,ts,json,md}\""
   },
   "dependencies": {
     "@types/node-osc": "^6.0.3",

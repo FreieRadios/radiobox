@@ -1,26 +1,59 @@
-import "dotenv/config";
-import { TimeGridPlaylist } from "./types/types";
 import { DateTime } from "luxon";
-import { getExporter, getSchedule, getSchema } from "./index";
-import { midnight } from "./helper/date-time";
+import "dotenv/config";
+import { timeFormats } from "./helper/helper";
+import {
+  fetchSchemaFromNextcloud,
+  getNextcloud,
+  getRecorder,
+  getSchedule,
+  getSchema,
+  getWelocal,
+  putSchemaToFTP,
+  updateStreamMeta,
+} from "./index";
+import { getDateStartEnd } from "./helper/date-time";
+import * as process from "node:process";
+import { cleanupFile } from "./helper/files";
 
-const schema = getSchema();
+const run = async () => {
+  console.log(`[autopilot] Current dir is ${__dirname}`);
+  console.log(`[autopilot] Current dir is ${__dirname}`);
+  await fetchSchemaFromNextcloud();
 
-const now = DateTime.now();
+  const now = DateTime.now();
+  const schema = getSchema();
 
-// Play around with repeat filename export
-const exporter = getExporter(
-  getSchedule(
-    schema,
-    now.plus({ days: 0 }).set(midnight),
-    now.plus({ days: 1 }).set(midnight)
-  ).mergeSlots(),
-  "txt"
-);
+  if (now.weekday === 1) {
+    // Each Monday, we want to export the schedule to FTP
+    [0, 1, 2, 3].forEach((week) => {
+      putSchemaToFTP(schema, now, week);
+    });
+  }
 
-exporter.write((data: TimeGridPlaylist) =>
-  data
-    .filter((slot) => slot.repeatFrom)
-    .map((slot) => slot.repeatFrom)
-    .join(`\n`)
-);
+  const { dateStart, dateEnd } = getDateStartEnd(
+  now.toFormat("yyyy-MM-dd"),
+  process.env.RECORDER_START_TIME,
+  Number(process.env.RECORDER_DURATION)
+  );
+
+  updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
+
+  console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
+  console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
+
+  const schedule = getSchedule(schema, dateStart, dateEnd);
+  const recorder = getRecorder(schedule);
+
+  const uploaderWelocal = getWelocal(schedule);
+
+  const uploadFile = ''
+    uploaderWelocal.upload(uploadFile).then((resp) => {
+      console.log("[welocal] upload finished!");
+    });
+
+};
+
+console.log("[autopilot] ... starting ...");
+run().then((resp) => {
+  console.log("[autopilot] Startup completed");
+});
