@@ -37,7 +37,7 @@ const run = async () => {
     Number(process.env.RECORDER_DURATION)
   );
 
-  // updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
+  updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
 
   console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
   console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
@@ -51,20 +51,20 @@ const run = async () => {
   recorder.on("finished", async (sourceFile, slot) => {
     copyFile(sourceFile, process.env.REPEAT_PATH)
 
-    // const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-    // uploaderWelocal.upload(uploadFile).then((resp) => {
-    //   console.log("[welocal] upload finished!");
-    //
-    //   uploaderNextcloud
-    //     .upload(uploadFile)
-    //     .then((resp) => {
-    //       console.log("[nextcloud] upload finished!");
-    //       cleanupFile(uploadFile);
-    //     })
-    //     .catch((err) => {
-    //       console.error(err);
-    //     });
-    // });
+    const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+    uploaderWelocal.upload(uploadFile).then((resp) => {
+      console.log("[welocal] upload finished!");
+
+      uploaderNextcloud
+        .upload(uploadFile)
+        .then((resp) => {
+          console.log("[nextcloud] upload finished!");
+          cleanupFile(uploadFile);
+        })
+        .catch((err) => {
+          console.error(err);
+        });
+    });
   });
 
   recorder.start().then((resp) => {
