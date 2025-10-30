@@ -22,8 +22,6 @@ const run = async () => {
   const now = DateTime.now();
   const schema = getSchema();
 
-  writeRepeatsPlaylist(schema, now)
-
   if ([1,3,5,6].includes(now.weekday)) {
     // Every second day, we want to export the schedule to FTP
     [0, 1, 2, 3].forEach((week) => {
@@ -48,23 +46,28 @@ const run = async () => {
   const uploaderWelocal = getWelocal(schedule);
   const uploaderNextcloud = getNextcloud();
 
+  recorder.on("startup", async () => {
+    // Export m3u for the next day
+    writeRepeatsPlaylist(schema, now)
+  })
+
   recorder.on("finished", async (sourceFile, slot) => {
-    copyFile(sourceFile, process.env.REPEAT_PATH)
-
-    const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-    uploaderWelocal.upload(uploadFile).then((resp) => {
-      console.log("[welocal] upload finished!");
-
-      uploaderNextcloud
-        .upload(uploadFile)
-        .then((resp) => {
-          console.log("[nextcloud] upload finished!");
-          cleanupFile(uploadFile);
-        })
-        .catch((err) => {
-          console.error(err);
-        });
-    });
+    copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
+    //
+    // const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+    // uploaderWelocal.upload(uploadFile).then((resp) => {
+    //   console.log("[welocal] upload finished!");
+    //
+    //   uploaderNextcloud
+    //     .upload(uploadFile)
+    //     .then((resp) => {
+    //       console.log("[nextcloud] upload finished!");
+    //       cleanupFile(uploadFile);
+    //     })
+    //     .catch((err) => {
+    //       console.error(err);
+    //     });
+    // });
   });
 
   recorder.start().then((resp) => {

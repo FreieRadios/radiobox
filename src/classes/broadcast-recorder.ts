@@ -31,6 +31,7 @@ export default class BroadcastRecorder {
   // delay each recording by
   delay = 0; // seconds
   events: BroadcastRecorderEvents = {
+    startup: [],
     finished: [],
   };
 
@@ -65,6 +66,7 @@ export default class BroadcastRecorder {
 
   async start() {
     await this.waitUntilStart();
+    await this.onStartup(DateTime.now())
     while (DateTime.now() <= this.dateEnd) {
       await this.checkRecording();
     }
@@ -296,6 +298,14 @@ export default class BroadcastRecorder {
         reject(err);
       });
     });
+  }
+
+  async onStartup(
+    startedAt: DateTime,
+  ) {
+    for (const listener of this.events.startup) {
+      await listener(null, null, startedAt, null, this);
+    }
   }
 
   async onFinished(

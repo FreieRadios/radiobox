@@ -27,6 +27,7 @@ export type BroadcastRecorderEventListener = (
   parent: BroadcastRecorder
 ) => Promise<void>;
 export type BroadcastRecorderEvents = {
+  startup: BroadcastRecorderEventListener[];
   finished: BroadcastRecorderEventListener[];
 };
 
@@ -95,8 +96,8 @@ export type ScheduleExportProps = {
   outDir?: string;
   filenamePrefix?: string;
   mp3Prefix?: string;
-  mp3Path?: string;
-  repeatPath?: string;
+  basePath?: string;
+  repeatFolder?: string;
 };
 
 export type AudioUploadProps = {

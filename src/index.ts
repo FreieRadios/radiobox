@@ -95,8 +95,8 @@ export const getExporter = (schedule: BroadcastSchedule, mode: ScheduleExportPro
     outDir,
     filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
     mp3Prefix: process.env.FILENAME_PREFIX,
-    mp3Path: process.env.EXPORTER_MP3_PATH,
-    repeatPath: process.env.REPEAT_PATH,
+    basePath: process.env.EXPORTER_BASE_PATH,
+    repeatFolder: process.env.EXPORTER_REPEAT_FOLDER,
   });
 };
 
@@ -144,12 +144,12 @@ export const putSchemaToFTP = (
     });
 };
 
-// Create a txt file with repeat mp3 files for today
+// Create a m3u file with repeat mp3 files for today
 export const writeRepeatsPlaylist = (
   schema: BroadcastSchema,
   now: DateTime,
 ) => {
-  console.log("[autopilot] Create mp3 repeats .txt file ...");
+  console.log("[autopilot] Create mp3 repeats .m3u file ...");
   getExporter(
     getSchedule(
       schema,
@@ -158,7 +158,7 @@ export const writeRepeatsPlaylist = (
     ).mergeSlots(),
     "m3u",
     "repeat"
-  ).toTxt();
+  ).toM3U(true);
 };
 
 /*
