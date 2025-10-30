@@ -171,6 +171,8 @@ export default class BroadcastRecorder {
 
       if (code === 0) {
         console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
+        fs.renameSync(targetFile + partSuffix, targetFile);
+
         await this.onFinished(targetFile, currentSlot, now, seconds);
 
         // Check if the part file exists
