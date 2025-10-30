@@ -184,32 +184,33 @@ export default class BroadcastRecorder {
       if (code === 0) {
         console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
 
+        fs.renameSync(targetFile + partSuffix, targetFile);
         await this.onFinished(targetFile, currentSlot, now, seconds);
 
-        // Check if the part file exists
-        if (fs.existsSync(targetFile + partSuffix)) {
-          // Check if target file already exists
-          if (fs.existsSync(targetFile)) {
-            // Concatenate existing file with new recording
-            await this.concatenateAudioFiles(
-              targetFile,
-              targetFile + partSuffix,
-              targetFile + tempSuffix
-            );
-
-            // Replace original with concatenated file
-            fs.renameSync(targetFile + tempSuffix, targetFile);
-
-            fs.unlinkSync(targetFile + partSuffix);
-          } else {
-            // No existing file, just rename part to final
-            fs.renameSync(targetFile + partSuffix, targetFile);
-          }
-
-          await this.onFinished(targetFile, currentSlot, now, seconds);
-        } else {
-          console.error('[ffmpeg] Part file not found after recording completion');
-        }
+        // // Check if the part file exists
+        // if (fs.existsSync(targetFile + partSuffix)) {
+        //   // Check if target file already exists
+        //   if (fs.existsSync(targetFile)) {
+        //     // Concatenate existing file with new recording
+        //     await this.concatenateAudioFiles(
+        //       targetFile,
+        //       targetFile + partSuffix,
+        //       targetFile + tempSuffix
+        //     );
+        //
+        //     // Replace original with concatenated file
+        //     fs.renameSync(targetFile + tempSuffix, targetFile);
+        //
+        //     fs.unlinkSync(targetFile + partSuffix);
+        //   } else {
+        //     // No existing file, just rename part to final
+        //     fs.renameSync(targetFile + partSuffix, targetFile);
+        //   }
+        //
+        //   await this.onFinished(targetFile, currentSlot, now, seconds);
+        // } else {
+        //   console.error('[ffmpeg] Part file not found after recording completion');
+        // }
       } else {
         console.error(`[ffmpeg] Process exited with code ${code}`);
         console.error('[ffmpeg] Error during recording! retry in 3s');
