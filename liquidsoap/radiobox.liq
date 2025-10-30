@@ -64,8 +64,8 @@ repeats=fallback(
 )
 
 source_switcher= switch([
-	({2h-14h}, repeats),
-	({14h-2h}, day)
+        ({2h-14h}, repeats),
+        ({14h-2h}, day)
 ])
 
 # function that makes a safe radio
