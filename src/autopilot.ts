@@ -53,21 +53,21 @@ const run = async () => {
 
   recorder.on("finished", async (sourceFile, slot) => {
     copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
-    //
-    // const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-    // uploaderWelocal.upload(uploadFile).then((resp) => {
-    //   console.log("[welocal] upload finished!");
-    //
-    //   uploaderNextcloud
-    //     .upload(uploadFile)
-    //     .then((resp) => {
-    //       console.log("[nextcloud] upload finished!");
-    //       cleanupFile(uploadFile);
-    //     })
-    //     .catch((err) => {
-    //       console.error(err);
-    //     });
-    // });
+
+    const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+    uploaderWelocal.upload(uploadFile).then((resp) => {
+      console.log("[welocal] upload finished!");
+
+      uploaderNextcloud
+        .upload(uploadFile)
+        .then((resp) => {
+          console.log("[nextcloud] upload finished!");
+          cleanupFile(uploadFile);
+        })
+        .catch((err) => {
+          console.error(err);
+        });
+    });
   });
 
   recorder.start().then((resp) => {

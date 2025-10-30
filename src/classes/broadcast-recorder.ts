@@ -1,4 +1,3 @@
-
 import { DateTime } from 'luxon';
 import {
   BroadcastRecorderEventListener,
@@ -7,8 +6,8 @@ import {
   TimeSlot,
 } from '../types/types';
 import BroadcastSchedule from './broadcast-schedule';
-import { spawn, ChildProcess } from 'child_process';
-import { sleep, timeFormats } from '../helper/helper';
+import { ChildProcess, spawn } from 'child_process';
+import { sleep, timeFormats, vd } from '../helper/helper';
 import { getFilename, getPath } from '../helper/files';
 import { toDateTime } from '../helper/date-time';
 import * as fs from 'node:fs';
@@ -66,7 +65,7 @@ export default class BroadcastRecorder {
 
   async start() {
     await this.waitUntilStart();
-    await this.onStartup(DateTime.now())
+    await this.onStartup(DateTime.now());
     while (DateTime.now() <= this.dateEnd) {
       await this.checkRecording();
     }
@@ -171,36 +170,46 @@ export default class BroadcastRecorder {
     ffmpegProcess.on('close', async (code) => {
       const _now = DateTime.now().toFormat(timeFormats.machine);
 
+      // const completedNaturally = this.checkIfRecordingCompletedNaturally(
+      //   now,
+      //   seconds,
+      //   currentSlot
+      // );
+      //
+      // if(!completedNaturally) {
+      //   setTimeout(retryCallback, 3000);
+      //   return;
+      // }
+
       if (code === 0) {
         console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
-        fs.renameSync(targetFile + partSuffix, targetFile);
 
         await this.onFinished(targetFile, currentSlot, now, seconds);
 
         // Check if the part file exists
-        // if (fs.existsSync(targetFile + partSuffix)) {
-        //   // Check if target file already exists
-        //   if (fs.existsSync(targetFile)) {
-        //     // Concatenate existing file with new recording
-        //     await this.concatenateAudioFiles(targetFile, targetFile + partSuffix, targetFile + tempSuffix);
-        //
-        //     // Replace original with concatenated file
-        //     fs.renameSync(targetFile + tempSuffix, targetFile);
-        //
-        //     // Clean up part file
-        //     fs.unlinkSync(targetFile + partSuffix);
-        //   } else {
-        //     // No existing file, just rename part to final
-        //     fs.renameSync(targetFile + partSuffix, targetFile);
-        //   }
-        //
-        //   // ToDo: Check if the 'close' event was emitted at a regular recording ending or if there is still time left to record, but something else has happened.
-        //   // If the recording was terminated too early, it should auto-resume without calling the onFinished (because it has not yet finished).
-        //
-        //   await this.onFinished(targetFile, currentSlot, now, seconds);
-        // } else {
-        //   console.error('[ffmpeg] Part file not found after recording completion');
-        // }
+        if (fs.existsSync(targetFile + partSuffix)) {
+          // Check if target file already exists
+          if (fs.existsSync(targetFile)) {
+            // Concatenate existing file with new recording
+            await this.concatenateAudioFiles(
+              targetFile,
+              targetFile + partSuffix,
+              targetFile + tempSuffix
+            );
+
+            // Replace original with concatenated file
+            fs.renameSync(targetFile + tempSuffix, targetFile);
+
+            fs.unlinkSync(targetFile + partSuffix);
+          } else {
+            // No existing file, just rename part to final
+            fs.renameSync(targetFile + partSuffix, targetFile);
+          }
+
+          await this.onFinished(targetFile, currentSlot, now, seconds);
+        } else {
+          console.error('[ffmpeg] Part file not found after recording completion');
+        }
       } else {
         console.error(`[ffmpeg] Process exited with code ${code}`);
         console.error('[ffmpeg] Error during recording! retry in 3s');
@@ -220,27 +229,27 @@ export default class BroadcastRecorder {
     });
   }
 
-  // private checkIfRecordingCompletedNaturally(
-  //   startedAt: DateTime,
-  //   expectedDurationSeconds: number,
-  //   currentSlot: TimeSlot
-  // ): boolean {
-  //   const actualDuration = DateTime.now().diff(startedAt, 'seconds').seconds;
-  //   const tolerance = 5; // Allow 5 seconds tolerance for natural completion
-  //
-  //   // Check if we recorded for the expected duration (within tolerance)
-  //   const completedNaturally = Math.abs(actualDuration - expectedDurationSeconds) <= tolerance;
-  //
-  //   // Also check if the time slot has actually ended
-  //   const slotEnded = DateTime.now() >= currentSlot.end.minus({ seconds: tolerance });
-  //
-  //   console.log(
-  //     `[recorder] Duration check - Expected: ${expectedDurationSeconds}s, Actual: ${Math.round(actualDuration)}s, ` +
-  //     `Slot ended: ${slotEnded}, Completed naturally: ${completedNaturally}`
-  //   );
-  //
-  //   return completedNaturally || slotEnded;
-  // }
+  private checkIfRecordingCompletedNaturally(
+    startedAt: DateTime,
+    expectedDurationSeconds: number,
+    currentSlot: TimeSlot
+  ): boolean {
+    const actualDuration = DateTime.now().diff(startedAt, 'seconds').seconds;
+    const tolerance = 5; // Allow 5 seconds tolerance for natural completion
+
+    // Check if we recorded for the expected duration (within tolerance)
+    const completedNaturally = Math.abs(actualDuration - expectedDurationSeconds) <= tolerance;
+
+    // Also check if the time slot has actually ended
+    const slotEnded = DateTime.now() >= currentSlot.end.minus({ seconds: tolerance });
+
+    console.log(
+      `[recorder] Duration check - Expected: ${expectedDurationSeconds}s, Actual: ${Math.round(actualDuration)}s, ` +
+        `Slot ended: ${slotEnded}, Completed naturally: ${completedNaturally}`
+    );
+
+    return completedNaturally || slotEnded;
+  }
 
   // private async resumeRecording(
   //   targetFile: string,
@@ -267,18 +276,28 @@ export default class BroadcastRecorder {
   //   }
   // }
 
-  private async concatenateAudioFiles(existingFile: string, newFile: string, outputFile: string): Promise<void> {
+  private async concatenateAudioFiles(
+    existingFile: string,
+    newFile: string,
+    outputFile: string
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       const concatArgs = [
-        '-i', existingFile,
-        '-i', newFile,
-        '-filter_complex', '[0:0][1:0]concat=n=2:v=0:a=1[out]',
-        '-map', '[out]',
-        '-b:a', `${this.bitrate}k`,
-        '-v', 'error',
+        '-i',
+        existingFile,
+        '-i',
+        newFile,
+        '-filter_complex',
+        '[0:0][1:0]concat=n=2:v=0:a=1[out]',
+        '-map',
+        '[out]',
+        '-b:a',
+        `${this.bitrate}k`,
+        '-v',
+        'error',
         '-hide_banner',
         '-y',
-        outputFile
+        outputFile,
       ];
 
       const concatProcess = spawn('ffmpeg', concatArgs);
@@ -300,9 +319,7 @@ export default class BroadcastRecorder {
     });
   }
 
-  async onStartup(
-    startedAt: DateTime,
-  ) {
+  async onStartup(startedAt: DateTime) {
     for (const listener of this.events.startup) {
       await listener(null, null, startedAt, null, this);
     }
