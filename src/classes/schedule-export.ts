@@ -38,7 +38,7 @@ export default class ScheduleExport {
     this.filenamePrefix = props.filenamePrefix;
     this.mp3Path = props.mp3Path;
     this.mp3Prefix = props.mp3Prefix;
-    this.repeatPath = props.repeatPath;
+    this.repeatPath = getPath(props.repeatPath);
   }
 
   getGrid() {

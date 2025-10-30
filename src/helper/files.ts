@@ -93,7 +93,7 @@ export const cleanupFile = (uploadFile: UploadFile) => {
 
 export const copyFile = (sourceFile: string, destinationPath: string) => {
   const sourceFileName = path.basename(sourceFile);
-  const targetFilePath = path.join(destinationPath, sourceFileName);
+  const targetFilePath = path.join(getPath(destinationPath), sourceFileName);
 
   try {
     // Ensure repeat directory exists
