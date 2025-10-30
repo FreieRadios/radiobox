@@ -29,7 +29,7 @@ radio_day=fallback(
     ]
 )
 
-repeats_playlist = playlist(mode="normal", reload=60, repeats_txt_file)
+repeats_playlist = playlist(mode="normal", reload=1800, repeats_txt_file)
 
 source_switcher= switch([
     ({2h-14h}, repeats_playlist),
