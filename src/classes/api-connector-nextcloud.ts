@@ -1,11 +1,7 @@
-import * as fs from "node:fs";
-import axios from "axios";
-import {
-  AudioUploadNextcloudProps,
-  UploadConfig,
-  UploadFile,
-} from "../types/types";
-import path from "node:path";
+import * as fs from 'node:fs';
+import axios from 'axios';
+import { AudioUploadNextcloudProps, UploadConfig, UploadFile } from '../types/types';
+import path from 'node:path';
 
 export default class ApiConnectorNextcloud {
   baseUrl: string;
@@ -14,7 +10,7 @@ export default class ApiConnectorNextcloud {
   targetDirectory: string;
   password: string;
 
-  nextcloudUrlPart: string = "remote.php/dav/files";
+  nextcloudUrlPart: string = 'remote.php/dav/files';
 
   constructor(props: AudioUploadNextcloudProps) {
     this.baseUrl = props.baseUrl;
@@ -27,11 +23,11 @@ export default class ApiConnectorNextcloud {
   }
 
   async upload(file: UploadFile) {
-    console.log("[nextcloud] Upload started: " + file.sourceFile);
+    console.log('[nextcloud] Upload started: ' + file.sourceFile);
 
     await this.uploadToNextcloud(file.sourceFile)
       .then((response) => {
-        console.log("[nextcloud] Upload finished: " + file.sourceFile);
+        console.log('[nextcloud] Upload finished: ' + file.sourceFile);
       })
       .catch((e) => {
         console.error(e);
@@ -45,7 +41,7 @@ export default class ApiConnectorNextcloud {
 
     return await axios.put(uploadUrl, fileStream, {
       headers: {
-        "Content-Type": "application/octet-stream",
+        'Content-Type': 'application/octet-stream',
       },
       auth: {
         username: this.username,
@@ -54,36 +50,26 @@ export default class ApiConnectorNextcloud {
     });
   }
 
-  async downloadFileFromNextcloud(
-    dirName: string,
-    fileName: string,
-    savePath: string
-  ) {
+  async downloadFileFromNextcloud(dirName: string, fileName: string, savePath: string) {
     const fileUrl = this.getFileUrl(dirName, fileName);
     const response = await axios.get(fileUrl, {
-      responseType: "stream",
+      responseType: 'stream',
       auth: {
         username: this.username,
         password: this.password,
       },
-    })
+    });
 
     const writer = fs.createWriteStream(savePath);
     response.data.pipe(writer);
 
-    return new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
+    return new Promise((resolve: any, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
     });
   }
 
   getFileUrl(directoryName: string, fileName: string) {
-    return [
-      this.baseUrl,
-      this.nextcloudUrlPart,
-      this.username,
-      directoryName,
-      fileName,
-    ].join("/");
+    return [this.baseUrl, this.nextcloudUrlPart, this.username, directoryName, fileName].join('/');
   }
 }

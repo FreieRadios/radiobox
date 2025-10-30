@@ -1,5 +1,7 @@
 FROM node:20-alpine AS builder
 
+ENV TZ="Europe/Berlin"
+
 # Create app directory
 WORKDIR /app
 
@@ -14,6 +16,8 @@ COPY . .
 RUN npm run build
 
 FROM node:20-alpine
+
+ENV TZ="Europe/Berlin"
 
 RUN apk add --no-cache ffmpeg
 
