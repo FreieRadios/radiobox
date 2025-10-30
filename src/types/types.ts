@@ -91,11 +91,12 @@ export type BroadcastScheduleProps = {
 
 export type ScheduleExportProps = {
   schedule: BroadcastSchedule;
-  mode: "welocal-json" | "txt";
+  mode: "welocal-json" | "m3u";
   outDir?: string;
   filenamePrefix?: string;
   mp3Prefix?: string;
   mp3Path?: string;
+  repeatPath?: string;
 };
 
 export type AudioUploadProps = {

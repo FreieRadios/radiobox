@@ -22,8 +22,8 @@ const run = async () => {
   const now = DateTime.now();
   const schema = getSchema();
 
-  if (now.weekday === 1) {
-    // Each Monday, we want to export the schedule to FTP
+  if ([1,3,5,6].includes(now.weekday)) {
+    // Every second day, we want to export the schedule to FTP
     [0, 1, 2, 3].forEach((week) => {
       putSchemaToFTP(schema, now, week);
     });

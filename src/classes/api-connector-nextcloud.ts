@@ -66,7 +66,7 @@ export default class ApiConnectorNextcloud {
         username: this.username,
         password: this.password,
       },
-    });
+    })
 
     const writer = fs.createWriteStream(savePath);
     response.data.pipe(writer);

@@ -28,6 +28,7 @@ export default class ScheduleExport {
   filenamePrefix: string;
   mp3Path: string;
   mp3Prefix: string;
+  repeatPath: string;
   mode: ScheduleExportProps["mode"];
 
   constructor(props: ScheduleExportProps) {
@@ -37,6 +38,7 @@ export default class ScheduleExport {
     this.filenamePrefix = props.filenamePrefix;
     this.mp3Path = props.mp3Path;
     this.mp3Prefix = props.mp3Prefix;
+    this.repeatPath = props.repeatPath;
   }
 
   getGrid() {
@@ -57,7 +59,7 @@ export default class ScheduleExport {
 
   convert() {
     switch (this.mode) {
-      case "txt":
+      case "m3u":
         return this.getGrid()
           .filter((slot) => slot.matches.length > 0)
           .map((slot) => {
@@ -67,7 +69,7 @@ export default class ScheduleExport {
             };
             if (slot.repeatFrom) {
               ret.repeatFrom = getFilename(
-                this.mp3Path,
+                this.repeatPath,
                 this.mp3Prefix,
                 slot.repeatFrom,
                 ".mp3"
@@ -149,8 +151,8 @@ export default class ScheduleExport {
         writeJsonFile(this.outDir, this.getFilename(), writeData);
         console.log("[export] Written file " + this.getFilename());
         break;
-      case "txt":
-        writeFile(this.outDir, this.getFilenameStart(), writeData, "txt");
+      case "m3u":
+        writeFile(this.outDir, this.getFilenameStart(), writeData, "m3u");
         console.log("[export] Written file " + this.getFilenameStart());
         break;
       default:

@@ -59,7 +59,7 @@ export const writeFile = (
     if (err) {
       return console.log(err);
     }
-    console.log(`${outDir}/${filename}.${ext} was saved!`);
+    console.log(`${outDir}/${filename}.${ext} has been saved!`);
   });
 };
 

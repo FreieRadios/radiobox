@@ -6,7 +6,7 @@ import ScheduleExport from "./classes/schedule-export";
 import BroadcastRecorder from "./classes/broadcast-recorder";
 import ApiConnectorNextcloud from "./classes/api-connector-nextcloud";
 import ApiConnectorWelocal from "./classes/api-connector-welocal";
-import { DateTimeInput } from "./types/types";
+import { DateTimeInput, ScheduleExportProps } from './types/types';
 import { getPath } from "./helper/files";
 import { DateTime } from "luxon";
 import { Client } from "node-osc";
@@ -86,14 +86,15 @@ export const getRecorder = (schedule: BroadcastSchedule) => {
   });
 };
 
-export const getExporter = (schedule: BroadcastSchedule, mode) => {
+export const getExporter = (schedule: BroadcastSchedule, mode: ScheduleExportProps['mode'], outDir: string) => {
   return new ScheduleExport({
     schedule,
     mode,
-    outDir: "json",
+    outDir,
     filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
     mp3Prefix: process.env.FILENAME_PREFIX,
     mp3Path: process.env.EXPORTER_MP3_PATH,
+    repeatPath: process.env.REPEAT_PATH,
   });
 };
 
@@ -133,7 +134,7 @@ export const putSchemaToFTP = (
     now.plus({ days: startDay }).set(midnight),
     now.plus({ days: endDay }).set(midnight)
   );
-  getExporter(schedule, "welocal-json")
+  getExporter(schedule, "welocal-json", "json")
     .write()
     .toFTP()
     .then((response) => {
@@ -146,7 +147,6 @@ export const putSchemaToFTP = (
 export const listRepeats = (
   schema: BroadcastSchema,
   now: DateTime,
-  week: number
 ) => {
   console.log("[autopilot] Create mp3 repeats .txt file ...");
   getExporter(
@@ -155,7 +155,8 @@ export const listRepeats = (
       now.plus({ days: 0 }).set(midnight),
       now.plus({ days: 1 }).set(midnight)
     ).mergeSlots(),
-    "txt"
+    "m3u",
+    "repeat"
   ).toTxt();
 };
 

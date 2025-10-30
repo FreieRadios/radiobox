@@ -7,50 +7,22 @@ import {
   getRecorder,
   getSchedule,
   getSchema,
-  getWelocal,
+  getWelocal, listRepeats,
   putSchemaToFTP,
   updateStreamMeta,
-} from "./index";
+} from './index';
 import { getDateStartEnd } from "./helper/date-time";
 import * as process from "node:process";
 import { cleanupFile } from "./helper/files";
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
-  console.log(`[autopilot] Current dir is ${__dirname}`);
   await fetchSchemaFromNextcloud();
 
   const now = DateTime.now();
   const schema = getSchema();
 
-  if (now.weekday === 1) {
-    // Each Monday, we want to export the schedule to FTP
-    [0, 1, 2, 3].forEach((week) => {
-      putSchemaToFTP(schema, now, week);
-    });
-  }
-
-  const { dateStart, dateEnd } = getDateStartEnd(
-  now.toFormat("yyyy-MM-dd"),
-  process.env.RECORDER_START_TIME,
-  Number(process.env.RECORDER_DURATION)
-  );
-
-  updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
-
-  console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
-  console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
-
-  const schedule = getSchedule(schema, dateStart, dateEnd);
-  const recorder = getRecorder(schedule);
-
-  const uploaderWelocal = getWelocal(schedule);
-
-  const uploadFile = ''
-    uploaderWelocal.upload(uploadFile).then((resp) => {
-      console.log("[welocal] upload finished!");
-    });
-
+  listRepeats(schema, now)
 };
 
 console.log("[autopilot] ... starting ...");
