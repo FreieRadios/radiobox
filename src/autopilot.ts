@@ -37,7 +37,7 @@ const run = async () => {
     Number(process.env.RECORDER_DURATION)
   );
 
-  // updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
+  updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
 
   console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
   console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));

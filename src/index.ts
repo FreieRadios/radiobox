@@ -153,8 +153,8 @@ export const writeRepeatsPlaylist = (
   getExporter(
     getSchedule(
       schema,
-      now.plus({ days: 0 }).set(midnight),
-      now.plus({ days: 1 }).set(midnight)
+      now.plus({ days: 1 }).set(midnight),
+      now.plus({ days: 2 }).set(midnight)
     ).mergeSlots(),
     "m3u",
     "repeat"
