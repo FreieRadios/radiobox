@@ -7,7 +7,7 @@ import {
   getRecorder,
   getSchedule,
   getSchema,
-  getWelocal, listRepeats,
+  getWelocal, writeRepeatsPlaylist,
   putSchemaToFTP,
   updateStreamMeta,
 } from './index';
@@ -22,7 +22,7 @@ const run = async () => {
   const now = DateTime.now();
   const schema = getSchema();
 
-  listRepeats(schema, now)
+  writeRepeatsPlaylist(schema, now)
 };
 
 console.log("[autopilot] ... starting ...");

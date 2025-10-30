@@ -4,6 +4,7 @@ import { TimeSlot, UploadFile } from "../types/types";
 import slugify from "slugify";
 import { timeFormats } from "./helper";
 import * as process from "node:process";
+import path from 'path';
 
 export const getPath = (file) => {
   if (process.env.RADIOBOX_BASEDIR) {
@@ -89,3 +90,22 @@ export const cleanupFile = (uploadFile: UploadFile) => {
     }
   });
 };
+
+export const copyFile = (sourceFile: string, destinationPath: string) => {
+  const sourceFileName = path.basename(sourceFile);
+  const targetFilePath = path.join(destinationPath, sourceFileName);
+
+  try {
+    // Ensure repeat directory exists
+    if (!fs.existsSync(destinationPath)) {
+      fs.mkdirSync(destinationPath, { recursive: true });
+      console.log(`[autopilot] Created repeat directory: ${destinationPath}`);
+    }
+
+    // Copy file to repeat directory
+    fs.copyFileSync(sourceFile, targetFilePath);
+    console.log(`[autopilot] Copied ${sourceFile} to ${targetFilePath}`);
+  } catch (error) {
+    console.error(`[autopilot] Error copying file to repeat directory:`, error);
+  }
+}

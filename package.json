@@ -4,7 +4,6 @@
   "main": "src/index.ts",
   "license": "MIT",
   "devDependencies": {
-    "@types/fluent-ffmpeg": "^2.1.24",
     "@types/jest": "^29.5.12",
     "@types/luxon": "^3.4.2",
     "@types/node": "^20.14.9",
@@ -33,10 +32,9 @@
   },
   "dependencies": {
     "@types/node-osc": "^6.0.3",
-    "axios": "^1.7.4",
+    "axios": "^1.13.1",
     "basic-ftp": "^5.0.5",
     "dotenv": "^16.4.5",
-    "fluent-ffmpeg": "^2.1.3",
     "luxon": "^3.4.4",
     "node-osc": "^9.1.4",
     "node-xlsx": "^0.24.0",

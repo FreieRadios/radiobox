@@ -2,7 +2,9 @@
 json/*
 mp3/*
 !mp3/fallback.mp3
+repeat/*
 schema/*
+archive/*
 !schema/example.xlsx
 icecast/icecast.xml
 liquidsoap/var.liq

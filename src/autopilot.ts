@@ -7,13 +7,13 @@ import {
   getRecorder,
   getSchedule,
   getSchema,
-  getWelocal,
+  getWelocal, writeRepeatsPlaylist,
   putSchemaToFTP,
   updateStreamMeta,
-} from "./index";
+} from './index';
 import { getDateStartEnd } from "./helper/date-time";
 import * as process from "node:process";
-import { cleanupFile } from "./helper/files";
+import { cleanupFile, copyFile } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -21,6 +21,8 @@ const run = async () => {
 
   const now = DateTime.now();
   const schema = getSchema();
+
+  writeRepeatsPlaylist(schema, now)
 
   if ([1,3,5,6].includes(now.weekday)) {
     // Every second day, we want to export the schedule to FTP
@@ -35,7 +37,7 @@ const run = async () => {
     Number(process.env.RECORDER_DURATION)
   );
 
-  updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
+  // updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
 
   console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
   console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
@@ -47,6 +49,8 @@ const run = async () => {
   const uploaderNextcloud = getNextcloud();
 
   recorder.on("finished", async (sourceFile, slot) => {
+    copyFile(sourceFile, process.env.REPEAT_PATH)
+
     const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
     uploaderWelocal.upload(uploadFile).then((resp) => {
       console.log("[welocal] upload finished!");

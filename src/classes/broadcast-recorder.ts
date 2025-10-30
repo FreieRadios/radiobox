@@ -1,3 +1,4 @@
+
 import { DateTime } from 'luxon';
 import {
   BroadcastRecorderEventListener,
@@ -6,7 +7,7 @@ import {
   TimeSlot,
 } from '../types/types';
 import BroadcastSchedule from './broadcast-schedule';
-import ffmpeg from 'fluent-ffmpeg';
+import { spawn, ChildProcess } from 'child_process';
 import { sleep, timeFormats } from '../helper/helper';
 import { getFilename, getPath } from '../helper/files';
 import { toDateTime } from '../helper/date-time';
@@ -103,86 +104,197 @@ export default class BroadcastRecorder {
     }
   }
 
-  async writeStreamToFile(
-    targetFile: string,
-    currentSlot: TimeSlot,
-    now: DateTime,
-    seconds: number
-  ) {
-    try {
-      await this.executeFFmpegRecording(targetFile, currentSlot, seconds);
-    } catch (error) {
-      console.error('[recorder] Recording failed:', error);
-      throw error;
-    }
+  writeStreamToFile(targetFile: string, currentSlot: TimeSlot, now: DateTime, seconds: number) {
+    const delay = this.delay || 0;
+    const partSuffix = '-part.mp3';
+    const tempSuffix = '-temp.mp3';
+
+    const title = currentSlot.broadcast.getTitle(
+      currentSlot,
+      ['name', 'startEndTime', 'info_0'],
+      ' - '
+    );
+    const genre = currentSlot.broadcast.getTitle(currentSlot, ['info_1']);
+    const album = currentSlot.broadcast.getTitle(
+      currentSlot,
+      ['info_0', 'startDate', 'startEndTime'],
+      ' '
+    );
+    const date = currentSlot.broadcast.getTitle(currentSlot, ['date']);
+    const artist = currentSlot.broadcast.getTitle(currentSlot, ['station']);
+
+    const ffmpegArgs = [
+      '-i', this.streamUrl,
+      '-ss', delay.toString(),
+      '-t', seconds.toString(),
+      '-b:a', `${this.bitrate}k`,
+      '-metadata', `title=${title}`,
+      '-metadata', `album=${album}`,
+      '-metadata', `genre=${genre}`,
+      '-metadata', `date=${date}`,
+      '-metadata', `artist=${artist}`,
+      '-v', 'error', // Changed to 'error' for less verbose output
+      '-hide_banner',
+      '-y', // Overwrite temp files
+      targetFile + partSuffix
+    ];
+
+    const ffmpegProcess: ChildProcess = spawn('ffmpeg', ffmpegArgs);
+
+    const retryCallback = () => {
+      console.log('[ffmpeg] Retrying recording...');
+      this.checkRecording().catch((retryErr) => {
+        console.error('[ffmpeg] Retry failed:', retryErr.message);
+      });
+    };
+
+    // Handle process start
+    const _now = DateTime.now().toFormat(timeFormats.machine);
+    console.log(
+      `[ffmpeg] ${_now} recording "${
+        targetFile + partSuffix
+      }" (${Math.round(seconds / 60)}min left; ${seconds}s)`
+    );
+
+    // Handle stderr
+    ffmpegProcess.stderr?.on('data', (data) => {
+      const output = data.toString();
+      // Log only errors
+      if (output.toLowerCase().includes('error')) {
+        console.error(`[ffmpeg] ${output}`);
+      }
+    });
+
+    // Handle process completion
+    ffmpegProcess.on('close', async (code) => {
+      const _now = DateTime.now().toFormat(timeFormats.machine);
+
+      if (code === 0) {
+        console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
+        await this.onFinished(targetFile, currentSlot, now, seconds);
+
+        // Check if the part file exists
+        // if (fs.existsSync(targetFile + partSuffix)) {
+        //   // Check if target file already exists
+        //   if (fs.existsSync(targetFile)) {
+        //     // Concatenate existing file with new recording
+        //     await this.concatenateAudioFiles(targetFile, targetFile + partSuffix, targetFile + tempSuffix);
+        //
+        //     // Replace original with concatenated file
+        //     fs.renameSync(targetFile + tempSuffix, targetFile);
+        //
+        //     // Clean up part file
+        //     fs.unlinkSync(targetFile + partSuffix);
+        //   } else {
+        //     // No existing file, just rename part to final
+        //     fs.renameSync(targetFile + partSuffix, targetFile);
+        //   }
+        //
+        //   // ToDo: Check if the 'close' event was emitted at a regular recording ending or if there is still time left to record, but something else has happened.
+        //   // If the recording was terminated too early, it should auto-resume without calling the onFinished (because it has not yet finished).
+        //
+        //   await this.onFinished(targetFile, currentSlot, now, seconds);
+        // } else {
+        //   console.error('[ffmpeg] Part file not found after recording completion');
+        // }
+      } else {
+        console.error(`[ffmpeg] Process exited with code ${code}`);
+        console.error('[ffmpeg] Error during recording! retry in 3s');
+
+        // throw Error('[ffmpeg] Terminated')
+
+        setTimeout(retryCallback, 3000);
+      }
+    });
+
+    // Handle process errors
+    ffmpegProcess.on('error', (err) => {
+      console.error('[ffmpeg] Failed to start process:', err.message);
+      console.error('[ffmpeg] Error during recording! retry in 3s');
+
+      setTimeout(retryCallback, 3000);
+    });
   }
 
-  // writeStreamToFile(
+  // private checkIfRecordingCompletedNaturally(
+  //   startedAt: DateTime,
+  //   expectedDurationSeconds: number,
+  //   currentSlot: TimeSlot
+  // ): boolean {
+  //   const actualDuration = DateTime.now().diff(startedAt, 'seconds').seconds;
+  //   const tolerance = 5; // Allow 5 seconds tolerance for natural completion
+  //
+  //   // Check if we recorded for the expected duration (within tolerance)
+  //   const completedNaturally = Math.abs(actualDuration - expectedDurationSeconds) <= tolerance;
+  //
+  //   // Also check if the time slot has actually ended
+  //   const slotEnded = DateTime.now() >= currentSlot.end.minus({ seconds: tolerance });
+  //
+  //   console.log(
+  //     `[recorder] Duration check - Expected: ${expectedDurationSeconds}s, Actual: ${Math.round(actualDuration)}s, ` +
+  //     `Slot ended: ${slotEnded}, Completed naturally: ${completedNaturally}`
+  //   );
+  //
+  //   return completedNaturally || slotEnded;
+  // }
+
+  // private async resumeRecording(
   //   targetFile: string,
   //   currentSlot: TimeSlot,
-  //   now: DateTime,
-  //   seconds: number
-  // ) {
-  //   const delay = this.delay || 0;
-  //   const partSuffix = "-part.mp3";
+  //   originalStartTime: DateTime
+  // ): Promise<void> {
+  //   console.log('[recorder] Recording terminated early, attempting to resume...');
   //
-  //   const title = currentSlot.broadcast.getTitle(
-  //     currentSlot,
-  //     ["name", "startEndTime", "info_0"],
-  //     " - "
-  //   );
-  //   const genre = currentSlot.broadcast.getTitle(currentSlot, ["info_1"]);
-  //   const album = currentSlot.broadcast.getTitle(
-  //     currentSlot,
-  //     ["info_0", "startDate", "startEndTime"],
-  //     " "
-  //   );
-  //   const date = currentSlot.broadcast.getTitle(currentSlot, ["date"]);
-  //   const artist = currentSlot.broadcast.getTitle(currentSlot, ["station"]);
+  //   // Calculate remaining time for this slot
+  //   const now = DateTime.now();
+  //   const remaining = now.until(currentSlot.end);
+  //   const remainingSeconds = remaining.length('seconds');
   //
-  //   const tmpFfmpeg = ffmpeg(this.streamUrl)
-  //     .outputOptions(`-ss ${delay}`)
-  //     .outputOptions(`-t ${seconds}`)
-  //     .outputOptions(`-b:a ${this.bitrate}k`)
-  //     .outputOptions("-metadata", "title=" + title)
-  //     .outputOptions("-metadata", "album=" + album)
-  //     .outputOptions("-metadata", "genre=" + genre)
-  //     .outputOptions("-metadata", "date=" + date)
-  //     .outputOptions("-metadata", "artist=" + artist)
-  //     .outputOptions("-v 256")
-  //     .outputOptions("-hide_banner")
-  //     .output(targetFile + partSuffix);
+  //   if (remainingSeconds > 5) { // Only resume if there's more than 5 seconds left
+  //     console.log(`[recorder] Resuming recording for ${Math.round(remainingSeconds)}s remaining`);
   //
-  //   tmpFfmpeg
-  //     .on("start", async () => {
-  //       const _now = DateTime.now().toFormat(timeFormats.machine);
-  //       console.log(
-  //         `[ffmpeg] ${_now} recording "${
-  //           targetFile + partSuffix
-  //         }" (${Math.round(seconds / 60)}min left; ${seconds}s)`
-  //       );
-  //     })
-  //     .on("end", async () => {
-  //       const _now = DateTime.now().toFormat(timeFormats.machine);
-  //       console.log(
-  //         `[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix
-  //       );
-  //       fs.renameSync(targetFile + partSuffix, targetFile);
-  //       await this.onFinished(targetFile, currentSlot, now, seconds);
-  //     })
-  //     // .on("stderr", (line) => console.log(`FFmpeg STDERR: ${line}`))
-  //     // .on("progress", function (progress) {
-  //     //   console.log(progress);
-  //     //   console.log("Processing: " + progress.percent + "% done");
-  //     // })
-  //     .on("error", function (err, stdout, stderr) {
-  //       console.error(stderr);
-  //       console.error("[ffmpeg] Cannot process: " + err.message);
-  //       throw new Error("[ffmpeg] Error during recording");
-  //     });
-  //
-  //   tmpFfmpeg.run();
+  //     // Start a new recording that will be concatenated
+  //     this.writeStreamToFile(targetFile, currentSlot, originalStartTime, Math.round(remainingSeconds));
+  //   } else {
+  //     console.log('[recorder] Too little time remaining, not resuming recording');
+  //     // Consider this as completed and trigger onFinished
+  //     const totalExpectedDuration = originalStartTime.until(currentSlot.end).length('seconds');
+  //     await this.onFinished(targetFile, currentSlot, originalStartTime, totalExpectedDuration);
+  //   }
   // }
+
+  private async concatenateAudioFiles(existingFile: string, newFile: string, outputFile: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const concatArgs = [
+        '-i', existingFile,
+        '-i', newFile,
+        '-filter_complex', '[0:0][1:0]concat=n=2:v=0:a=1[out]',
+        '-map', '[out]',
+        '-b:a', `${this.bitrate}k`,
+        '-v', 'error',
+        '-hide_banner',
+        '-y',
+        outputFile
+      ];
+
+      const concatProcess = spawn('ffmpeg', concatArgs);
+
+      concatProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log('[ffmpeg] Successfully concatenated audio files');
+          resolve();
+        } else {
+          console.error(`[ffmpeg] Concatenation failed with code ${code}`);
+          reject(new Error(`Concatenation failed with code ${code}`));
+        }
+      });
+
+      concatProcess.on('error', (err) => {
+        console.error('[ffmpeg] Concatenation process error:', err.message);
+        reject(err);
+      });
+    });
+  }
 
   async onFinished(
     outputFile: string,
@@ -202,153 +314,5 @@ export default class BroadcastRecorder {
       console.log('[Recorder] Going to wait for ' + Math.round(waitFor / 1000) + 's now....');
       await sleep(waitFor);
     }
-  }
-
-  private async executeFFmpegRecording(
-    targetFile: string,
-    currentSlot: TimeSlot,
-    seconds: number
-  ): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-      const partSuffix = '-part.mp3';
-      const delay = this.delay || 0;
-      let totalRecordedTime = 0;
-      let currentFfmpeg: any = null;
-      const maxStreamCheckAttempts = 30; // Will try for 5 minutes (30 * 10 seconds)
-
-      // Function to check if stream is accessible
-      const checkStream = async (): Promise<boolean> => {
-        return new Promise((resolveCheck) => {
-          const probe = ffmpeg(this.streamUrl)
-            .inputOptions('-t 1') // Try to read just 1 second
-            .on('error', () => resolveCheck(false))
-            .on('end', () => resolveCheck(true));
-
-          // Set a timeout for the probe
-          const timeout = setTimeout(() => {
-            probe.kill('SIGKILL');
-            resolveCheck(false);
-          }, 5000);
-
-          probe.run();
-        });
-      };
-
-      // Function to start/resume recording
-      const startRecording = async (remainingSeconds: number) => {
-        const title = currentSlot.broadcast.getTitle(
-          currentSlot,
-          ['name', 'startEndTime', 'info_0'],
-          ' - '
-        );
-        const genre = currentSlot.broadcast.getTitle(currentSlot, ['info_1']);
-        const album = currentSlot.broadcast.getTitle(
-          currentSlot,
-          ['info_0', 'startDate', 'startEndTime'],
-          ' '
-        );
-        const date = currentSlot.broadcast.getTitle(currentSlot, ['date']);
-        const artist = currentSlot.broadcast.getTitle(currentSlot, ['station']);
-
-        currentFfmpeg = ffmpeg(this.streamUrl)
-          .outputOptions(`-ss ${delay}`)
-          .outputOptions(`-t ${remainingSeconds}`)
-          .outputOptions(`-b:a ${this.bitrate}k`)
-          .outputOptions('-metadata', 'title=' + title)
-          .outputOptions('-metadata', 'album=' + album)
-          .outputOptions('-metadata', 'genre=' + genre)
-          .outputOptions('-metadata', 'date=' + date)
-          .outputOptions('-metadata', 'artist=' + artist)
-          .outputOptions('-v 256')
-          .outputOptions('-hide_banner')
-          .output(targetFile + partSuffix);
-
-        let lastProgressTime = Date.now();
-        const streamTimeout = 10000; // 10 seconds without progress indicates stream issue
-
-        currentFfmpeg
-          .on('start', () => {
-            console.log(
-              `[ffmpeg] ${DateTime.now().toFormat(timeFormats.machine)} Resuming recording "${targetFile + partSuffix}" (${Math.round(remainingSeconds / 60)}min left)`
-            );
-          })
-          .on('progress', (progress: any) => {
-            lastProgressTime = Date.now();
-            // Convert FFmpeg time format to seconds and update total time
-            if (progress.timemark) {
-              const parts = progress.timemark.split(':');
-              const currentTime =
-                parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
-              totalRecordedTime = Math.max(totalRecordedTime, currentTime);
-            }
-          })
-          .on('error', async (err: Error) => {
-            console.error('[ffmpeg] Stream error:', err.message);
-            currentFfmpeg.kill('SIGKILL');
-
-            // Check if we still have time to record
-            const remainingTime = seconds - totalRecordedTime;
-            if (remainingTime > 0) {
-              console.log('[ffmpeg] Stream interrupted, attempting to reconnect...');
-              await handleStreamInterruption(remainingTime);
-            } else {
-              finishRecording();
-            }
-          })
-          .on('end', () => {
-            finishRecording();
-          });
-
-        // Monitor for stream health
-        const healthCheck = setInterval(() => {
-          if (Date.now() - lastProgressTime > streamTimeout) {
-            clearInterval(healthCheck);
-            currentFfmpeg.kill('SIGKILL');
-            // The error handler will take care of reconnection
-          }
-        }, 5000);
-
-        currentFfmpeg.run();
-      };
-
-      // Handle stream interruption
-      const handleStreamInterruption = async (remainingTime: number) => {
-        let attempts = 0;
-
-        while (attempts < maxStreamCheckAttempts) {
-          console.log(
-            `[ffmpeg] Checking stream availability (attempt ${attempts + 1}/${maxStreamCheckAttempts})...`
-          );
-
-          if (await checkStream()) {
-            console.log('[ffmpeg] Stream is available again, resuming recording');
-            await startRecording(remainingTime);
-            return;
-          }
-
-          attempts++;
-          await sleep(10000); // Wait 10 seconds between attempts
-        }
-
-        console.error('[ffmpeg] Stream unavailable after maximum attempts, stopping recording');
-        finishRecording();
-      };
-
-      // Finish recording and cleanup
-      const finishRecording = async () => {
-        try {
-          if (fs.existsSync(targetFile + partSuffix)) {
-            fs.renameSync(targetFile + partSuffix, targetFile);
-            await this.onFinished(targetFile, currentSlot, DateTime.now(), totalRecordedTime);
-          }
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      // Start initial recording
-      await startRecording(seconds);
-    });
   }
 }

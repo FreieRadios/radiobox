@@ -57,6 +57,10 @@ export default class ScheduleExport {
     return [this.filenamePrefix, this.schedule.dateStart.toISODate()].join("_");
   }
 
+  getFilenameStatic() {
+    return [this.filenamePrefix].join("_");
+  }
+
   convert() {
     switch (this.mode) {
       case "m3u":
@@ -152,8 +156,8 @@ export default class ScheduleExport {
         console.log("[export] Written file " + this.getFilename());
         break;
       case "m3u":
-        writeFile(this.outDir, this.getFilenameStart(), writeData, "m3u");
-        console.log("[export] Written file " + this.getFilenameStart());
+        writeFile(this.outDir, this.getFilenameStatic(), writeData, "m3u");
+        console.log("[export] Written file " + this.getFilenameStatic());
         break;
       default:
         break;

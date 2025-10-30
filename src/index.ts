@@ -11,6 +11,8 @@ import { getPath } from "./helper/files";
 import { DateTime } from "luxon";
 import { Client } from "node-osc";
 import { midnight } from "./helper/date-time";
+import * as fs from "fs";
+import * as path from "path";
 
 export const getNextcloud = () => {
   return new ApiConnectorNextcloud({
@@ -143,8 +145,7 @@ export const putSchemaToFTP = (
 };
 
 // Create a txt file with repeat mp3 files for today
-// WIP
-export const listRepeats = (
+export const writeRepeatsPlaylist = (
   schema: BroadcastSchema,
   now: DateTime,
 ) => {
