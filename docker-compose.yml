@@ -29,12 +29,16 @@ services:
     build: .
     container_name: radiobox
     restart: always
+    devices:
+      - "/dev/snd:/dev/snd"
+    privileged: true
     environment:
       TZ: "Europe/Berlin"
     extra_hosts:
       - "radio-z.net:49.12.17.76"
       - "snd.radio-z.net:78.47.182.99"
     volumes:
+      - "/dev/snd:/dev/snd"
       - /etc/localtime:/etc/localtime:ro
       - "./logs:/app/logs"
       - "./mp3:/app/mp3"
