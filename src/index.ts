@@ -1,18 +1,16 @@
-import "dotenv/config";
+import 'dotenv/config';
 
-import BroadcastSchema from "./classes/broadcast-schema";
-import BroadcastSchedule from "./classes/broadcast-schedule";
-import ScheduleExport from "./classes/schedule-export";
-import BroadcastRecorder from "./classes/broadcast-recorder";
-import ApiConnectorNextcloud from "./classes/api-connector-nextcloud";
-import ApiConnectorWelocal from "./classes/api-connector-welocal";
+import BroadcastSchema from './classes/broadcast-schema';
+import BroadcastSchedule from './classes/broadcast-schedule';
+import ScheduleExport from './classes/schedule-export';
+import BroadcastRecorder from './classes/broadcast-recorder';
+import ApiConnectorNextcloud from './classes/api-connector-nextcloud';
+import ApiConnectorWelocal from './classes/api-connector-welocal';
 import { DateTimeInput, ScheduleExportProps } from './types/types';
-import { getPath } from "./helper/files";
-import { DateTime } from "luxon";
-import { Client } from "node-osc";
-import { midnight } from "./helper/date-time";
-import * as fs from "fs";
-import * as path from "path";
+import { getPath } from './helper/files';
+import { DateTime } from 'luxon';
+import { Client } from 'node-osc';
+import { midnight } from './helper/date-time';
 
 export const getNextcloud = () => {
   return new ApiConnectorNextcloud({
@@ -28,9 +26,9 @@ export const getWelocal = (schedule) => {
     token: process.env.WELOCAL_API_TOKEN,
     baseUrl: process.env.WELOCAL_API_URL,
     uploadFilePath: process.env.MP3_PATH,
-    logFile: "upload-welocal",
+    logFile: 'upload-welocal',
     filePrefix: process.env.FILENAME_PREFIX,
-    fileSuffix: ".mp3",
+    fileSuffix: '.mp3',
     schedule,
   });
 };
@@ -72,7 +70,7 @@ export const getSchedule = (
 export const dumpScheduleErrors = (schedule: BroadcastSchedule) => {
   const errors = schedule.checkIntegrity(true);
   if (errors.length) {
-    console.error("[schedule] BroadcastSchedule has errors: ");
+    console.error('[schedule] BroadcastSchedule has errors: ');
     console.error(errors.map((error) => error.reason));
   }
 };
@@ -88,13 +86,19 @@ export const getRecorder = (schedule: BroadcastSchedule) => {
   });
 };
 
-export const getExporter = (schedule: BroadcastSchedule, mode: ScheduleExportProps['mode'], outDir: string) => {
+export const getExporter = (
+  schedule: BroadcastSchedule,
+  mode: ScheduleExportProps['mode'],
+  outDir: string,
+  fileExt?: string
+) => {
   return new ScheduleExport({
     schedule,
     mode,
     outDir,
     filenamePrefix: process.env.EXPORTER_FILENAME_PREFIX,
     mp3Prefix: process.env.FILENAME_PREFIX,
+    mp3Suffix: fileExt || '.mp3',
     basePath: process.env.EXPORTER_BASE_PATH,
     repeatFolder: process.env.EXPORTER_REPEAT_FOLDER,
   });
@@ -102,9 +106,9 @@ export const getExporter = (schedule: BroadcastSchedule, mode: ScheduleExportPro
 
 export const fetchSchemaFromNextcloud = async () => {
   console.log(
-    "[nextcloud] Fetching schema.... " +
+    '[nextcloud] Fetching schema.... ' +
       process.env.NEXTCLOUD_WEBDAV_SCHEMA_FILE +
-      " from " +
+      ' from ' +
       process.env.NEXTCLOUD_WEBDAV_SCHEMA_DIRECTORY
   );
   return getNextcloud()
@@ -114,21 +118,15 @@ export const fetchSchemaFromNextcloud = async () => {
       getPath(process.env.BROADCAST_SCHEMA_FILE)
     )
     .then((resp) => {
-      console.log(
-        "[nextcloud] Fetched schema file " + process.env.BROADCAST_SCHEMA_FILE
-      );
+      console.log('[nextcloud] Fetched schema file ' + process.env.BROADCAST_SCHEMA_FILE);
     })
     .catch((e) => {
       console.error(e);
-      console.error("[nextcloud] Error fetching schema!");
+      console.error('[nextcloud] Error fetching schema!');
     });
 };
 
-export const putSchemaToFTP = (
-  schema: BroadcastSchema,
-  now: DateTime,
-  week: number
-) => {
+export const putSchemaToFTP = (schema: BroadcastSchema, now: DateTime, week: number) => {
   const startDay = week * 7;
   const endDay = startDay + 7;
   const schedule = getSchedule(
@@ -136,29 +134,26 @@ export const putSchemaToFTP = (
     now.plus({ days: startDay }).set(midnight),
     now.plus({ days: endDay }).set(midnight)
   );
-  getExporter(schedule, "welocal-json", "json")
+  getExporter(schedule, 'welocal-json', 'json')
     .write()
     .toFTP()
     .then((response) => {
-      console.log("[Export] exported to FTP");
+      console.log('[Export] exported to FTP');
     });
 };
 
 // Create a m3u file with repeat mp3 files for today
-export const writeRepeatsPlaylist = (
-  schema: BroadcastSchema,
-  now: DateTime,
-  days: number
-) => {
-  console.log("[autopilot] Create mp3 repeats .m3u file ...");
+export const writeRepeatsPlaylist = (schema: BroadcastSchema, now: DateTime, days: number, fileExt?: string) => {
+  console.log('[autopilot] Create mp3 repeats .m3u file ...');
   getExporter(
     getSchedule(
       schema,
       now.plus({ days: days }).set(midnight),
-      now.plus({ days: (days + 1) }).set(midnight)
+      now.plus({ days: days + 1 }).set(midnight)
     ).mergeSlots(),
-    "m3u",
-    "repeat"
+    'm3u',
+    'repeat',
+    fileExt
   ).toM3U(true);
 };
 
@@ -167,16 +162,12 @@ export const writeRepeatsPlaylist = (
  * Use current broadcast name and caption and sends an ocs request
  * to liquidsoap
  */
-export const updateStreamMeta = (
-  schema: BroadcastSchema,
-  interval: number,
-  dateEnd: DateTime
-) => {
-  const client = new Client("liquidsoap", 44444);
+export const updateStreamMeta = (schema: BroadcastSchema, interval: number, dateEnd: DateTime) => {
+  const client = new Client('liquidsoap', 44444);
 
   let count = -1;
   const claim = process.env.META_STATION_CLAIM;
-  const staticText = [...claim.split(" | "), "dyn:Title"];
+  const staticText = [...claim.split(' | '), 'dyn:Title'];
   const max = staticText.length;
 
   const updateInterval = setInterval(() => {
@@ -184,7 +175,7 @@ export const updateStreamMeta = (
 
     if (now >= dateEnd) {
       clearInterval(updateInterval);
-      console.log("[autopilot] Stopped OSC update stream meta.");
+      console.log('[autopilot] Stopped OSC update stream meta.');
       return;
     }
 
@@ -198,8 +189,8 @@ export const updateStreamMeta = (
       const nowTitle = nowBroadcast.name;
       const nowCaption = nowBroadcast.info[0];
 
-      staticText[max - 1] = nowTitle.replaceAll("-", " ");
-      staticText[max] = nowCaption.replaceAll("-", " ");
+      staticText[max - 1] = nowTitle.replaceAll('-', ' ');
+      staticText[max] = nowCaption.replaceAll('-', ' ');
 
       const useString = staticText[count];
 
@@ -209,11 +200,11 @@ export const updateStreamMeta = (
 
       client.send(
         {
-          address: "/metadata",
+          address: '/metadata',
           args: [
-            { type: "string", value: "title" },
+            { type: 'string', value: 'title' },
             {
-              type: "string",
+              type: 'string',
               value: useString,
             },
           ],

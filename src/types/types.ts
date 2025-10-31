@@ -96,6 +96,7 @@ export type ScheduleExportProps = {
   outDir?: string;
   filenamePrefix?: string;
   mp3Prefix?: string;
+  mp3Suffix?: string;
   basePath?: string;
   repeatFolder?: string;
 };

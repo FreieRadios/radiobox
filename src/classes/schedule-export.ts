@@ -23,7 +23,8 @@ export default class ScheduleExport {
   filenamePrefix: string;
   basePath: string;
   repeatFolder: string;
-  mp3Prefix: string;
+  filePrefix: string;
+  fileExtension: string;
   mode: ScheduleExportProps['mode'];
 
   constructor(props: ScheduleExportProps) {
@@ -31,7 +32,8 @@ export default class ScheduleExport {
     this.mode = props.mode;
     this.outDir = getPath(props.outDir);
     this.filenamePrefix = props.filenamePrefix;
-    this.mp3Prefix = props.mp3Prefix;
+    this.filePrefix = props.mp3Prefix;
+    this.fileExtension = props.mp3Suffix || '.mp3';
     this.basePath = props.basePath;
     this.repeatFolder = props.repeatFolder;
   }
@@ -65,18 +67,18 @@ export default class ScheduleExport {
             const ret = {
               filename: getFilename(
                 this.basePath + this.repeatFolder,
-                this.mp3Prefix,
+                this.filePrefix,
                 slot,
-                '.mp3'
+                this.fileExtension
               ),
               repeatFrom: null,
             };
             if (slot.repeatFrom) {
               ret.repeatFrom = getFilename(
                 this.basePath + this.repeatFolder,
-                this.mp3Prefix,
+                this.filePrefix,
                 slot.repeatFrom,
-                '.mp3'
+                this.fileExtension
               );
             }
             return ret;
