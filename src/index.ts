@@ -148,13 +148,14 @@ export const putSchemaToFTP = (
 export const writeRepeatsPlaylist = (
   schema: BroadcastSchema,
   now: DateTime,
+  days: number
 ) => {
   console.log("[autopilot] Create mp3 repeats .m3u file ...");
   getExporter(
     getSchedule(
       schema,
-      now.plus({ days: 1 }).set(midnight),
-      now.plus({ days: 2 }).set(midnight)
+      now.plus({ days: days }).set(midnight),
+      now.plus({ days: (days + 1) }).set(midnight)
     ).mergeSlots(),
     "m3u",
     "repeat"

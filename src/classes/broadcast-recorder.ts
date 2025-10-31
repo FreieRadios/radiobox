@@ -107,8 +107,16 @@ export default class BroadcastRecorder {
 
   writeStreamToFile(targetFile: string, currentSlot: TimeSlot, now: DateTime, seconds: number) {
     const delay = this.delay || 0;
-    const partSuffix = '-part.mp3';
-    const tempSuffix = '-temp.mp3';
+
+    // Determine if we're recording from a USB device or stream
+    const isUsbInput = this.streamUrl.startsWith('hw:') || this.streamUrl.startsWith('plughw:') || this.streamUrl.startsWith('pulse') || this.streamUrl.startsWith('alsa');
+
+    // Set appropriate file extension and suffix based on input type
+    const fileExtension = isUsbInput ? '.flac' : '.mp3';
+    const partSuffix = isUsbInput ? '-part.flac' : '-part.mp3';
+
+    // Update target file extension if recording from USB
+    const finalTargetFile = isUsbInput ? targetFile.replace(/\.(mp3|flac)$/, fileExtension) : targetFile;
 
     const title = currentSlot.broadcast.getTitle(
       currentSlot,
@@ -124,21 +132,47 @@ export default class BroadcastRecorder {
     const date = currentSlot.broadcast.getTitle(currentSlot, ['date']);
     const artist = currentSlot.broadcast.getTitle(currentSlot, ['station']);
 
-    const ffmpegArgs = [
-      '-i', this.streamUrl,
-      '-ss', delay.toString(),
-      '-t', seconds.toString(),
-      '-b:a', `${this.bitrate}k`,
-      '-metadata', `title=${title}`,
-      '-metadata', `album=${album}`,
-      '-metadata', `genre=${genre}`,
-      '-metadata', `date=${date}`,
-      '-metadata', `artist=${artist}`,
-      '-v', 'error', // Changed to 'error' for less verbose output
-      '-hide_banner',
-      '-y', // Overwrite temp files
-      targetFile + partSuffix
-    ];
+    let ffmpegArgs: string[];
+
+    if (isUsbInput) {
+      // USB input recording to FLAC (lossless)
+      ffmpegArgs = [
+        '-f', 'alsa',  // Use ALSA for audio input
+        '-i', this.streamUrl,  // USB device (e.g., 'hw:1,0', 'plughw:1,0', 'pulse')
+        '-ss', delay.toString(),
+        '-t', seconds.toString(),
+        '-c:a', 'flac',  // Use FLAC codec for lossless compression
+        '-compression_level', '8',  // Maximum FLAC compression
+        '-sample_fmt', 's16',  // 16-bit sample format
+        '-ar', '44100',  // 44.1kHz sample rate
+        '-metadata', `title=${title}`,
+        '-metadata', `album=${album}`,
+        '-metadata', `genre=${genre}`,
+        '-metadata', `date=${date}`,
+        '-metadata', `artist=${artist}`,
+        '-v', 'error',
+        '-hide_banner',
+        '-y', // Overwrite temp files
+        finalTargetFile + partSuffix
+      ];
+    } else {
+      // Stream URL recording to MP3 (existing functionality)
+      ffmpegArgs = [
+        '-i', this.streamUrl,
+        '-ss', delay.toString(),
+        '-t', seconds.toString(),
+        '-b:a', `${this.bitrate}k`,
+        '-metadata', `title=${title}`,
+        '-metadata', `album=${album}`,
+        '-metadata', `genre=${genre}`,
+        '-metadata', `date=${date}`,
+        '-metadata', `artist=${artist}`,
+        '-v', 'error',
+        '-hide_banner',
+        '-y', // Overwrite temp files
+        finalTargetFile + partSuffix
+      ];
+    }
 
     const ffmpegProcess: ChildProcess = spawn('ffmpeg', ffmpegArgs);
 
@@ -151,9 +185,11 @@ export default class BroadcastRecorder {
 
     // Handle process start
     const _now = DateTime.now().toFormat(timeFormats.machine);
+    const inputType = isUsbInput ? 'USB' : 'stream';
+    const format = isUsbInput ? 'FLAC' : 'MP3';
     console.log(
-      `[ffmpeg] ${_now} recording "${
-        targetFile + partSuffix
+      `[ffmpeg] ${_now} recording ${format} from ${inputType} "${
+        finalTargetFile + partSuffix
       }" (${Math.round(seconds / 60)}min left; ${seconds}s)`
     );
 
@@ -170,52 +206,15 @@ export default class BroadcastRecorder {
     ffmpegProcess.on('close', async (code) => {
       const _now = DateTime.now().toFormat(timeFormats.machine);
 
-      // const completedNaturally = this.checkIfRecordingCompletedNaturally(
-      //   now,
-      //   seconds,
-      //   currentSlot
-      // );
-      //
-      // if(!completedNaturally) {
-      //   setTimeout(retryCallback, 3000);
-      //   return;
-      // }
-
       if (code === 0) {
-        console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
+        console.log(`[ffmpeg] ${_now} Finished recording ` + finalTargetFile + partSuffix);
 
-        fs.renameSync(targetFile + partSuffix, targetFile);
-        await this.onFinished(targetFile, currentSlot, now, seconds);
+        fs.renameSync(finalTargetFile + partSuffix, finalTargetFile);
+        await this.onFinished(finalTargetFile, currentSlot, now, seconds);
 
-        // // Check if the part file exists
-        // if (fs.existsSync(targetFile + partSuffix)) {
-        //   // Check if target file already exists
-        //   if (fs.existsSync(targetFile)) {
-        //     // Concatenate existing file with new recording
-        //     await this.concatenateAudioFiles(
-        //       targetFile,
-        //       targetFile + partSuffix,
-        //       targetFile + tempSuffix
-        //     );
-        //
-        //     // Replace original with concatenated file
-        //     fs.renameSync(targetFile + tempSuffix, targetFile);
-        //
-        //     fs.unlinkSync(targetFile + partSuffix);
-        //   } else {
-        //     // No existing file, just rename part to final
-        //     fs.renameSync(targetFile + partSuffix, targetFile);
-        //   }
-        //
-        //   await this.onFinished(targetFile, currentSlot, now, seconds);
-        // } else {
-        //   console.error('[ffmpeg] Part file not found after recording completion');
-        // }
       } else {
         console.error(`[ffmpeg] Process exited with code ${code}`);
         console.error('[ffmpeg] Error during recording! retry in 3s');
-
-        // throw Error('[ffmpeg] Terminated')
 
         setTimeout(retryCallback, 3000);
       }
@@ -227,96 +226,6 @@ export default class BroadcastRecorder {
       console.error('[ffmpeg] Error during recording! retry in 3s');
 
       setTimeout(retryCallback, 3000);
-    });
-  }
-
-  private checkIfRecordingCompletedNaturally(
-    startedAt: DateTime,
-    expectedDurationSeconds: number,
-    currentSlot: TimeSlot
-  ): boolean {
-    const actualDuration = DateTime.now().diff(startedAt, 'seconds').seconds;
-    const tolerance = 5; // Allow 5 seconds tolerance for natural completion
-
-    // Check if we recorded for the expected duration (within tolerance)
-    const completedNaturally = Math.abs(actualDuration - expectedDurationSeconds) <= tolerance;
-
-    // Also check if the time slot has actually ended
-    const slotEnded = DateTime.now() >= currentSlot.end.minus({ seconds: tolerance });
-
-    console.log(
-      `[recorder] Duration check - Expected: ${expectedDurationSeconds}s, Actual: ${Math.round(actualDuration)}s, ` +
-        `Slot ended: ${slotEnded}, Completed naturally: ${completedNaturally}`
-    );
-
-    return completedNaturally || slotEnded;
-  }
-
-  // private async resumeRecording(
-  //   targetFile: string,
-  //   currentSlot: TimeSlot,
-  //   originalStartTime: DateTime
-  // ): Promise<void> {
-  //   console.log('[recorder] Recording terminated early, attempting to resume...');
-  //
-  //   // Calculate remaining time for this slot
-  //   const now = DateTime.now();
-  //   const remaining = now.until(currentSlot.end);
-  //   const remainingSeconds = remaining.length('seconds');
-  //
-  //   if (remainingSeconds > 5) { // Only resume if there's more than 5 seconds left
-  //     console.log(`[recorder] Resuming recording for ${Math.round(remainingSeconds)}s remaining`);
-  //
-  //     // Start a new recording that will be concatenated
-  //     this.writeStreamToFile(targetFile, currentSlot, originalStartTime, Math.round(remainingSeconds));
-  //   } else {
-  //     console.log('[recorder] Too little time remaining, not resuming recording');
-  //     // Consider this as completed and trigger onFinished
-  //     const totalExpectedDuration = originalStartTime.until(currentSlot.end).length('seconds');
-  //     await this.onFinished(targetFile, currentSlot, originalStartTime, totalExpectedDuration);
-  //   }
-  // }
-
-  private async concatenateAudioFiles(
-    existingFile: string,
-    newFile: string,
-    outputFile: string
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const concatArgs = [
-        '-i',
-        existingFile,
-        '-i',
-        newFile,
-        '-filter_complex',
-        '[0:0][1:0]concat=n=2:v=0:a=1[out]',
-        '-map',
-        '[out]',
-        '-b:a',
-        `${this.bitrate}k`,
-        '-v',
-        'error',
-        '-hide_banner',
-        '-y',
-        outputFile,
-      ];
-
-      const concatProcess = spawn('ffmpeg', concatArgs);
-
-      concatProcess.on('close', (code) => {
-        if (code === 0) {
-          console.log('[ffmpeg] Successfully concatenated audio files');
-          resolve();
-        } else {
-          console.error(`[ffmpeg] Concatenation failed with code ${code}`);
-          reject(new Error(`Concatenation failed with code ${code}`));
-        }
-      });
-
-      concatProcess.on('error', (err) => {
-        console.error('[ffmpeg] Concatenation process error:', err.message);
-        reject(err);
-      });
     });
   }
 

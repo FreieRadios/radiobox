@@ -82,7 +82,11 @@ export const getFilename = (
 };
 
 export const cleanupFile = (uploadFile: UploadFile) => {
-  fs.unlink(uploadFile.sourceFile, (err) => {
+  unlinkFile(uploadFile.sourceFile)
+};
+
+export const unlinkFile = (sourceFile: string) => {
+  fs.unlink(sourceFile, (err) => {
     if (err) {
       console.error(err);
     } else {

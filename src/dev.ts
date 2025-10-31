@@ -22,7 +22,7 @@ const run = async () => {
   const now = DateTime.now();
   const schema = getSchema();
 
-  writeRepeatsPlaylist(schema, now)
+  writeRepeatsPlaylist(schema, now, 1)
 };
 
 console.log("[autopilot] ... starting ...");

@@ -11,7 +11,34 @@ log.level.set(3)
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
 
-main_stream = input.http(main_stream_url, timeout=3.0)
+settings.harbor.bind_addrs.set(["0.0.0.0"])
+
+# (optional) configure live harbor input
+raw_harbor_live=input.harbor(
+    id="raw_harbor_live",
+    port=harbor_port,
+    #transport=harbor_transport,
+    user=harbor_user,
+    password=harbor_password,
+    buffer=2.0,
+    replay_metadata=true,
+    metadata_charset="UTF-8",
+    icy=true,
+    icy_metadata_charset="UTF-8",
+    "/live"
+)
+
+# process live harbor input
+live_harbor=blank.strip(
+    id="live_harbor_blank_stripper",
+    stereo(
+        id="live_harbor_stereo",
+        raw_harbor_live
+    )
+)
+
+
+main_stream = input.http(main_stream_url, timeout=30.0)
 
 # configure security input
 security = single(
@@ -25,11 +52,36 @@ radio_day=fallback(
     track_sensitive=false,
     [
         main_stream,
+        live_harbor,
         security
     ]
 )
 
-repeats_playlist = playlist(mode="normal", reload=1800, repeats_txt_file)
+# Log the playlist file content for debugging
+def debug_playlist_file() =
+    log(">>>>>>>>>>> Reading playlist file #{repeats_txt_file}:")
+    try
+        content = file.contents(repeats_txt_file)
+        log("Repeats playlist file contents:")
+        log(content)
+        lines = string.split(separator="\n", content)
+        log("Number of lines in playlist: #{list.length(lines)}")
+    catch err do
+        log("Error reading playlist file #{repeats_txt_file}: #{err}")
+    end
+end
+
+# Call this at startup to see what's in the file
+debug_playlist_file()
+
+repeats_playlist = mksafe(
+    playlist(
+        id="repeats_playlist",
+        mode="normal",
+        reload_mode="watch",
+        repeats_txt_file
+    )
+)
 
 source_switcher= switch([
     ({2h-14h}, repeats_playlist),

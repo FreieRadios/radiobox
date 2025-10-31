@@ -46,10 +46,8 @@ const run = async () => {
   const uploaderWelocal = getWelocal(schedule);
   const uploaderNextcloud = getNextcloud();
 
-  recorder.on("startup", async () => {
-    // Export m3u for the next day
-    writeRepeatsPlaylist(schema, now)
-  })
+  // recorder.on("startup", async () => {
+  // })
 
   recorder.on("finished", async (sourceFile, slot) => {
     copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
@@ -71,6 +69,7 @@ const run = async () => {
   });
 
   recorder.start().then((resp) => {
+    writeRepeatsPlaylist(schema, now, 0)
     console.log("[Recorder] has finished!");
   });
 };
