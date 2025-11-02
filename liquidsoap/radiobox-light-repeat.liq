@@ -8,7 +8,7 @@ settings.log.file.path.set("#{home_path}/logs/<script>.log")
 settings.log.stdout.set(true)
 log.level.set(3)
 
-log(">>>>>>>>>>>>>>> Running Script #{home_path}/logs/<script>.log")
+log(">>>>>>>>>>>>>>> Running Script")
 
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
@@ -51,7 +51,7 @@ security = single(
 # main source switcher
 radio_day=fallback(
     id="source_switcher_day",
-    track_sensitive=true,
+    track_sensitive=false,
     [
         main_stream,
         live_harbor,
@@ -86,7 +86,7 @@ repeats_playlist = mksafe(
 )
 
 source_switcher= switch(
-    track_sensitive=true,
+    track_sensitive=false,
     [
       ({2h-14h}, repeats_playlist),
       ({14h-2h}, radio_day)

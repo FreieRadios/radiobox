@@ -66,8 +66,8 @@ repeats=fallback(
 )
 
 source_switcher= switch([
-        ({2h-14h}, repeats),
-        ({14h-2h}, day)
+      ({14h-02h}, silence_source),    # 14:00 to 02:00 next day - main stream
+      ({02h-14h}, repeats_playlist)   # 02:00 to 14:00 - playlist
 ])
 
 # function that makes a safe radio

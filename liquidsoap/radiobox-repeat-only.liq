@@ -50,10 +50,10 @@ repeats_playlist = mksafe(
 silence_source = blank(duration=1.0)
 
 source_switcher= switch(
-    track_sensitive=true,
+    track_sensitive=false,
     [
-      ({2h-14h}, repeats_playlist),
-      ({14h-2h}, silence_source)
+      ({14h-02h}, silence_source),    # 14:00 to 02:00 next day - main stream
+      ({02h-14h}, repeats_playlist)   # 02:00 to 14:00 - playlist
     ]
 )
 
