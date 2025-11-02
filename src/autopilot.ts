@@ -69,7 +69,7 @@ const run = async () => {
   });
 
   recorder.start().then((resp) => {
-    writeRepeatsPlaylist(schema, now, 0)
+    writeRepeatsPlaylist(schema, DateTime.now(), 0)
     console.log("[Recorder] has finished!");
   });
 };

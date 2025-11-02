@@ -38,7 +38,8 @@ const run = async () => {
   });
 
   recorder.start().then((resp) => {
-    writeRepeatsPlaylist(schema, now, 0, '.flac');
+    console.log('[Recorder] Write repeat playlist for now!');
+    writeRepeatsPlaylist(schema, DateTime.now(), 0, '.flac');
     console.log('[Recorder] has finished!');
   });
 };

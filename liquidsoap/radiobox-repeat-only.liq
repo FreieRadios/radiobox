@@ -6,7 +6,9 @@
 # Logging configuration to stdout and to the file
 settings.log.file.path.set("#{home_path}/logs/<script>.log")
 settings.log.stdout.set(true)
-log.level.set(3)
+log.level.set(2)
+
+log(">>>>>>>>>>>>>>> Running Script #{home_path}/logs/<script>.log")
 
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
@@ -37,6 +39,7 @@ debug_playlist_file()
 repeats_playlist = mksafe(
     playlist(
         id="repeats_playlist",
+        loop=false,
         mode="normal",
         reload_mode="watch",
         repeats_txt_file
@@ -46,10 +49,13 @@ repeats_playlist = mksafe(
 # Create a silence source for 14h-2h period
 silence_source = blank(duration=1.0)
 
-source_switcher= switch([
-    ({2h-14h}, repeats_playlist),
-    ({14h-2h}, silence_source)
-])
+source_switcher= switch(
+    track_sensitive=true,
+    [
+      ({2h-14h}, repeats_playlist),
+      ({14h-2h}, silence_source)
+    ]
+)
 
 # Add a fallback to make it infallible
 safe_source_switcher = fallback([

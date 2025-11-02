@@ -8,6 +8,8 @@ settings.log.file.path.set("/tmp/<script>.log")
 settings.log.stdout.set(true)
 log.level.set(2)
 
+log(">>>>>>>>>>>>>>> Running Script #{home_path}/logs/<script>.log")
+
 settings.harbor.bind_addrs.set(["0.0.0.0"])
 
 fallback_stream = mksafe(input.http(fallback_stream_url))

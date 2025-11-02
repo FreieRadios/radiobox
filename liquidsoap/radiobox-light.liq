@@ -8,6 +8,8 @@ settings.log.file.path.set("#{home_path}/logs/<script>.log")
 settings.log.stdout.set(true)
 log.level.set(3)
 
+log(">>>>>>>>>>>>>>> Running Script #{home_path}/logs/<script>.log")
+
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
 
