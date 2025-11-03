@@ -6,7 +6,7 @@
 # Logging configuration to stdout and to the file
 settings.log.file.path.set("#{home_path}/logs/<script>.log")
 settings.log.stdout.set(true)
-log.level.set(2)
+log.level.set(3)
 
 log(">>>>>>>>>>>>>>> Running Script #{home_path}/logs/<script>.log")
 
@@ -36,14 +36,18 @@ end
 # Call this at startup to see what's in the file
 debug_playlist_file()
 
-repeats_playlist = mksafe(
-    playlist(
-        id="repeats_playlist",
-        loop=false,
-        mode="normal",
-        reload_mode="watch",
-        repeats_txt_file
-    )
+repeats_playlist = playlist(
+    id="repeats_playlist",
+    loop=false,
+    mode="normal",
+    reload_mode="watch",
+    on_reload=fun(this_pl) -> begin
+        log("Playlist reloaded")
+        log(this_pl)
+        # Reset queue using server command
+        server.execute("repeats_playlist.queue []")
+    end,
+    repeats_txt_file
 )
 
 # Create a silence source for 14h-2h period
@@ -52,7 +56,8 @@ silence_source = blank(duration=1.0)
 source_switcher= switch(
     track_sensitive=false,
     [
-      ({14h-02h}, silence_source),    # 14:00 to 02:00 next day - main stream
+        ({14h-02h}, repeats_playlist),
+      ({14h-02h}, security),    # 14:00 to 02:00 next day - main stream
       ({02h-14h}, repeats_playlist)   # 02:00 to 14:00 - playlist
     ]
 )

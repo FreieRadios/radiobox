@@ -56,11 +56,24 @@ export const writeFile = (
   data: string,
   ext: string
 ) => {
-  fs.writeFile(`${outDir}/${filename}.${ext}`, data, (err) => {
+  const finalPath = `${outDir}/${filename}.${ext}`;
+  const tempPath = `${finalPath}.tmp`;
+
+  fs.writeFile(tempPath, data, (err) => {
     if (err) {
       return console.log(err);
     }
-    console.log(`${outDir}/${filename}.${ext} has been saved!`);
+
+    // Atomically rename the temp file to the final file
+    fs.rename(tempPath, finalPath, (renameErr) => {
+      if (renameErr) {
+        console.log(renameErr);
+        // Clean up temp file on error
+        fs.unlink(tempPath, () => {});
+        return;
+      }
+      console.log(`${finalPath} has been saved!`);
+    });
   });
 };
 
@@ -113,3 +126,37 @@ export const copyFile = (sourceFile: string, destinationPath: string) => {
     console.error(`[autopilot] Error copying file to repeat directory:`, error);
   }
 }
+
+export const unlinkFilesByType = (directory: string, type: string) => {
+  try {
+    const dirPath = getPath(directory);
+
+    if (!fs.existsSync(dirPath)) {
+      console.log(`[autopilot] Directory does not exist: ${dirPath}`);
+      return;
+    }
+
+    const files = fs.readdirSync(dirPath);
+    const flacFiles = files.filter(file => path.extname(file).toLowerCase() === type);
+
+    if (flacFiles.length === 0) {
+      console.log(`[autopilot] No files found in ${dirPath}`);
+      return;
+    }
+
+    flacFiles.forEach(file => {
+      const filePath = path.join(dirPath, file);
+      fs.unlink(filePath, (err) => {
+        if (err) {
+          console.error(`[autopilot] Error deleting ${filePath}:`, err);
+        } else {
+          console.log(`[autopilot] Deleted file: ${filePath}`);
+        }
+      });
+    });
+
+    console.log(`[autopilot] Initiated deletion of ${flacFiles.length} files`);
+  } catch (error) {
+    console.error(`[autopilot] Error reading directory ${directory}:`, error);
+  }
+};

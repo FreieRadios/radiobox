@@ -11,7 +11,7 @@ import {
 } from './index';
 import { getDateStartEnd } from './helper/date-time';
 import * as process from 'node:process';
-import { copyFile, unlinkFile } from './helper/files';
+import { copyFile, unlinkFile, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -31,6 +31,11 @@ const run = async () => {
 
   const schedule = getSchedule(schema, dateStart, dateEnd);
   const recorder = getRecorder(schedule);
+
+
+  recorder.on('startup', async () => {
+    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.flac')
+  });
 
   recorder.on('finished', async (sourceFile, slot) => {
     copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER);

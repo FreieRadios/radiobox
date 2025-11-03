@@ -13,7 +13,7 @@ import {
 } from './index';
 import { getDateStartEnd } from "./helper/date-time";
 import * as process from "node:process";
-import { cleanupFile, copyFile } from './helper/files';
+import { cleanupFile, copyFile, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -46,12 +46,11 @@ const run = async () => {
   const uploaderWelocal = getWelocal(schedule);
   const uploaderNextcloud = getNextcloud();
 
-  // recorder.on("startup", async () => {
-  // })
+  recorder.on('startup', async () => {
+    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.mp3')
+  });
 
   recorder.on("finished", async (sourceFile, slot) => {
-    copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
-
     const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
     uploaderWelocal.upload(uploadFile).then((resp) => {
       console.log("[welocal] upload finished!");
@@ -60,6 +59,8 @@ const run = async () => {
         .upload(uploadFile)
         .then((resp) => {
           console.log("[nextcloud] upload finished!");
+          copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
+          writeRepeatsPlaylist(schema, now, 1)
           cleanupFile(uploadFile);
         })
         .catch((err) => {
@@ -69,7 +70,6 @@ const run = async () => {
   });
 
   recorder.start().then((resp) => {
-    writeRepeatsPlaylist(schema, DateTime.now(), 0)
     console.log("[Recorder] has finished!");
   });
 };
