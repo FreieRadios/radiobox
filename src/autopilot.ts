@@ -47,7 +47,10 @@ const run = async () => {
   const uploaderNextcloud = getNextcloud();
 
   recorder.on('startup', async () => {
+    // Clean up yesterday's repeat files
     unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.mp3')
+    // Update repeats playlist for tomorrow
+    writeRepeatsPlaylist(schema, now, 1)
   });
 
   recorder.on("finished", async (sourceFile, slot) => {
@@ -60,7 +63,6 @@ const run = async () => {
         .then((resp) => {
           console.log("[nextcloud] upload finished!");
           copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
-          writeRepeatsPlaylist(schema, now, 1)
           cleanupFile(uploadFile);
         })
         .catch((err) => {

@@ -8,7 +8,7 @@ settings.log.file.path.set("#{home_path}/logs/<script>.log")
 settings.log.stdout.set(true)
 log.level.set(3)
 
-log(">>>>>>>>>>>>>>> Running Script")
+log(">>>>>>>>>>>>>>> Running Script light-repeat")
 
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
@@ -59,37 +59,44 @@ radio_day=fallback(
     ]
 )
 
-# Log the playlist file content for debugging
-def debug_playlist_file() =
-    log(">>>>>>>>>>> Reading playlist file #{repeats_txt_file}:")
-    try
-        content = file.contents(repeats_txt_file)
-        log("Repeats playlist file contents:")
-        log(content)
-        lines = string.split(separator="\n", content)
-        log("Number of lines in playlist: #{list.length(lines)}")
-    catch err do
-        log("Error reading playlist file #{repeats_txt_file}: #{err}")
-    end
+repeats_playlist = playlist(
+    id="repeats_playlist",
+    loop=true,
+    mode="normal",
+    reload_mode="never",
+    repeats_txt_file
+)
+
+# Log tracks for different sources
+def log_source_track(source_name, metadata) =
+   log(">>>>> #{source_name} - Now playing: #{metadata['filename']}")
 end
 
-# Call this at startup to see what's in the file
-debug_playlist_file()
+# For the repeats_playlist switcher
+repeats_playlist.on_track(fun(m) -> log_source_track("repeats_playlist", m))
 
-repeats_playlist = mksafe(
-    playlist(
-        id="repeats_playlist",
-        mode="normal",
-        reload_mode="watch",
-        repeats_txt_file
-    )
-)
+# Daily scheduled task to reload playlist and clear queue at 01:55 AM
+def repeats_playlist_stop() =
+    repeats_playlist.set_queue([])
+    repeats_playlist.skip()
+
+    log("repeats playlist stop completed")
+end
+
+def repeats_playlist_start() =
+    repeats_playlist.reload()
+
+    log("repeats playlist reload completed")
+end
+
+thread.when(start_live, repeats_playlist_stop)
+thread.when(start_prepare_repeat, repeats_playlist_start)
 
 source_switcher= switch(
     track_sensitive=false,
     [
-      ({2h-14h}, repeats_playlist),
-      ({14h-2h}, radio_day)
+      (interval_repeat, repeats_playlist),
+      (interval_live, radio_day)
     ]
 )
 
