@@ -11,6 +11,10 @@ log.level.set(3)
 log(">>>>>>>>>>>>>>> Running Script repeat-only")
 
 silence_source = blank(duration=1.0)
+security = single(
+    id="security_single",
+    default_wav_path
+)
 
 repeats_playlist = playlist(
     id="repeats_playlist",
@@ -36,14 +40,15 @@ def repeats_playlist_stop() =
     log("repeats playlist stop completed")
 end
 
-def repeats_playlist_start() =
+def repeats_playlist_reload() =
     repeats_playlist.reload()
 
     log("repeats playlist reload completed")
 end
 
 thread.when(start_live, repeats_playlist_stop)
-thread.when(start_prepare_repeat, repeats_playlist_start)
+thread.when(start_prepare_repeat, repeats_playlist_reload)
+thread.when(refresh_prepare_repeat, repeats_playlist_reload)
 
 source_switcher= switch(
     track_sensitive=false,
@@ -56,7 +61,7 @@ source_switcher= switch(
 # Add a fallback to make it infallible
 safe_source_switcher = fallback([
     source_switcher,
-    silence_source
+    security
 ])
 
 # Lossless FLAC output for WAV files

@@ -91,6 +91,7 @@ end
 
 thread.when(start_live, repeats_playlist_stop)
 thread.when(start_prepare_repeat, repeats_playlist_start)
+thread.when(refresh_prepare_repeat, repeats_playlist_reload)
 
 source_switcher= switch(
     track_sensitive=false,
