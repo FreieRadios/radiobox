@@ -85,8 +85,8 @@ export default class BroadcastRecorder {
     const currentSlot = this.schedule.findByDateStart(now);
     if (currentSlot) {
       const remaining = now.until(currentSlot.end);
-      const seconds = 10;
-      // const seconds = remaining.length('seconds');
+      // const seconds = 10;
+      const seconds = remaining.length('seconds');
 
       if (seconds > 0) {
         const outputFile = getFilename(
