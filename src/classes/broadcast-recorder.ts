@@ -18,19 +18,21 @@ import * as fs from 'node:fs';
 export default class BroadcastRecorder {
   schedule: BroadcastSchedule;
   streamUrl: string;
+  streamDevice: string;
   outDir: string;
   filenamePrefix: string;
   // Start recording at (optional)
   dateStart: DateTime;
   // End recording at (optional)
   dateEnd: DateTime;
-  filenameSuffix = '.mp3';
+  filenameSuffix: string;
   pollingInterval = 1000; //ms
   bitrate = 256; //ms
   // delay each recording by
   delay = 0; // seconds
   events: BroadcastRecorderEvents = {
     startup: [],
+    startRecording: [],
     finished: [],
   };
 
@@ -38,7 +40,9 @@ export default class BroadcastRecorder {
     this.schedule = props.schedule;
     this.outDir = getPath(props.outDir || 'mp3/');
     this.streamUrl = props.streamUrl;
+    this.streamDevice = props.streamDevice;
     this.filenamePrefix = props.filenamePrefix;
+    this.filenameSuffix = props.filenameSuffix;
 
     if (props.dateStart && props.dateEnd) {
       this.dateStart = toDateTime(props.dateStart);
@@ -81,8 +85,8 @@ export default class BroadcastRecorder {
     const currentSlot = this.schedule.findByDateStart(now);
     if (currentSlot) {
       const remaining = now.until(currentSlot.end);
-      // const seconds = 10;
-      const seconds = remaining.length('seconds');
+      const seconds = 10;
+      // const seconds = remaining.length('seconds');
 
       if (seconds > 0) {
         const outputFile = getFilename(
@@ -109,14 +113,13 @@ export default class BroadcastRecorder {
     const delay = this.delay || 0;
 
     // Determine if we're recording from a USB device or stream
-    const isUsbInput = this.streamUrl.startsWith('hw:') || this.streamUrl.startsWith('plughw:') || this.streamUrl.startsWith('pulse') || this.streamUrl.startsWith('alsa');
+    const isUsbInput = (!this.streamUrl && this.streamDevice)
 
     // Set appropriate file extension and suffix based on input type
-    const fileExtension = isUsbInput ? '.flac' : '.mp3';
-    const partSuffix = isUsbInput ? '-part.flac' : '-part.mp3';
+    const fileExtension = this.filenameSuffix;
+    const partSuffix = '-part' + fileExtension
 
-    // Update target file extension if recording from USB
-    const finalTargetFile = isUsbInput ? targetFile.replace(/\.(mp3|flac)$/, fileExtension) : targetFile;
+    this.onStartRecording(targetFile, currentSlot, now, seconds);
 
     const title = currentSlot.broadcast.getTitle(
       currentSlot,
@@ -134,44 +137,24 @@ export default class BroadcastRecorder {
 
     let ffmpegArgs: string[];
 
+    const args = {
+      delay,
+      seconds,
+      title,
+      album,
+      genre,
+      date,
+      artist,
+      targetFile,
+      partSuffix,
+    }
+
     if (isUsbInput) {
       // USB input recording to FLAC (lossless)
-      ffmpegArgs = [
-        '-f', 'alsa',  // Use ALSA for audio input
-        '-i', this.streamUrl,  // USB device (e.g., 'hw:1,0', 'plughw:1,0', 'pulse')
-        '-ss', delay.toString(),
-        '-t', seconds.toString(),
-        '-c:a', 'flac',  // Use FLAC codec for lossless compression
-        '-compression_level', '8',  // Maximum FLAC compression
-        '-sample_fmt', 's16',  // 16-bit sample format
-        '-ar', '44100',  // 44.1kHz sample rate
-        '-metadata', `title=${title}`,
-        '-metadata', `album=${album}`,
-        '-metadata', `genre=${genre}`,
-        '-metadata', `date=${date}`,
-        '-metadata', `artist=${artist}`,
-        '-v', 'error',
-        '-hide_banner',
-        '-y', // Overwrite temp files
-        finalTargetFile + partSuffix
-      ];
+      ffmpegArgs = this.getDeviceArgs(args);
     } else {
       // Stream URL recording to MP3 (existing functionality)
-      ffmpegArgs = [
-        '-i', this.streamUrl,
-        '-ss', delay.toString(),
-        '-t', seconds.toString(),
-        '-b:a', `${this.bitrate}k`,
-        '-metadata', `title=${title}`,
-        '-metadata', `album=${album}`,
-        '-metadata', `genre=${genre}`,
-        '-metadata', `date=${date}`,
-        '-metadata', `artist=${artist}`,
-        '-v', 'error',
-        '-hide_banner',
-        '-y', // Overwrite temp files
-        finalTargetFile + partSuffix
-      ];
+      ffmpegArgs = this.getUrlArgs(args);
     }
 
     const ffmpegProcess: ChildProcess = spawn('ffmpeg', ffmpegArgs);
@@ -189,7 +172,7 @@ export default class BroadcastRecorder {
     const format = isUsbInput ? 'FLAC' : 'MP3';
     console.log(
       `[ffmpeg] ${_now} recording ${format} from ${inputType} "${
-        finalTargetFile + partSuffix
+        targetFile + partSuffix
       }" (${Math.round(seconds / 60)}min left; ${seconds}s)`
     );
 
@@ -207,10 +190,10 @@ export default class BroadcastRecorder {
       const _now = DateTime.now().toFormat(timeFormats.machine);
 
       if (code === 0) {
-        console.log(`[ffmpeg] ${_now} Finished recording ` + finalTargetFile + partSuffix);
+        console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
 
-        fs.renameSync(finalTargetFile + partSuffix, finalTargetFile);
-        await this.onFinished(finalTargetFile, currentSlot, now, seconds);
+        fs.renameSync(targetFile + partSuffix, targetFile);
+        await this.onFinished(targetFile, currentSlot, now, seconds);
 
       } else {
         console.error(`[ffmpeg] Process exited with code ${code}`);
@@ -229,6 +212,46 @@ export default class BroadcastRecorder {
     });
   }
 
+  getUrlArgs(args) {
+   return [
+     '-i', this.streamUrl,
+     '-ss', args.delay.toString(),
+     '-t', args.seconds.toString(),
+     '-b:a', `${this.bitrate}k`,
+     '-metadata', `title=${args.title}`,
+     '-metadata', `album=${args.album}`,
+     '-metadata', `genre=${args.genre}`,
+     '-metadata', `date=${args.date}`,
+     '-metadata', `artist=${args.artist}`,
+     '-v', 'error',
+     '-hide_banner',
+     '-y', // Overwrite temp files
+     args.targetFile + args.partSuffix
+   ]
+  }
+
+  getDeviceArgs(args) {
+    return [
+      '-f', 'alsa',  // Use ALSA for audio input
+      '-i', this.streamDevice,  // USB device (e.g., 'hw:1,0', 'plughw:1,0', 'pulse')
+      '-ss', args.delay.toString(),
+      '-t', args.seconds.toString(),
+      '-c:a', 'flac',  // Use FLAC codec for lossless compression
+      '-compression_level', '8',  // Maximum FLAC compression
+      '-sample_fmt', 's16',  // 16-bit sample format
+      '-ar', '44100',  // 44.1kHz sample rate
+      '-metadata', `title=${args.title}`,
+      '-metadata', `album=${args.album}`,
+      '-metadata', `genre=${args.genre}`,
+      '-metadata', `date=${args.date}`,
+      '-metadata', `artist=${args.artist}`,
+      '-v', 'error',
+      '-hide_banner',
+      '-y', // Overwrite temp files
+      args.targetFile + args.partSuffix
+    ]
+  }
+
   async onStartup(startedAt: DateTime) {
     for (const listener of this.events.startup) {
       await listener(null, null, startedAt, null, this);
@@ -243,6 +266,17 @@ export default class BroadcastRecorder {
   ) {
     for (const listener of this.events.finished) {
       await listener(outputFile, currentSlot, startedAt, seconds, this);
+    }
+  }
+
+  onStartRecording(
+    outputFile: string,
+    currentSlot: TimeSlot,
+    startedAt: DateTime,
+    seconds: number
+  ) {
+    for (const listener of this.events.startRecording) {
+      listener(outputFile, currentSlot, startedAt, seconds, this);
     }
   }
 

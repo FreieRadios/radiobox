@@ -3,7 +3,6 @@ import 'dotenv/config';
 import { timeFormats } from './helper/helper';
 import {
   fetchSchemaFromNextcloud,
-  getNextcloud,
   getRecorder,
   getSchedule,
   getSchema,
@@ -11,7 +10,7 @@ import {
 } from './index';
 import { getDateStartEnd } from './helper/date-time';
 import * as process from 'node:process';
-import { copyFile, unlinkFile, unlinkFilesByType } from './helper/files';
+import { getFilename, moveFile, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -32,19 +31,26 @@ const run = async () => {
   const schedule = getSchedule(schema, dateStart, dateEnd);
   const recorder = getRecorder(schedule);
 
+  console.log('[Recorder] Write repeat playlist for now!');
+  writeRepeatsPlaylist(schema, DateTime.now(), 1, '.flac');
 
   recorder.on('startup', async () => {
-    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.flac')
+    //unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.flac');
   });
 
+  recorder.on('startRecording', async (sourceFile, slot) => {});
+
   recorder.on('finished', async (sourceFile, slot) => {
-    copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER);
-    unlinkFile(sourceFile);
+    const destinationFilename = getFilename(
+      process.env.EXPORTER_REPEAT_FOLDER,
+      'repeat',
+      slot.matches[0].repeatAt,
+      '.flac'
+    );
+    moveFile(sourceFile, destinationFilename);
   });
 
   recorder.start().then((resp) => {
-    console.log('[Recorder] Write repeat playlist for now!');
-    writeRepeatsPlaylist(schema, DateTime.now(), 0, '.flac');
     console.log('[Recorder] has finished!');
   });
 };

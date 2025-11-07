@@ -127,6 +127,26 @@ export const copyFile = (sourceFile: string, destinationPath: string) => {
   }
 }
 
+export const moveFile = (sourceFile: string, destinationFile: string) => {
+  try {
+    // Get the destination directory
+    const destinationDir = path.dirname(destinationFile);
+
+    // Ensure destination directory exists
+    if (!fs.existsSync(destinationDir)) {
+      fs.mkdirSync(destinationDir, { recursive: true });
+      console.log(`[autopilot] Created directory: ${destinationDir}`);
+    }
+
+    // Move the file (rename is atomic and works across directories on the same filesystem)
+    fs.renameSync(sourceFile, destinationFile);
+    console.log(`[autopilot] Moved ${sourceFile} to ${destinationFile}`);
+  } catch (error) {
+    console.error(`[autopilot] Error moving file from ${sourceFile} to ${destinationFile}:`, error);
+    throw error;
+  }
+}
+
 export const unlinkFilesByType = (directory: string, type: string) => {
   try {
     const dirPath = getPath(directory);

@@ -32,6 +32,7 @@ test("record a broadcast from url and store as mp3", async () => {
   const recorder = new BroadcastRecorder({
     schedule,
     streamUrl: process.env.RECORDER_STREAM_URL,
+    streamDevice: process.env.RECORDER_STREAM_DEVICE,
     filenamePrefix: process.env.FILENAME_PREFIX,
     delay: 5,
   });
