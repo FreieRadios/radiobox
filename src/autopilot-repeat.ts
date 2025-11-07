@@ -10,7 +10,7 @@ import {
 } from './index';
 import { getDateStartEnd } from './helper/date-time';
 import * as process from 'node:process';
-import { getFilename, moveFile, unlinkFilesByType } from './helper/files';
+import { getFilename, getPath, moveFile, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -42,7 +42,7 @@ const run = async () => {
 
   recorder.on('finished', async (sourceFile, slot) => {
     const destinationFilename = getFilename(
-      process.env.EXPORTER_REPEAT_FOLDER,
+      getPath(process.env.EXPORTER_REPEAT_FOLDER),
       'repeat',
       slot.matches[0].repeatAt,
       '.flac'
