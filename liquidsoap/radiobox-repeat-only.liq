@@ -23,8 +23,7 @@ time_based_source = fallback(track_sensitive=false, [q, security])
 source_switcher= switch(
     track_sensitive=false,
     [
-      # First priority: time-based files
-      ({true}, time_based_source),
+      (interval_repeat, time_based_source),
       (interval_live, silence_source)
     ]
 )
