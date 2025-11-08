@@ -16,44 +16,15 @@ security = single(
     default_wav_path
 )
 
-repeats_playlist = playlist(
-    id="repeats_playlist",
-    loop=true,
-    mode="normal",
-    reload_mode="never",
-    repeats_txt_file
-)
-
-# Log tracks for different sources
-def log_source_track(source_name, metadata) =
-   log(">>>>> #{source_name} - Now playing: #{metadata['filename']}")
-end
-
-# For the repeats_playlist switcher
-repeats_playlist.on_track(fun(m) -> log_source_track("repeats_playlist", m))
-
-# Daily scheduled task to reload playlist and clear queue at 01:55 AM
-def repeats_playlist_stop() =
-    repeats_playlist.set_queue([])
-    repeats_playlist.skip()
-
-    log("repeats playlist stop completed")
-end
-
-def repeats_playlist_reload() =
-    repeats_playlist.reload()
-
-    log("repeats playlist reload completed")
-end
-
-thread.when(start_live, repeats_playlist_stop)
-thread.when(start_prepare_repeat, repeats_playlist_reload)
-thread.when(refresh_prepare_repeat, repeats_playlist_reload)
+q = request.queue(id="repeat_queue")
+%include "play_by_filename.liq"
+time_based_source = fallback(track_sensitive=false, [q, security])
 
 source_switcher= switch(
     track_sensitive=false,
     [
-      (interval_repeat, repeats_playlist),
+      # First priority: time-based files
+      ({true}, time_based_source),
       (interval_live, silence_source)
     ]
 )

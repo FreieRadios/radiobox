@@ -13,7 +13,14 @@ import {
 } from './index';
 import { getDateStartEnd } from "./helper/date-time";
 import * as process from "node:process";
-import { cleanupFile, copyFile, unlinkFilesByType } from './helper/files';
+import {
+  cleanupFile,
+  copyFile,
+  getFilename,
+  getPath,
+  moveFile,
+  unlinkFilesByType,
+} from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -49,8 +56,6 @@ const run = async () => {
   recorder.on('startup', async () => {
     // Clean up yesterday's repeat files
     unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.mp3')
-    // Update repeats playlist for tomorrow
-    writeRepeatsPlaylist(schema, now, 1)
   });
 
   recorder.on("finished", async (sourceFile, slot) => {
@@ -62,8 +67,14 @@ const run = async () => {
         .upload(uploadFile)
         .then((resp) => {
           console.log("[nextcloud] upload finished!");
-          copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
-          cleanupFile(uploadFile);
+          const destinationFilename = getFilename(
+            getPath(process.env.EXPORTER_REPEAT_FOLDER),
+            'repeat',
+            slot.matches[0].repeatAt,
+            '.mp3'
+          );
+          // rename the file with the repeat's timestamp and move to repeats folder.
+          moveFile(sourceFile, destinationFilename)
         })
         .catch((err) => {
           console.error(err);
