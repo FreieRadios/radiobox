@@ -7,7 +7,7 @@ import {
 } from '../types/types';
 import BroadcastSchedule from './broadcast-schedule';
 import { ChildProcess, spawn } from 'child_process';
-import { sleep, timeFormats, vd } from '../helper/helper';
+import { sleep, timeFormats } from '../helper/helper';
 import { getFilename, getPath } from '../helper/files';
 import { toDateTime } from '../helper/date-time';
 import * as fs from 'node:fs';
@@ -197,18 +197,18 @@ export default class BroadcastRecorder {
 
       } else {
         console.error(`[ffmpeg] Process exited with code ${code}`);
-        console.error('[ffmpeg] Error during recording! retry in 3s');
+        console.error('[ffmpeg] Error during recording! retry in 1s');
 
-        setTimeout(retryCallback, 3000);
+        setTimeout(retryCallback, 1000);
       }
     });
 
     // Handle process errors
     ffmpegProcess.on('error', (err) => {
       console.error('[ffmpeg] Failed to start process:', err.message);
-      console.error('[ffmpeg] Error during recording! retry in 3s');
+      console.error('[ffmpeg] Error during recording! retry in 1s');
 
-      setTimeout(retryCallback, 3000);
+      setTimeout(retryCallback, 1000);
     });
   }
 

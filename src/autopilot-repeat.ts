@@ -1,24 +1,10 @@
 import { DateTime } from 'luxon';
 import 'dotenv/config';
 import { timeFormats } from './helper/helper';
-import {
-  fetchSchemaFromNextcloud,
-  getRecorder,
-  getSchedule,
-  getSchema,
-  writeRepeatsPlaylist,
-} from './index';
+import { fetchSchemaFromNextcloud, getRecorder, getSchedule, getSchema } from './index';
 import { getDateStartEnd } from './helper/date-time';
 import * as process from 'node:process';
-import {
-  cleanupFile,
-  copyFile,
-  getFilename,
-  getPath,
-  moveFile,
-  unlinkFile,
-  unlinkFilesByType,
-} from './helper/files';
+import { copyFile, copyRepeat, getFilename, unlinkFile, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -26,6 +12,8 @@ const run = async () => {
 
   const now = DateTime.now();
   const schema = getSchema();
+
+  const filenameSuffix = process.env.FILENAME_SUFFIX
 
   const { dateStart, dateEnd } = getDateStartEnd(
     now.toFormat('yyyy-MM-dd'),
@@ -39,25 +27,13 @@ const run = async () => {
   const schedule = getSchedule(schema, dateStart, dateEnd);
   const recorder = getRecorder(schedule);
 
-  console.log('[Recorder] Write repeat playlist for now!');
-  writeRepeatsPlaylist(schema, DateTime.now(), 1, '.flac');
-
   recorder.on('startup', async () => {
-    //unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.flac');
+    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, filenameSuffix);
   });
 
-  recorder.on('startRecording', async (sourceFile, slot) => {});
-
   recorder.on('finished', async (sourceFile, slot) => {
-    const destinationFilename = getFilename(
-      getPath(process.env.EXPORTER_REPEAT_FOLDER),
-      'repeat',
-      slot.matches[0].repeatAt,
-      '.flac'
-    );
-    // rename the file with the repeat's timestamp and copy to repeats folder.
-    copyFile(sourceFile, destinationFilename)
-    unlinkFile(sourceFile)
+    copyRepeat(sourceFile, slot, filenameSuffix)
+    unlinkFile(sourceFile);
   });
 
   recorder.start().then((resp) => {

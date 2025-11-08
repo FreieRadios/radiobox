@@ -1,22 +1,19 @@
-import * as fs from "fs";
-import nodeXlsx from "node-xlsx";
-import { TimeSlot, UploadFile } from "../types/types";
-import slugify from "slugify";
-import { timeFormats } from "./helper";
-import * as process from "node:process";
+import * as fs from 'fs';
+import nodeXlsx from 'node-xlsx';
+import { TimeSlot, UploadFile } from '../types/types';
+import slugify from 'slugify';
+import { timeFormats } from './helper';
+import * as process from 'node:process';
 import path from 'path';
 
 export const getPath = (file) => {
   if (process.env.RADIOBOX_BASEDIR) {
-    return process.env.RADIOBOX_BASEDIR + "/" + file;
+    return process.env.RADIOBOX_BASEDIR + '/' + file;
   }
   return file;
 };
 
-export const dataFromXlsx = (
-  file: string,
-  worksheetId?: number
-): string[][] => {
+export const dataFromXlsx = (file: string, worksheetId?: number): string[][] => {
   if (!fileExistsSync(file)) {
     console.error(`Could not locate ${file}`);
     return [];
@@ -42,20 +39,11 @@ export function fileExistsSync(path: string): boolean {
   }
 }
 
-export const writeJsonFile = (
-  outDir: string,
-  filename: string,
-  data: object
-) => {
-  writeFile(outDir, filename, JSON.stringify(data, null, 2), "json");
+export const writeJsonFile = (outDir: string, filename: string, data: object) => {
+  writeFile(outDir, filename, JSON.stringify(data, null, 2), 'json');
 };
 
-export const writeFile = (
-  outDir: string,
-  filename: string,
-  data: string,
-  ext: string
-) => {
+export const writeFile = (outDir: string, filename: string, data: string, ext: string) => {
   const finalPath = `${outDir}/${filename}.${ext}`;
   const tempPath = `${finalPath}.tmp`;
 
@@ -89,13 +77,13 @@ export const getFilename = (
       filePrefix,
       slot.start.toFormat(timeFormats.machine),
       slugify(slot.broadcast.name.slice(0, 50)),
-    ].join("-") +
+    ].join('-') +
       fileSuffix)
   );
 };
 
 export const cleanupFile = (uploadFile: UploadFile) => {
-  unlinkFile(uploadFile.sourceFile)
+  unlinkFile(uploadFile.sourceFile);
 };
 
 export const unlinkFile = (sourceFile: string) => {
@@ -103,29 +91,29 @@ export const unlinkFile = (sourceFile: string) => {
     if (err) {
       console.error(err);
     } else {
-      console.log("[autopilot] upload file was deleted.");
+      console.log('[autopilot] upload file was deleted.');
     }
   });
 };
 
-export const copyFile = (sourceFile: string, destinationPath: string) => {
+export const copyRepeat = (sourceFile: string, slot: TimeSlot, filenameSuffix: string) => {
+  const destinationFilename = getFilename('', 'repeat', slot.matches[0].repeatAt, filenameSuffix);
+  // rename the file with the repeat's timestamp and copy to repeats folder.
+  copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER, destinationFilename);
+};
+
+export const copyFile = (sourceFile: string, destinationPath: string, newName?: string) => {
   const sourceFileName = path.basename(sourceFile);
-  const targetFilePath = path.join(getPath(destinationPath), sourceFileName);
+  const targetFilePath = path.join(getPath(destinationPath), newName || sourceFileName);
 
   try {
-    // Ensure repeat directory exists
-    if (!fs.existsSync(destinationPath)) {
-      fs.mkdirSync(destinationPath, { recursive: true });
-      console.log(`[autopilot] Created repeat directory: ${destinationPath}`);
-    }
-
-    // Copy file to repeat directory
+    // Copy file to directory
     fs.copyFileSync(sourceFile, targetFilePath);
     console.log(`[autopilot] Copied ${sourceFile} to ${targetFilePath}`);
   } catch (error) {
-    console.error(`[autopilot] Error copying file to repeat directory:`, error);
+    console.error(`[autopilot] Error copying file to directory:`, error);
   }
-}
+};
 
 export const moveFile = (sourceFile: string, destinationFile: string) => {
   try {
@@ -145,7 +133,7 @@ export const moveFile = (sourceFile: string, destinationFile: string) => {
     console.error(`[autopilot] Error moving file from ${sourceFile} to ${destinationFile}:`, error);
     throw error;
   }
-}
+};
 
 export const unlinkFilesByType = (directory: string, type: string) => {
   try {
@@ -157,14 +145,14 @@ export const unlinkFilesByType = (directory: string, type: string) => {
     }
 
     const files = fs.readdirSync(dirPath);
-    const flacFiles = files.filter(file => path.extname(file).toLowerCase() === type);
+    const flacFiles = files.filter((file) => path.extname(file).toLowerCase() === type);
 
     if (flacFiles.length === 0) {
       console.log(`[autopilot] No files found in ${dirPath}`);
       return;
     }
 
-    flacFiles.forEach(file => {
+    flacFiles.forEach((file) => {
       const filePath = path.join(dirPath, file);
       fs.unlink(filePath, (err) => {
         if (err) {
