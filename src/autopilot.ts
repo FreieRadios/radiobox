@@ -73,8 +73,9 @@ const run = async () => {
             slot.matches[0].repeatAt,
             '.mp3'
           );
-          // rename the file with the repeat's timestamp and move to repeats folder.
-          moveFile(sourceFile, destinationFilename)
+          // rename the file with the repeat's timestamp and copy to repeats folder.
+          copyFile(sourceFile, destinationFilename)
+          cleanupFile(uploadFile)
         })
         .catch((err) => {
           console.error(err);

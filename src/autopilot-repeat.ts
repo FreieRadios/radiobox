@@ -10,7 +10,15 @@ import {
 } from './index';
 import { getDateStartEnd } from './helper/date-time';
 import * as process from 'node:process';
-import { getFilename, getPath, moveFile, unlinkFilesByType } from './helper/files';
+import {
+  cleanupFile,
+  copyFile,
+  getFilename,
+  getPath,
+  moveFile,
+  unlinkFile,
+  unlinkFilesByType,
+} from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -47,7 +55,9 @@ const run = async () => {
       slot.matches[0].repeatAt,
       '.flac'
     );
-    moveFile(sourceFile, destinationFilename);
+    // rename the file with the repeat's timestamp and copy to repeats folder.
+    copyFile(sourceFile, destinationFilename)
+    unlinkFile(sourceFile)
   });
 
   recorder.start().then((resp) => {
