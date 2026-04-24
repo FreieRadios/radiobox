@@ -192,7 +192,7 @@ export default class ScheduleExport {
     this.write((data: TimeGridPlaylist) =>
       data
         .filter((slot) => !filterRepeat || (filterRepeat && slot.repeatFrom))
-        .map((slot) => slot.repeatFrom)
+        .map((slot) => slot.filename)
         .join(`\n`)
     );
   }

@@ -1,19 +1,19 @@
-import { DateTime } from "luxon";
-import "dotenv/config";
-import { timeFormats } from "./helper/helper";
+import { DateTime } from 'luxon';
+import 'dotenv/config';
+import { timeFormats } from './helper/helper';
 import {
   fetchSchemaFromNextcloud,
   getNextcloud,
   getRecorder,
   getSchedule,
   getSchema,
-  getWelocal, writeRepeatsPlaylist,
+  getWelocal,
   putSchemaToFTP,
   updateStreamMeta,
 } from './index';
-import { getDateStartEnd } from "./helper/date-time";
-import * as process from "node:process";
-import { cleanupFile, copyFile, unlinkFilesByType } from './helper/files';
+import { getDateStartEnd } from './helper/date-time';
+import * as process from 'node:process';
+import { cleanupFile, copyRepeat, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -21,8 +21,9 @@ const run = async () => {
 
   const now = DateTime.now();
   const schema = getSchema();
+  const filenameSuffix = process.env.FILENAME_SUFFIX;
 
-  if ([1,3,5,6].includes(now.weekday)) {
+  if ([1, 3, 5, 6].includes(now.weekday)) {
     // Every second day, we want to export the schedule to FTP
     [0, 1, 2, 3].forEach((week) => {
       putSchemaToFTP(schema, now, week);
@@ -30,15 +31,15 @@ const run = async () => {
   }
 
   const { dateStart, dateEnd } = getDateStartEnd(
-    now.toFormat("yyyy-MM-dd"),
+    now.toFormat('yyyy-MM-dd'),
     process.env.RECORDER_START_TIME,
     Number(process.env.RECORDER_DURATION)
   );
 
   updateStreamMeta(schema, Number(process.env.META_UPDATE_INTERVAL), dateEnd);
 
-  console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
-  console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
+  console.log('[Recorder] starts at ' + dateStart.toFormat(timeFormats.human));
+  console.log('[Recorder] ends at ' + dateEnd.toFormat(timeFormats.human));
 
   const schedule = getSchedule(schema, dateStart, dateEnd);
   const recorder = getRecorder(schedule);
@@ -48,21 +49,19 @@ const run = async () => {
 
   recorder.on('startup', async () => {
     // Clean up yesterday's repeat files
-    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.mp3')
-    // Update repeats playlist for tomorrow
-    writeRepeatsPlaylist(schema, now, 1)
+    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, filenameSuffix);
   });
 
-  recorder.on("finished", async (sourceFile, slot) => {
+  recorder.on('finished', async (sourceFile, slot) => {
     const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
     uploaderWelocal.upload(uploadFile).then((resp) => {
-      console.log("[welocal] upload finished!");
+      console.log('[welocal] upload finished!');
 
       uploaderNextcloud
         .upload(uploadFile)
         .then((resp) => {
-          console.log("[nextcloud] upload finished!");
-          copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER)
+          console.log('[nextcloud] upload finished!');
+          copyRepeat(sourceFile, slot, filenameSuffix);
           cleanupFile(uploadFile);
         })
         .catch((err) => {
@@ -72,11 +71,11 @@ const run = async () => {
   });
 
   recorder.start().then((resp) => {
-    console.log("[Recorder] has finished!");
+    console.log('[Recorder] has finished!');
   });
 };
 
-console.log("[autopilot] ... starting ...");
+console.log('[autopilot] ... starting ...');
 run().then((resp) => {
-  console.log("[autopilot] Startup completed");
+  console.log('[autopilot] Startup completed');
 });

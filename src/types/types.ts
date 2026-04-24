@@ -11,9 +11,11 @@ export type BroadcastRecorderProps = {
   dateStart?: DateTimeInput;
   // skip to record all scheduled
   dateEnd?: DateTimeInput;
-  streamUrl: string;
+  streamUrl?: string;
+  streamDevice?: string;
   outDir?: string;
   filenamePrefix?: string;
+  filenameSuffix?: 'mp3' | 'flac';
   ignoreRepeats?: boolean;
   delay?: number;
   bitrate?: number;
@@ -25,10 +27,11 @@ export type BroadcastRecorderEventListener = (
   startedAt: DateTime,
   seconds: number,
   parent: BroadcastRecorder
-) => Promise<void>;
+) => Promise<void> | void;
 export type BroadcastRecorderEvents = {
   startup: BroadcastRecorderEventListener[];
   finished: BroadcastRecorderEventListener[];
+  startRecording: BroadcastRecorderEventListener[];
 };
 
 export type BroadcastSchemaProps = {
@@ -164,6 +167,7 @@ export type Schedule = {
   hoursOfDay: number[];
   repeatOffset: number;
   isRepeat: boolean;
+  repeatAt: TimeSlot;
 };
 
 export type TimeSlot = {

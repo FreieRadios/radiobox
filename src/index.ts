@@ -6,7 +6,7 @@ import ScheduleExport from './classes/schedule-export';
 import BroadcastRecorder from './classes/broadcast-recorder';
 import ApiConnectorNextcloud from './classes/api-connector-nextcloud';
 import ApiConnectorWelocal from './classes/api-connector-welocal';
-import { DateTimeInput, ScheduleExportProps } from './types/types';
+import { BroadcastRecorderProps, DateTimeInput, ScheduleExportProps } from './types/types';
 import { getPath } from './helper/files';
 import { DateTime } from 'luxon';
 import { Client } from 'node-osc';
@@ -80,9 +80,11 @@ export const getRecorder = (schedule: BroadcastSchedule) => {
     schedule,
     outDir: process.env.MP3_PATH,
     streamUrl: process.env.RECORDER_STREAM_URL,
+    streamDevice: process.env.RECORDER_STREAM_DEVICE,
     delay: Number(process.env.RECORDER_STREAM_DELAY),
     bitrate: Number(process.env.RECORDER_BITRATE),
     filenamePrefix: process.env.FILENAME_PREFIX,
+    filenameSuffix: process.env.FILENAME_SUFFIX as BroadcastRecorderProps['filenameSuffix'],
   });
 };
 
@@ -143,7 +145,12 @@ export const putSchemaToFTP = (schema: BroadcastSchema, now: DateTime, week: num
 };
 
 // Create a m3u file with repeat mp3 files for today
-export const writeRepeatsPlaylist = (schema: BroadcastSchema, now: DateTime, days: number, fileExt?: string) => {
+export const writeRepeatsPlaylist = (
+  schema: BroadcastSchema,
+  now: DateTime,
+  days: number,
+  fileExt?: string
+) => {
   console.log('[autopilot] Create mp3 repeats .m3u file ...');
   getExporter(
     getSchedule(

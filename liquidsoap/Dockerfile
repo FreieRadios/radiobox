@@ -10,7 +10,9 @@ RUN mkdir -p /tmp/liquidsoap/logs
 COPY radiobox-light-repeat.liq /home/liquidsoap/radio
 COPY radiobox-repeat-only.liq /home/liquidsoap/radio
 COPY var.liq /home/liquidsoap/radio
+COPY play_by_filename.liq /home/liquidsoap/radio
 
 USER liquidsoap
 
 CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox-light-repeat.liq"]
+#CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox-repeat-only.liq"]

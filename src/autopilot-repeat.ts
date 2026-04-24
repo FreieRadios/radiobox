@@ -1,17 +1,10 @@
 import { DateTime } from 'luxon';
 import 'dotenv/config';
 import { timeFormats } from './helper/helper';
-import {
-  fetchSchemaFromNextcloud,
-  getNextcloud,
-  getRecorder,
-  getSchedule,
-  getSchema,
-  writeRepeatsPlaylist,
-} from './index';
+import { fetchSchemaFromNextcloud, getRecorder, getSchedule, getSchema } from './index';
 import { getDateStartEnd } from './helper/date-time';
 import * as process from 'node:process';
-import { copyFile, unlinkFile, unlinkFilesByType } from './helper/files';
+import { copyFile, copyRepeat, getFilename, unlinkFile, unlinkFilesByType } from './helper/files';
 
 const run = async () => {
   console.log(`[autopilot] Current dir is ${__dirname}`);
@@ -19,6 +12,8 @@ const run = async () => {
 
   const now = DateTime.now();
   const schema = getSchema();
+
+  const filenameSuffix = process.env.FILENAME_SUFFIX
 
   const { dateStart, dateEnd } = getDateStartEnd(
     now.toFormat('yyyy-MM-dd'),
@@ -32,19 +27,16 @@ const run = async () => {
   const schedule = getSchedule(schema, dateStart, dateEnd);
   const recorder = getRecorder(schedule);
 
-
   recorder.on('startup', async () => {
-    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, '.flac')
+    unlinkFilesByType(process.env.EXPORTER_REPEAT_FOLDER, filenameSuffix);
   });
 
   recorder.on('finished', async (sourceFile, slot) => {
-    copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER);
+    copyRepeat(sourceFile, slot, filenameSuffix)
     unlinkFile(sourceFile);
   });
 
   recorder.start().then((resp) => {
-    console.log('[Recorder] Write repeat playlist for now!');
-    writeRepeatsPlaylist(schema, DateTime.now(), 0, '.flac');
     console.log('[Recorder] has finished!');
   });
 };
