@@ -152,7 +152,31 @@ export const unlinkFilesByType = (directory: string, type: string) => {
       return;
     }
 
-    flacFiles.forEach((file) => {
+    const timestampRegex = /(\d{8})-(\d{6})/;
+    const now = new Date();
+    const filesToDelete = flacFiles.filter((file) => {
+      const match = file.match(timestampRegex);
+      if (!match) {
+        // No timestamp in filename: keep previous behavior and delete.
+        return true;
+      }
+      const [, date, time] = match;
+      // Parse "YYYYMMDD-HHmmss" as local time
+      const year = Number(date.slice(0, 4));
+      const month = Number(date.slice(4, 6)) - 1;
+      const day = Number(date.slice(6, 8));
+      const hour = Number(time.slice(0, 2));
+      const minute = Number(time.slice(2, 4));
+      const second = Number(time.slice(4, 6));
+      const fileDate = new Date(year, month, day, hour, minute, second);
+      if (fileDate.getTime() > now.getTime()) {
+        console.log(`[autopilot] Skipping future-dated file: ${file}`);
+        return false;
+      }
+      return true;
+    });
+
+    filesToDelete.forEach((file) => {
       const filePath = path.join(dirPath, file);
       fs.unlink(filePath, (err) => {
         if (err) {
@@ -163,7 +187,7 @@ export const unlinkFilesByType = (directory: string, type: string) => {
       });
     });
 
-    console.log(`[autopilot] Initiated deletion of ${flacFiles.length} files`);
+    console.log(`[autopilot] Initiated deletion of ${filesToDelete.length} files`);
   } catch (error) {
     console.error(`[autopilot] Error reading directory ${directory}:`, error);
   }

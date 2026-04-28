@@ -1,52 +1,54 @@
-services:
-  icecast:
-    image: moul/icecast
-    container_name: icecast2
-    volumes:
-      - ./icecast/logs:/var/log/icecast2
-      - /etc/localtime:/etc/localtime:ro
-      - ./icecast/icecast.xml:/etc/icecast2/icecast.xml
-    ports:
-      - 8000:8000
-    networks:
-      - radiobox_network
-    restart: always
-  liquidsoap:
-    build: ./liquidsoap
-    container_name: liquidsoap
-    ports:
-      - 4444:4444
-    restart: always
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - "./mp3:/tmp/liquidsoap/mp3"
-      - "./repeat:/tmp/liquidsoap/repeat"
-      - "./json:/tmp/liquidsoap/json"
-      - "./liquidsoap/logs:/tmp/liquidsoap/logs"
-    networks:
-      - radiobox_network
-  radiobox:
-    build: .
-    container_name: radiobox
-    restart: always
-    devices:
-      - "/dev/snd:/dev/snd"
-    privileged: true
-    environment:
-      TZ: "Europe/Berlin"
-    extra_hosts:
-      - "radio-z.net:49.12.17.76"
-      - "snd.radio-z.net:78.47.182.99"
-    volumes:
-      - "/dev/snd:/dev/snd"
-      - /etc/localtime:/etc/localtime:ro
-      - "./logs:/app/logs"
-      - "./mp3:/app/mp3"
-      - "./schema:/app/schema"
-      - "./repeat:/app/repeat"
-      - "./json:/app/json"
-    networks:
-      - radiobox_network
-networks:
-  radiobox_network:
-    driver: bridge
+  services:
+    icecast:
+      image: deepcomp/icecast2
+      container_name: icecast2
+      env_file:
+        - .env
+      environment:
+        - TZ=Europe/Berlin
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+        - ./icecast/mime.types:/etc/mime.types:ro
+        - ./icecast/logs:/var/log/icecast2
+        - ./icecast/icecast.xml.tpl:/etc/icecast.xml.tpl:ro
+        - ./icecast/entrypoint.sh:/usr/local/bin/icecast-entrypoint.sh:ro
+      entrypoint: ["/bin/sh", "/usr/local/bin/icecast-entrypoint.sh"]
+      ports:
+        - 8000:8000
+      networks:
+        - radiobox_network
+      restart: always
+    liquidsoap:
+      build: ./liquidsoap
+      container_name: liquidsoap
+      env_file:
+        - .env
+      ports:
+        - 4444:4444
+      restart: always
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+        - "./mp3:/tmp/liquidsoap/mp3"
+        - "./repeat:/tmp/liquidsoap/repeat"
+        - "./json:/tmp/liquidsoap/json"
+        - "./liquidsoap/logs:/tmp/liquidsoap/logs"
+      networks:
+        - radiobox_network
+    radiobox:
+      build: .
+      container_name: radiobox
+      restart: always
+      environment:
+        TZ: "Europe/Berlin"
+      volumes:
+        - /etc/localtime:/etc/localtime:ro
+        - "./logs:/app/logs"
+        - "./mp3:/app/mp3"
+        - "./schema:/app/schema"
+        - "./repeat:/app/repeat"
+        - "./json:/app/json"
+      networks:
+        - radiobox_network
+  networks:
+    radiobox_network:
+      driver: bridge

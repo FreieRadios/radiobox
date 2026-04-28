@@ -1,0 +1,30 @@
+[Unit]
+Description=Soundcard Capture -> Icecast (lossless FLAC)
+Documentation=https://github.com/FreieRadios/radiobox
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=tsing
+Group=audio
+
+ExecStartPre=/bin/sleep 5
+
+ExecStart=/usr/bin/ffmpeg -hide_banner -loglevel info \
+    -f alsa -ac 2 -ar 48000 -i hw:3,0 \
+    -c:a flac -compression_level 5 \
+    -content_type application/ogg \
+    -f ogg \
+    icecast://source:jdUEan21pOermncAw91@localhost:8000/lossless.flac
+
+Restart=always
+RestartSec=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ffmpeg-capture
+
+[Install]
+WantedBy=multi-user.target

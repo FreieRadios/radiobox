@@ -6,9 +6,6 @@ repeat/*
 schema/*
 archive/*
 !schema/example.xlsx
-icecast/icecast.xml
-liquidsoap/var.liq
-liquidsoap/output.liq
 
 # Dev only
 # dev.ts
