@@ -3,7 +3,8 @@
       image: deepcomp/icecast2
       container_name: icecast2
       env_file:
-        - .env
+        - path: .env
+          required: false
       environment:
         - TZ=Europe/Berlin
       volumes:
@@ -22,7 +23,8 @@
       build: ./liquidsoap
       container_name: liquidsoap
       env_file:
-        - .env
+        - path: .env
+          required: false
       ports:
         - 4444:4444
       restart: always
@@ -37,6 +39,9 @@
     radiobox:
       build: .
       container_name: radiobox
+      env_file:
+        - path: .env
+          required: false
       restart: always
       environment:
         TZ: "Europe/Berlin"
