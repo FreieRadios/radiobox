@@ -8,17 +8,13 @@ Wants=network-online.target docker.service
 Type=simple
 User=tsing
 Group=audio
-
 ExecStartPre=/bin/sleep 5
-
 ExecStart=/usr/bin/ffmpeg -hide_banner -loglevel warning \
-    -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-    -i http://localhost:8000/lossless \
-    -f alsa hw:3,0
-
+   -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+   -i http://localhost:8000/lossless \
+   -f alsa hw:CARD=UGM96,DEV=0
 Restart=always
 RestartSec=3
-
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=ffmpeg-playout
