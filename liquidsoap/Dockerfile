@@ -5,14 +5,11 @@ USER root
 RUN mkdir -p /home/liquidsoap/radio
 RUN mkdir -p /tmp/liquidsoap/logs
 
-#COPY radiobox.liq /home/liquidsoap/radio
-#COPY radiobox-light.liq /home/liquidsoap/radio
-COPY radiobox-light-repeat.liq /home/liquidsoap/radio
-COPY radiobox-repeat-only.liq /home/liquidsoap/radio
+COPY radiobox.liq /home/liquidsoap/radio
+COPY mounts.liq /home/liquidsoap/radio
 COPY var.liq /home/liquidsoap/radio
-COPY play_by_filename.liq /home/liquidsoap/radio
+COPY tools /home/liquidsoap/radio/tools
 
 USER liquidsoap
 
-CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox-light-repeat.liq"]
-#CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox-repeat-only.liq"]
+CMD ["liquidsoap", "/home/liquidsoap/radio/radiobox.liq"]

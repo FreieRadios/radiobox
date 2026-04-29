@@ -1,42 +1,62 @@
 #!/usr/bin/liquidsoap
+#
+# Single, merged radiobox script.
+#
+# Behaviour is controlled entirely by flags defined in var.liq, so that the
+# previous "light", "light-repeat" and "repeat-only" scripts can all be
+# expressed as different flag combinations of this one file.
+#
+# Flags consumed (defined in var.liq):
+#   script_label              - free-form text shown in the startup log line
+#   enable_harbor             - accept a live harbor input on /live
+#   enable_repeat_schedule    - use the time-based switch repeat/live
+#   enable_repeat_crossfade   - apply a 2s crossfade on switch transitions
+#   live_source_kind          - "main_stream" or "silence"
+#                               source used during interval_live
+#   enable_mount_live         - publish 256 kbps MP3 on /live
+#   enable_mount_live_128k    - publish 128 kbps MP3 on /live-128k
+#   enable_mount_legacy       - publish legacy mount under radio_legacy_mount
+#   enable_mount_lossless     - publish lossless FLAC on /lossless
 
-# Include some sensitive configuration variables for icecast
 %include "var.liq"
+%include "tools/logging.liq"
 
-# Logging configuration to stdout and to the file
-settings.log.file.path.set("/tmp/<script>.log")
-settings.log.stdout.set(true)
-log.level.set(2)
+log(">>>>>>>>>>>>>>> Running Script #{script_label}")
 
-log(">>>>>>>>>>>>>>> Running Script #{home_path}/logs/<script>.log")
+settings.osc.port.set(44444)
+log(">>>> OSC Port #{settings.osc.port()}")
 
-settings.harbor.bind_addrs.set(["0.0.0.0"])
+%include "tools/security.liq"
 
-fallback_stream = mksafe(input.http(fallback_stream_url))
+# ---------------------------------------------------------------------------
+# Live-side source (used during interval_live, or as the only source when
+# enable_repeat_schedule is false).
+# ---------------------------------------------------------------------------
 
-# configure security input
-security = single(
-    id="security_single",
-    default_wav_path
-)
+# Optional harbor (DJ) input on /live
+if enable_harbor then
+  settings.harbor.bind_addrs.set(["0.0.0.0"])
+end
 
-# (optional) configure live harbor input
-raw_harbor_live=input.harbor(
-    id="raw_harbor_live",
-    port=harbor_port,
-    #transport=harbor_transport,
-    user=harbor_user,
-    password=harbor_password,
-    buffer=2.0,
-    replay_metadata=true,
-    metadata_charset="UTF-8",
-    icy=true,
-    icy_metadata_charset="UTF-8",
-    "/live"
-)
+raw_harbor_live =
+  if enable_harbor then
+    input.harbor(
+        id="raw_harbor_live",
+        port=harbor_port,
+        user=harbor_user,
+        password=harbor_password,
+        buffer=2.0,
+        replay_metadata=true,
+        metadata_charset="UTF-8",
+        icy=true,
+        icy_metadata_charset="UTF-8",
+        "/live"
+    )
+  else
+    blank(id="raw_harbor_live_disabled")
+  end
 
-# process live harbor input
-live_harbor=blank.strip(
+live_harbor = blank.strip(
     id="live_harbor_blank_stripper",
     stereo(
         id="live_harbor_stereo",
@@ -44,244 +64,86 @@ live_harbor=blank.strip(
     )
 )
 
-# main source switcher
-day=fallback(
-    id="source_switcher_day",
+# HTTP main stream. The repeat-only behaviour wraps it with audio_to_stereo
+# to smooth out channel-layout differences; the others did not. We use
+# audio_to_stereo unconditionally - it is a no-op for already-stereo input.
+main_stream = audio_to_stereo(input.http(main_stream_url, timeout=30.0))
+
+silence_source = blank(duration=1.0)
+
+# Build the "live" branch depending on which sources are enabled.
+live_branch =
+  if live_source_kind == "silence" then
+    silence_source
+  elsif enable_harbor then
+    fallback(
+        id="source_switcher_day",
+        track_sensitive=false,
+        [main_stream, live_harbor, security]
+    )
+  else
+    fallback(
+        id="source_switcher_day",
+        track_sensitive=false,
+        [main_stream, security]
+    )
+  end
+
+# ---------------------------------------------------------------------------
+# Repeat-side source (queue fed by play_by_filename.liq).
+# ---------------------------------------------------------------------------
+q = request.queue(id="repeat_queue")
+%include "tools/play_by_filename.liq"
+
+# When the repeat schedule is active we want to fall back to the public
+# stream if the queue is empty (this is what radiobox-repeat-only did);
+# light-repeat instead falls back to the security file. We model both with
+# the same shape and rely on the live branch as the secondary fallback.
+repeat_branch = fallback(
+    id="repeat_branch",
     track_sensitive=false,
-    [
-        live_harbor,
-        fallback_stream,
-        security
-    ]
+    [q, live_branch, security]
 )
 
-repeats_playlist = playlist(mode="normal", reload=60, repeats_txt_file)
-repeats=fallback(
-    id="source_switcher_repeats",
-    track_sensitive=false,
-    [
-        repeats_playlist,
-        security
-    ]
-)
+# ---------------------------------------------------------------------------
+# Schedule.
+# ---------------------------------------------------------------------------
+%include "tools/crossfade.liq"
 
-source_switcher= switch([
-      ({14h-02h}, silence_source),    # 14:00 to 02:00 next day - main stream
-      ({02h-14h}, repeats_playlist)   # 02:00 to 14:00 - playlist
+source_switcher =
+  if enable_repeat_schedule then
+    if enable_repeat_crossfade then
+      switch(
+          track_sensitive=false,
+          transitions=[crossfade_transition, crossfade_transition],
+          [
+            (interval_repeat, repeat_branch),
+            (interval_live, live_branch)
+          ]
+      )
+    else
+      switch(
+          track_sensitive=false,
+          [
+            (interval_repeat, repeat_branch),
+            (interval_live, live_branch)
+          ]
+      )
+    end
+  else
+    live_branch
+  end
+
+# Add a fallback to make the switcher infallible.
+safe_source_switcher = fallback([
+    source_switcher,
+    security
 ])
 
-# function that makes a safe radio
-def saferadio(radio, n) =
-    mksafe(
-        id="radio_mksafe_#{n}",
-        radio
-    )
-end
+# ---------------------------------------------------------------------------
+# Metadata + outputs.
+# ---------------------------------------------------------------------------
+metadata_input_source = safe_source_switcher
+%include "tools/osc_metadata.liq"
 
-radio_ogg=saferadio(
-    source_switcher,
-    "ogg"
-)
-radio_opus=saferadio(
-    source_switcher,
-    "opus"
-)
-radio_mp3=saferadio(
-    source_switcher,
-    "mp3"
-)
-radio_flac=saferadio(
-    source_switcher,
-    "flac"
-)
-
-output.icecast(
-    id="output_icecast_ogg",
-    %ffmpeg(
-        format="ogg",
-        %audio(
-            codec="libvorbis",
-            global_quality="9"
-        )
-    ),
-    radio_ogg,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/stream.ogg",
-    name="#{radio_name} (OGG)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/stream.ogg",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/ogg",
-    start=true
-)
-
-output.icecast(
-    id="output_icecast_opus",
-    %ffmpeg(
-        format="opus",
-        %audio(
-            codec="libopus",
-            b="327680",
-            ar="48000"
-        )
-    ),
-    radio_opus,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/stream.opus",
-    name="#{radio_name} (OPUS)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/stream.opus",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/ogg",
-    start=true
-)
-
-output.icecast(
-    id="output_icecast_mp3",
-    %ffmpeg(
-        format="mp3",
-        %audio(
-            codec="libmp3lame",
-            b="320k"
-        )
-    ),
-    radio_mp3,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/stream.mp3",
-    name="#{radio_name} (MP3)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/stream.mp3",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/mpeg",
-    start=true
-)
-
-output.icecast(
-    id="output_icecast_flac",
-    %ffmpeg(
-       format="ogg",
-       %audio(
-           codec="flac",
-           ar=48000,
-           ac=2,
-           compression_level=8
-       )
-    ),
-    radio_flac,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/stream.flac",
-    name="#{radio_name} (FLAC)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/stream.flac",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/ogg",
-    start=true
-)
-
-# Legacy URL
-output.icecast(
-    id="output_icecast_mp3_legacy",
-    %ffmpeg(
-        format="mp3",
-        %audio(
-            codec="libmp3lame",
-            b="320k"
-        )
-    ),
-    radio_mp3,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/#{radio_legacy_mount}",
-    name="#{radio_name} (MP3)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/#{radio_legacy_mount}",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/mpeg",
-    start=true
-)
-
-# Harbor direct throughput
-live_harbor_secure=fallback(
-    id="source_switcher_harbor",
-    [
-        live_harbor,
-        security
-    ]
-)
-
-output.icecast(
-    id="output_icecast_mp3_harbor",
-    %ffmpeg(
-        format="mp3",
-        %audio(
-            codec="libmp3lame",
-            b="320k"
-        )
-    ),
-    live_harbor_secure,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/harbor",
-    name="#{radio_name} Harbor (MP3)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/harbor",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/mpeg",
-    start=true
-)
-
-# Play random file from archive
-radio_archive = playlist(archive_dir)
-live_archive_secure=fallback(
-    id="source_switcher_harbor",
-    [
-        radio_archive,
-        security
-    ]
-)
-
-output.icecast(
-    id="output_icecast_mp3_archive",
-    %ffmpeg(
-        format="mp3",
-        %audio(
-            codec="libmp3lame",
-            b="320k"
-        )
-    ),
-    live_archive_secure,
-    host=icecast_host,
-    port=icecast_port,
-    password=icecast_password,
-    mount="/archive",
-    name="#{radio_name} Archive (MP3)",
-    genre=radio_genre,
-    description=radio_desc,
-    url="#{radio_url}/archive",
-    send_icy_metadata=true,
-    encoding="UTF-8",
-    format="audio/mpeg",
-    start=true
-)
+%include "mounts.liq"

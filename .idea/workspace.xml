@@ -4,39 +4,60 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c7fe337e-e72c-4f8f-b543-1bd63186a666" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.prettierignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.prettierrc" afterDir="false" />
+    <list default="true" id="c7fe337e-e72c-4f8f-b543-1bd63186a666" name="Changes" comment="chore(auto): cleanup &amp; finalize">
+      <change afterPath="$PROJECT_DIR$/liquidsoap/tools/play_by_filename.liq" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/ffmpeg-capture.service" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/ffmpeg-playout.service" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.radiobox.yml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/liquidsoap/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/docker-compose.yml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/play_by_filename.liq" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox-light-repeat.liq" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox-light.liq" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox-repeat-only.liq" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox.liq" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/liquidsoap/var.liq.example" beforeDir="false" afterPath="$PROJECT_DIR$/liquidsoap/var.liq.example" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-recorder.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-recorder.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/dev.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/dev.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/yarn.lock" beforeDir="false" afterPath="$PROJECT_DIR$/yarn.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/autopilot.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/autopilot.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/helper/files.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/helper/files.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="EmbeddingIndexingInfo">
+    <option name="cachedIndexableFilesCount" value="156" />
+    <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
+  </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "singerla"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;singerla&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "git@github.com:FreieRadios/radiobox.git",
-    "accountId": "846a7e96-312f-4dbf-b49a-21383d50e849"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:FreieRadios/radiobox.git&quot;,
+    &quot;accountId&quot;: &quot;846a7e96-312f-4dbf-b49a-21383d50e849&quot;
   }
-}]]></component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "customColor": "",
-  "associatedIndex": 7
-}]]></component>
+}</component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 7
+}</component>
   <component name="ProjectId" id="2y8ggnDHITHnEdryz0xt0gPGKbj" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
@@ -45,8 +66,12 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.MCP Project settings loaded": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
     "git-widget-placeholder": "main",
     "junie.onboarding.icon.badge.shown": "true",
     "node.js.detected.package.eslint": "true",
@@ -54,16 +79,22 @@
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "yarn",
-    "prettierjs.PrettierConfiguration.Package": "/home/tsing/WebstormProjects/radiobox/node_modules/prettier",
+    "prettierjs.PrettierConfiguration.Package": "/home/tsing/Desktop/radiobox/node_modules/prettier",
     "settings.editor.selected.configurable": "settings.javascript.prettier",
-    "ts.external.directory.path": "/home/tsing/WebstormProjects/radiobox/node_modules/typescript/lib",
+    "to.speed.mode.migration.done": "true",
+    "ts.external.directory.path": "/home/tsing/Desktop/radiobox/node_modules/typescript/lib",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/liquidsoap/tools" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-6a121458b545-JavaScript-WS-251.25410.117" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-WS-261.23567.141" />
       </set>
     </attachedChunks>
   </component>
@@ -75,9 +106,83 @@
       <option name="presentableId" value="Default" />
       <updated>1749221727314</updated>
     </task>
+    <task id="LOCAL-00001" summary="refactor(record): write flac files for repeat slots">
+      <option name="closed" value="true" />
+      <created>1762555942081</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1762555942081</updated>
+    </task>
+    <task id="LOCAL-00002" summary="refactor(record): write flac files for repeat slots">
+      <option name="closed" value="true" />
+      <created>1762556284631</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1762556284631</updated>
+    </task>
+    <task id="LOCAL-00003" summary="fix(auto): repeat path">
+      <option name="closed" value="true" />
+      <created>1762556483276</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1762556483277</updated>
+    </task>
+    <task id="LOCAL-00004" summary="chore(liq): play scheduled files by date-time from filename">
+      <option name="closed" value="true" />
+      <created>1762603710577</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1762603710577</updated>
+    </task>
+    <task id="LOCAL-00005" summary="chore(liq): play scheduled files by date-time from filename">
+      <option name="closed" value="true" />
+      <created>1762603732190</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1762603732190</updated>
+    </task>
+    <task id="LOCAL-00006" summary="chore(liq): switch to time based filename sources during interval_repeat">
+      <option name="closed" value="true" />
+      <created>1762605641168</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1762605641168</updated>
+    </task>
+    <task id="LOCAL-00007" summary="fix(auto): use copy/unlink instead of move to prevent container error">
+      <option name="closed" value="true" />
+      <created>1762611962713</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1762611962713</updated>
+    </task>
+    <task id="LOCAL-00008" summary="chore(auto): cleanup &amp; finalize">
+      <option name="closed" value="true" />
+      <created>1762615107919</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1762615107919</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="refactor(record): write flac files for repeat slots" />
+    <MESSAGE value="fix(auto): repeat path" />
+    <MESSAGE value="chore(liq): play scheduled files by date-time from filename" />
+    <MESSAGE value="chore(liq): switch to time based filename sources during interval_repeat" />
+    <MESSAGE value="fix(auto): use copy/unlink instead of move to prevent container error" />
+    <MESSAGE value="chore(auto): cleanup &amp; finalize" />
+    <option name="LAST_COMMIT_MESSAGE" value="chore(auto): cleanup &amp; finalize" />
   </component>
 </project>
