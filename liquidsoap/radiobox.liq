@@ -26,6 +26,11 @@ log(">>>>>>>>>>>>>>> Running Script #{script_label}")
 settings.osc.port.set(44444)
 log(">>>> OSC Port #{settings.osc.port()}")
 
+# Default request timeout trips on >1 GB FLACs on slow SD storage even with
+# prefetch in place. 60s acts as a safety net; prefetch normally completes
+# well before this. See tools/play_by_filename.liq.
+settings.request.timeout.set(60.0)
+
 %include "tools/security.liq"
 
 # ---------------------------------------------------------------------------
@@ -90,10 +95,41 @@ live_branch =
   end
 
 # ---------------------------------------------------------------------------
-# Repeat-side source (queue fed by play_by_filename.liq).
+# Repeat-side source (queues fed by play_by_filename.liq).
+#
+# Two queues are used:
+#   q          - legacy on-time match queue. Receives a request only when the
+#                wallclock crosses the target time (fallback path when prefetch
+#                failed or wasn't possible).
+#   q_prefetch - warm queue. Receives a request up to
+#                repeats_prefetch_lead_seconds before the target time so that
+#                resolution + FFmpeg decoder init + buffer fill happen ahead
+#                of the on-air switch.
+#
+# armed_prefetch holds (filename, full_path, target_epoch) of the file
+# currently primed for the on-air switch. The switch predicate prefetch_due()
+# activates q_prefetch exactly when wallclock >= target_epoch and q_prefetch
+# is ready. Hard-cut transition (no inner crossfade) for punctuality.
 # ---------------------------------------------------------------------------
-q = request.queue(id="repeat_queue")
+q          = request.queue(id="repeat_queue")
+q_prefetch = request.queue(id="repeat_prefetch_queue")
+armed_prefetch = ref(("", "", 0.))
+
+def prefetch_due() =
+  let (_f, _p, target_epoch) = armed_prefetch()
+  target_epoch > 0. and time() >= target_epoch and source.is_ready(q_prefetch)
+end
+
 %include "tools/play_by_filename.liq"
+
+repeat_source = switch(
+    id="repeat_source",
+    track_sensitive=false,
+    [
+      (prefetch_due, q_prefetch),
+      ({true},       q)
+    ]
+)
 
 # When the repeat schedule is active we want to fall back to the public
 # stream if the queue is empty (this is what radiobox-repeat-only did);
@@ -102,7 +138,7 @@ q = request.queue(id="repeat_queue")
 repeat_branch = fallback(
     id="repeat_branch",
     track_sensitive=false,
-    [q, live_branch, security]
+    [repeat_source, live_branch, security]
 )
 
 # ---------------------------------------------------------------------------

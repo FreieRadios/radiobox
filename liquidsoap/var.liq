@@ -78,6 +78,10 @@ archive_dir       = "#{home_path}/mp3/Archiv"
 repeats_check_interval = 0.5
 repeats_tolerance = 1
 repeats_dir       = "#{home_path}/repeat/"
+# Lead time (seconds) before a scheduled repeat starts during which the
+# file is resolved + decoded into a warm prefetch queue. Default 120s gives
+# headroom for >1 GB FLACs on slow SD storage with parallel capture I/O.
+repeats_prefetch_lead_seconds = float_of_int(env_int("REPEATS_PREFETCH_LEAD_SECONDS", 120))
 
 # ---------------------------------------------------------------------------
 # Behaviour flags consumed by radiobox.liq / mounts.liq.
