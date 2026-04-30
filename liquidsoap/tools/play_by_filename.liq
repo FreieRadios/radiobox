@@ -1,34 +1,14 @@
 r = regexp(flags=["g","i"], "(\\d{8})-(\\d{6})")
 
 # ---------------------------------------------------------------------------
-# Memos.
+# Memo.
 #
-# played_files     : (filename, target_epoch) for files already pushed via the
-#                    legacy on-time match path. Prevents the same file firing
-#                    repeatedly within repeats_tolerance.
 # prefetched_files : (filename, target_epoch) for files already pushed into
 #                    q_prefetch. Prevents duplicate pushes on subsequent
 #                    scan ticks while the lead window is still open.
-# Both are pruned by cleanup_*() to entries within the last 300s.
+# Pruned by cleanup_prefetched() to entries within the last 300s.
 # ---------------------------------------------------------------------------
-played_files     = ref([])
 prefetched_files = ref([])
-
-def already_played(filename) =
-  list.exists(fun (entry) -> fst(entry) == filename, played_files())
-end
-
-def remember_played(filename, target_epoch) =
-  played_files := [(filename, target_epoch), ...played_files()]
-end
-
-def cleanup_played() =
-  now_t = time()
-  played_files := list.filter(
-    fun (entry) -> (now_t - snd(entry)) < 300.,
-    played_files()
-  )
-end
 
 def already_prefetched(filename) =
   list.exists(fun (entry) -> fst(entry) == filename, prefetched_files())
@@ -84,11 +64,37 @@ end
 # actually starts producing audio, which is the natural "switch_completed"
 # moment from the audience's perspective.
 # ---------------------------------------------------------------------------
+# Tracks the full_path of the file q_prefetch is currently producing.
+# Used by the preemption check in scan_and_schedule to detect when a later
+# armed entry has reached its target_epoch while an earlier (over-running)
+# track is still on-air, so we can q_prefetch.skip() to honour the schedule.
+currently_playing_path = ref("")
+
 q_prefetch.on_track(fun (m) -> begin
   rid = m["rid"] ?? "?"
   fn  = m["filename"] ?? "?"
+  # Mark q_prefetch as actively producing. Cleared by prefetch_due() once
+  # q_prefetch becomes not-ready again (end-of-track, no successor queued).
+  # Required so that re-arming with the next file's future target_epoch
+  # doesn't make the switch predicate flip away mid-track.
+  prefetch_playing := true
+  currently_playing_path := fn
+  # Pop the head of armed_queue: this entry has now started playing, so the
+  # *next* head becomes the upcoming due target for prefetch_due().
+  if list.length(armed_queue()) > 0 then
+    armed_queue := list.tl(armed_queue())
+  end
+  log.important(">>>>>>> repeat_prefetch event=now_playing file=#{fn} rid=#{rid} now=#{time()}")
   log.important("repeat_prefetch event=switch_completed file=#{fn} rid=#{rid} now=#{time()}")
 end)
+
+# Helper: is this filename already pending in armed_queue?
+def already_armed(filename) =
+  list.exists(fun (entry) -> begin
+    let (f, _p, _t) = entry
+    f == filename
+  end, armed_queue())
+end
 
 # ---------------------------------------------------------------------------
 # Prefetch path: if a filename's target_epoch is in (now, now + lead], push
@@ -107,14 +113,18 @@ def try_prefetch(filename, full_path, target_epoch) =
         log.important("repeat_prefetch event=prefetch_scheduled file=#{filename} lead=#{lead}")
         uri = "file://#{full_path}"
         req = request.create(uri)
-        # Stale invalidation strategy: armed_prefetch is overwritten with
-        # the latest target. The switch predicate ties activation to
-        # target_epoch; obsolete entries already in q_prefetch will play
-        # only if their predicate happens to be true, which it won't be
-        # once armed_prefetch points elsewhere. (Liquidsoap 2.2.5's
-        # request.queue does not expose a public "remove pending" API.)
+        # Push to q_prefetch (FIFO). Caller (scan_and_schedule) ensures
+        # try_prefetch is invoked in target_epoch ascending order so the
+        # FIFO matches the schedule. armed_queue tracks the same order
+        # and is used by prefetch_due() to gate the on-air switch.
         q_prefetch.push(req)
-        armed_prefetch := (filename, full_path, target_epoch)
+        # Insert into armed_queue in target_epoch ascending order, so that
+        # head(armed_queue) always points to the *next* file due on-air.
+        # NOTE: q_prefetch is FIFO, so we must also push to it in target
+        # order; that is enforced by sorting candidates in scan_and_schedule
+        # before calling try_prefetch.
+        new_entry = (filename, full_path, target_epoch)
+        armed_queue := list.append(armed_queue(), [new_entry])
         remember_prefetched(filename, target_epoch)
         plog("prefetch_started", filename, target_epoch)
 
@@ -150,7 +160,12 @@ def try_prefetch(filename, full_path, target_epoch) =
   end
 end
 
-def prefetch_filename(filename) =
+# Returns a list of (filename, full_path, target_epoch) candidates parsed
+# from the filename (today and, near midnight, tomorrow). Returning rather
+# than pushing directly lets scan_and_schedule sort across files by
+# target_epoch before queueing - critical so q_prefetch FIFO matches the
+# schedule order when several files arm in the same scan tick.
+def prefetch_candidates(filename) =
   m = r.exec(filename)
   if m != [] then
     date_str = m[1]
@@ -164,105 +179,71 @@ def prefetch_filename(filename) =
 
     full_path = path.concat(repeats_dir, filename)
 
-    # Today.
+    out = ref([])
+
     te_today = target_epoch_for(year, month, day, hour, minute, second, 0)
     if te_today > 0. then
-      try_prefetch(filename, full_path, te_today)
+      out := list.append(out(), [(filename, full_path, te_today)])
     end
 
-    # Tomorrow: only relevant near midnight, otherwise the lead window
-    # cannot reach a next-day target. Cheap to compute either way; we gate
-    # by current hour to avoid spurious work and to avoid date arithmetic
-    # across month boundaries (the date components must already match
-    # tomorrow's calendar day for target_epoch_for to return non-zero).
+    # Tomorrow: only relevant near midnight (see original NOTE).
     cur = time.local()
     if cur.hour >= 23 then
       te_tomorrow = target_epoch_for(year, month, day, hour, minute, second, 1)
       if te_tomorrow > 0. then
-        try_prefetch(filename, full_path, te_tomorrow)
+        out := list.append(out(), [(filename, full_path, te_tomorrow)])
       end
     end
-  end
-end
-
-# ---------------------------------------------------------------------------
-# Legacy on-time match path. Retained as a safety net: it fires only if
-# prefetch failed or could not run (e.g. file dropped at T-0).
-#
-# NOTE on repeats_tolerance: with prefetch in place, this check no longer
-# means "tolerate match-detection imprecision" - the switch predicate uses
-# time() >= target_epoch which is naturally tick-robust. The tolerance now
-# means "accept slightly-late targets via the legacy fallback path". Any
-# fire here with time_diff > 0 indicates prefetch missed the target and
-# is logged as match_fallback for production monitoring.
-# ---------------------------------------------------------------------------
-def match_filename(filename) =
-  m = r.exec(filename)
-  if m != [] then
-    date_str = m[1]
-    time_str = m[2]
-
-    year = int_of_string(string.sub(date_str, start=0, length=4))
-    month = int_of_string(string.sub(date_str, start=4, length=2))
-    day = int_of_string(string.sub(date_str, start=6, length=2))
-    hour = int_of_string(string.sub(time_str, start=0, length=2))
-    minute = int_of_string(string.sub(time_str, start=2, length=2))
-    second = int_of_string(string.sub(time_str, start=4, length=2))
-
-    current_time = time.local()
-    current_year = current_time.year
-    current_month = current_time.month
-    current_day = current_time.day
-    current_hour = current_time.hour
-    current_min = current_time.min
-    current_sec = current_time.sec
-
-    if year == current_year and month == current_month and day == current_day then
-      target_seconds = hour * 3600 + minute * 60 + second
-      current_seconds = current_hour * 3600 + current_min * 60 + current_sec
-      time_diff = abs(target_seconds - current_seconds)
-
-      # See NOTE above: this check is now the late-fallback gate, not a
-      # match-detection precision tuning knob.
-      if time_diff <= repeats_tolerance then
-        if not already_played(filename) then
-          full_path = path.concat(repeats_dir, filename)
-
-          if file.exists(full_path) then
-            log("Match found! Playing file: #{filename}")
-            current_meta_list = q.last_metadata() ?? []
-            current_filename = current_meta_list["filename"] ?? ""
-
-            # Only play if it's not the same file currently playing.
-            if current_filename != full_path then
-              # If we reach this branch with time_diff > 0, prefetch
-              # missed the target. Emit a distinct line so production
-              # can monitor whether the fallback ever fires.
-              if time_diff > 0 then
-                log.important("match_fallback file=#{filename} time_diff=#{time_diff} reason=prefetch_missed")
-              end
-              uri = "file://#{full_path}"
-              play_request = request.create(uri)
-              q.set_queue([play_request])
-              q.skip()
-              log(">>>>>>  Playing #{filename} now")
-              remember_played(filename, time())
-            end
-          else
-            log.important("File matched by pattern but not found on disk: #{full_path}")
-          end
-        end
-      end
-    end
+    out()
+  else
+    []
   end
 end
 
 def scan_and_schedule() =
-  cleanup_played()
   cleanup_prefetched()
   files = file.ls(repeats_dir)
-  list.iter(prefetch_filename, files)   # NEW: future window
-  list.iter(match_filename,    files)   # EXISTING: now ± tolerance (fallback)
+
+  # Collect prefetch candidates from all matched files, then sort by
+  # target_epoch ascending. file.ls returns filenames in arbitrary order,
+  # so without this sort q_prefetch (FIFO) could play files in push-order
+  # rather than time-order when two targets fall in the lead window in the
+  # same scan tick (e.g. a 11:38:00 target armed after a 11:39:00 target).
+  candidates = ref([])
+  list.iter(fun (fn) -> begin
+    candidates := list.append(candidates(), prefetch_candidates(fn))
+  end, files)
+  sorted = list.sort(
+    fun (a, b) -> begin
+      let (_fa, _pa, ta) = a
+      let (_fb, _pb, tb) = b
+      if ta < tb then -1 elsif ta > tb then 1 else 0 end
+    end,
+    candidates()
+  )
+  list.iter(fun (entry) -> begin
+    let (fn, fp, te) = entry
+    try_prefetch(fn, fp, te)
+  end, sorted)
+
+  # Preemption: if the head of armed_queue has reached its target_epoch but
+  # q_prefetch is still producing an earlier (over-running) track, skip the
+  # current track so the queue advances to the next request and the new
+  # scheduled file goes on-air on time. Without this, request.queue waits
+  # for the current request to finish on its own, which causes a long file
+  # (e.g. a multi-minute repeat) to push subsequent scheduled files past
+  # their target times.
+  if list.length(armed_queue()) > 0 then
+    let (head_fn, head_path, head_te) = list.hd(default=("", "", 0.), armed_queue())
+    if head_te > 0. and time() >= head_te
+       and prefetch_playing()
+       and currently_playing_path() != head_path
+       and currently_playing_path() != "" then
+      log.important("repeat_prefetch event=preempt file=#{head_fn} target_epoch=#{head_te} now=#{time()} reason=overrun_previous=#{currently_playing_path()}")
+      q_prefetch.skip()
+    end
+  end
+
   repeats_check_interval
 end
 

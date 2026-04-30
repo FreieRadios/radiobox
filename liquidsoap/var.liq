@@ -76,7 +76,6 @@ repeats_txt_file  = "#{home_path}/repeat/#{exporter_filename_prefix}.m3u"
 default_wav_path  = "#{home_path}/mp3/fallback.mp3"
 archive_dir       = "#{home_path}/mp3/Archiv"
 repeats_check_interval = 0.5
-repeats_tolerance = 1
 repeats_dir       = "#{home_path}/repeat/"
 # Lead time (seconds) before a scheduled repeat starts during which the
 # file is resolved + decoded into a warm prefetch queue. Default 120s gives
