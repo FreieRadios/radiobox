@@ -39,10 +39,15 @@ const parseDays = (v: string | undefined): number[] => {
 };
 
 let shuttingDown = false;
+const pendingJobs: Promise<void>[] = [];
 
-function gracefulShutdown(reason: string, code = 0) {
+async function gracefulShutdown(reason: string, code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (pendingJobs.length > 0) {
+    log('autopilot', `waiting for ${pendingJobs.length} pending job(s) to finish before shutdown`);
+    await Promise.allSettled(pendingJobs);
+  }
   log('autopilot', `shutting down (reason=${reason}, exitCode=${code})`);
   process.exit(code);
 }
@@ -103,58 +108,53 @@ const run = async () => {
   });
 
   recorder.on('finished', async (sourceFile, slot) => {
-    const finalize = (uploadFile?: { sourceFile?: string } | any) => {
-      if (doCopyRepeat) {
-        copyRepeat(sourceFile, slot, filenameSuffix);
-      }
-      if (uploadFile) {
-        cleanupFile(uploadFile);
-      } else {
-        unlinkFile(sourceFile);
-      }
-    };
+    const job = (async () => {
+      const finalize = (uploadFile?: { sourceFile?: string } | any) => {
+        if (doCopyRepeat) {
+          copyRepeat(sourceFile, slot, filenameSuffix);
+        }
+        if (uploadFile) {
+          cleanupFile(uploadFile);
+        } else {
+          unlinkFile(sourceFile);
+        }
+      };
 
-    if (uploaderWelocal && uploaderNextcloud) {
-      const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-      log('welocal', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
-      uploaderWelocal
-        .upload(uploadFile)
-        .then(() => {
+      try {
+        if (uploaderWelocal && uploaderNextcloud) {
+          const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+          log('welocal', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
+          await uploaderWelocal.upload(uploadFile);
           log('welocal', `upload finished for ${uploadFile?.sourceFile ?? sourceFile}`);
           log('nextcloud', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
-          uploaderNextcloud
-            .upload(uploadFile)
-            .then(() => {
-              log('nextcloud', `upload finished for ${uploadFile?.sourceFile ?? sourceFile}`);
-              finalize(uploadFile);
-            })
-            .catch((err) => logError('nextcloud', 'upload failed', err));
-        })
-        .catch((err) => logError('welocal', 'upload failed', err));
-    } else if (uploaderWelocal) {
-      const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
-      log('welocal', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
-      uploaderWelocal
-        .upload(uploadFile)
-        .then(() => {
-          log('welocal', `upload finished for ${uploadFile?.sourceFile ?? sourceFile}`);
-          finalize(uploadFile);
-        })
-        .catch((err) => logError('welocal', 'upload failed', err));
-    } else if (uploaderNextcloud) {
-      // Nextcloud uploader needs upload file info; reuse welocal helper shape via a minimal call
-      const uploadFile = getWelocal(schedule).getUploadFileInfo(sourceFile, slot);
-      log('nextcloud', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
-      uploaderNextcloud
-        .upload(uploadFile)
-        .then(() => {
+          await uploaderNextcloud.upload(uploadFile);
           log('nextcloud', `upload finished for ${uploadFile?.sourceFile ?? sourceFile}`);
           finalize(uploadFile);
-        })
-        .catch((err) => logError('nextcloud', 'upload failed', err));
-    } else {
-      finalize();
-    }
+        } else if (uploaderWelocal) {
+          const uploadFile = uploaderWelocal.getUploadFileInfo(sourceFile, slot);
+          log('welocal', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
+          await uploaderWelocal.upload(uploadFile);
+          log('welocal', `upload finished for ${uploadFile?.sourceFile ?? sourceFile}`);
+          finalize(uploadFile);
+        } else if (uploaderNextcloud) {
+          // Nextcloud uploader needs upload file info; reuse welocal helper shape via a minimal call
+          const uploadFile = getWelocal(schedule).getUploadFileInfo(sourceFile, slot);
+          log('nextcloud', `upload starting for ${uploadFile?.sourceFile ?? sourceFile}`);
+          await uploaderNextcloud.upload(uploadFile);
+          log('nextcloud', `upload finished for ${uploadFile?.sourceFile ?? sourceFile}`);
+          finalize(uploadFile);
+        } else {
+          finalize();
+        }
+      } catch (err) {
+        logError('autopilot', 'upload/finalize failed', err);
+      }
+    })();
+    pendingJobs.push(job);
+    job.finally(() => {
+      const idx = pendingJobs.indexOf(job);
+      if (idx >= 0) pendingJobs.splice(idx, 1);
+    });
   });
 
   log('recorder', 'starting recording cycle');
