@@ -97,6 +97,10 @@ export const unlinkFile = (sourceFile: string) => {
 };
 
 export const copyRepeat = (sourceFile: string, slot: TimeSlot, filenameSuffix: string) => {
+  if (!slot.matches[0]?.repeatAt) {
+    console.log('[autopilot] No repeat scheduled for this slot, skipping copyRepeat.');
+    return;
+  }
   const destinationFilename = getFilename('', 'repeat', slot.matches[0].repeatAt, filenameSuffix);
   // rename the file with the repeat's timestamp and copy to repeats folder.
   copyFile(sourceFile, process.env.EXPORTER_REPEAT_FOLDER, destinationFilename);

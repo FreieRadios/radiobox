@@ -193,7 +193,8 @@ export default class BroadcastSchema {
       .replace("H:", '"hoursOfDay": ')
       .replace("R:", '"repeatOffset": ')
       .replace("I:", '"info": ')
-      .replace("O:", '"overrides": ');
+      .replace("O:", '"overrides": ')
+      .replace("N:", '"noMerge": ');
   };
 
   parseJsonBlock = (block: string) => {

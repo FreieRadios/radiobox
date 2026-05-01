@@ -22,6 +22,10 @@ export default class ApiConnectorNextcloud {
     this.targetDirectory = props.targetDirectory;
   }
 
+  getUploadFileInfo(sourceFile: string): UploadFile {
+    return { sourceFile } as UploadFile;
+  }
+
   async upload(file: UploadFile) {
     console.log('[nextcloud] Upload started: ' + file.sourceFile);
 

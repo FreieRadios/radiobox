@@ -161,6 +161,7 @@ export type Schedule = {
   name: string;
   info?: string;
   overrides?: boolean;
+  noMerge?: boolean;
   weekday: number;
   monthsOfYear: number[];
   nthWeekdaysOfMonth: number[];

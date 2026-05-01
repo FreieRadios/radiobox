@@ -35,6 +35,9 @@ export default class BroadcastRecorder {
     startRecording: [],
     finished: [],
   };
+  // Tracks in-flight ffmpeg recordings (including their onFinished handlers)
+  // so that start() can await them after the scheduling loop exits.
+  pendingRecordings: Promise<void>[] = [];
 
   constructor(props: BroadcastRecorderProps) {
     this.schedule = props.schedule;
@@ -72,6 +75,12 @@ export default class BroadcastRecorder {
     await this.onStartup(DateTime.now());
     while (DateTime.now() <= this.dateEnd) {
       await this.checkRecording();
+    }
+    if (this.pendingRecordings.length > 0) {
+      console.log(
+        `[recorder] waiting for ${this.pendingRecordings.length} in-flight recording(s) to finalize`
+      );
+      await Promise.allSettled(this.pendingRecordings);
     }
   }
 
@@ -159,6 +168,18 @@ export default class BroadcastRecorder {
 
     const ffmpegProcess: ChildProcess = spawn('ffmpeg', ffmpegArgs);
 
+    // Track this recording so start() can await it before resolving.
+    let resolveRecording: () => void;
+    const recordingPromise = new Promise<void>((resolve) => {
+      resolveRecording = resolve;
+    });
+    this.pendingRecordings.push(recordingPromise);
+    const finishRecording = () => {
+      resolveRecording();
+      const idx = this.pendingRecordings.indexOf(recordingPromise);
+      if (idx >= 0) this.pendingRecordings.splice(idx, 1);
+    };
+
     const retryCallback = () => {
       console.log('[ffmpeg] Retrying recording...');
       this.checkRecording().catch((retryErr) => {
@@ -189,17 +210,20 @@ export default class BroadcastRecorder {
     ffmpegProcess.on('close', async (code) => {
       const _now = DateTime.now().toFormat(timeFormats.machine);
 
-      if (code === 0) {
-        console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
+      try {
+        if (code === 0) {
+          console.log(`[ffmpeg] ${_now} Finished recording ` + targetFile + partSuffix);
 
-        fs.renameSync(targetFile + partSuffix, targetFile);
-        await this.onFinished(targetFile, currentSlot, now, seconds);
+          fs.renameSync(targetFile + partSuffix, targetFile);
+          await this.onFinished(targetFile, currentSlot, now, seconds);
+        } else {
+          console.error(`[ffmpeg] Process exited with code ${code}`);
+          console.error('[ffmpeg] Error during recording! retry in 1s');
 
-      } else {
-        console.error(`[ffmpeg] Process exited with code ${code}`);
-        console.error('[ffmpeg] Error during recording! retry in 1s');
-
-        setTimeout(retryCallback, 1000);
+          setTimeout(retryCallback, 1000);
+        }
+      } finally {
+        finishRecording();
       }
     });
 
@@ -209,6 +233,7 @@ export default class BroadcastRecorder {
       console.error('[ffmpeg] Error during recording! retry in 1s');
 
       setTimeout(retryCallback, 1000);
+      finishRecording();
     });
   }
 

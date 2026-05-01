@@ -4,7 +4,7 @@ export const vd = (v: any, keys?: boolean): void => {
   if (keys && typeof v === "object") {
     v = Object.keys(v);
   }
-  console.log("--------- [zappi] ---------");
+  console.log("--------- [radiobox] ---------");
   // @ts-ignore
   console.log(new Error().stack.split("\n")[2].trim());
   console.dir(v, { depth: 10 });

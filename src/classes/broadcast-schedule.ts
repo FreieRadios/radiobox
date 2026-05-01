@@ -232,6 +232,10 @@ export default class BroadcastSchedule {
         if (!this._grid[sMin] || !this._grid[sMin].broadcast) {
           return;
         }
+        // prevent merging adjacent slots when N: true given in slot.matches
+        if (slot.matches.find((match) => match.noMerge)) {
+          return;
+        }
         if (this._grid[sMin].broadcast !== slot.broadcast) {
           return;
         } else {
