@@ -140,24 +140,13 @@ repeat_branch = fallback(
 
 source_switcher =
   if enable_repeat_schedule then
-    if enable_repeat_crossfade then
-      switch(
-          track_sensitive=false,
-          transitions=[crossfade_transition, crossfade_transition],
-          [
-            (interval_repeat, repeat_branch),
-            (interval_live, live_branch)
-          ]
-      )
-    else
-      switch(
-          track_sensitive=false,
-          [
-            (interval_repeat, repeat_branch),
-            (interval_live, live_branch)
-          ]
-      )
-    end
+    switch(
+        track_sensitive=false,
+        [
+          (interval_repeat, repeat_branch),
+          (interval_live, live_branch)
+        ]
+    )
   else
     live_branch
   end

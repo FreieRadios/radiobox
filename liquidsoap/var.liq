@@ -47,11 +47,42 @@ radio_host  = env_or("STATION_HOST",        "snd.example.net")
 radio_url   = "http://#{radio_host}"
 
 # ---------------------------------------------------------------------------
-# Schedule windows (kept in code: they are time literals, not strings)
+# Schedule windows.
+#
+# The live / repeat windows are derived from two integer env vars (hours,
+# 0..23):
+#   INTERVAL_LIVE_START_HOUR  - hour at which the "live" branch takes over
+#   INTERVAL_LIVE_END_HOUR    - hour at which the "live" branch ends and
+#                               the "repeat" branch takes over again
+#
+# Wrap-around (end < start) is supported, so START=14 END=2 means
+# live runs 14:00..02:00 and repeat runs 02:00..14:00 (the previous default).
+#
+# For a *repeat-only* instance set both vars to the same value (e.g. 0):
+# the live window collapses to "never" and the repeat window covers 24/7.
+# Equivalently you can set LIQ_ENABLE_REPEAT_SCHEDULE=false together with
+# LIQ_LIVE_SOURCE_KIND=silence, but using equal hours keeps the schedule
+# switch in place.
 # ---------------------------------------------------------------------------
-start_live       = {14h}
-interval_live    = {14h-02h}
-interval_repeat  = {02h-14h}
+interval_live_start_hour = env_int("INTERVAL_LIVE_START_HOUR", 14)
+interval_live_end_hour   = env_int("INTERVAL_LIVE_END_HOUR",    2)
+
+# Predicate: is the current local hour inside [start, end) with optional
+# wrap-around at midnight?
+def _hour_in_window(start, stop) =
+  h = time.local().hour
+  if start == stop then
+    false
+  elsif start < stop then
+    h >= start and h < stop
+  else
+    # wrap-around (e.g. 14..2)
+    h >= start or h < stop
+  end
+end
+
+interval_live   = fun () -> _hour_in_window(interval_live_start_hour, interval_live_end_hour)
+interval_repeat = fun () -> not _hour_in_window(interval_live_start_hour, interval_live_end_hour)
 
 # ---------------------------------------------------------------------------
 # Icecast target
