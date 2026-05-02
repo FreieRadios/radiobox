@@ -70,11 +70,10 @@ radio_legacy_mount  = env_or("RADIO_LEGACY_MOUNT",  "Radio")
 # Filesystem layout
 # ---------------------------------------------------------------------------
 home_path     = "/tmp/liquidsoap"
-current_date  = time.string("%Y-%m-%d")
 exporter_filename_prefix = env_or("EXPORTER_FILENAME_PREFIX", "program_radio")
-repeats_txt_file  = "#{home_path}/repeat/#{exporter_filename_prefix}.m3u"
-default_wav_path  = "#{home_path}/mp3/fallback.mp3"
-archive_dir       = "#{home_path}/mp3/Archiv"
+ignore(exporter_filename_prefix)
+fallback_path     = env_or("LIQ_FALLBACK_PATH", "mp3/fallback.mp3")
+default_wav_path  = "#{home_path}/#{fallback_path}"
 repeats_check_interval = 0.5
 repeats_dir       = "#{home_path}/repeat/"
 # Lead time (seconds) before a scheduled repeat starts during which the

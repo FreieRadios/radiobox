@@ -70,6 +70,15 @@ end
 # track is still on-air, so we can q_prefetch.skip() to honour the schedule.
 currently_playing_path = ref("")
 
+# True while q_prefetch is actively producing audio. Set in on_track,
+# cleared when the queue becomes not-ready (see prefetch_due / scan loop).
+prefetch_playing = ref(false)
+
+# Pending entries armed for on-air switching: (filename, full_path,
+# target_epoch). Pushed by try_prefetch, popped by on_track when the
+# corresponding track starts producing.
+armed_queue = ref([])
+
 q_prefetch.on_track(fun (m) -> begin
   rid = m["rid"] ?? "?"
   fn  = m["filename"] ?? "?"
@@ -91,7 +100,7 @@ end)
 # Helper: is this filename already pending in armed_queue?
 def already_armed(filename) =
   list.exists(fun (entry) -> begin
-    let (f, _p, _t) = entry
+    let (f, _, _) = entry
     f == filename
   end, armed_queue())
 end
@@ -215,8 +224,8 @@ def scan_and_schedule() =
   end, files)
   sorted = list.sort(
     fun (a, b) -> begin
-      let (_fa, _pa, ta) = a
-      let (_fb, _pb, tb) = b
+      let (_, _, ta) = a
+      let (_, _, tb) = b
       if ta < tb then -1 elsif ta > tb then 1 else 0 end
     end,
     candidates()
