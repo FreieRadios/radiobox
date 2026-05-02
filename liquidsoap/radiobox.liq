@@ -123,6 +123,19 @@ q_buffered = buffer(
     q_prefetch
 )
 
+# Gate the repeat queue so it only becomes selectable by repeat_branch once
+# the head of armed_queue has reached its target_epoch. Without this gate,
+# repeat_branch (track_sensitive=false) would pick q_buffered the instant
+# the prefetched FLAC finishes decoding - which, with prefetch leads up to
+# REPEATS_PREFETCH_LEAD_SECONDS (default 120s), causes the file to go
+# on-air up to ~2 minutes early. prefetch_due() is defined in
+# tools/play_by_filename.liq.
+q_gated = switch(
+    id="repeat_queue_gated",
+    track_sensitive=false,
+    [(prefetch_due, q_buffered)]
+)
+
 # When the repeat schedule is active we want to fall back to the public
 # stream if the queue is empty (this is what radiobox-repeat-only did);
 # light-repeat instead falls back to the security file. We model both with
@@ -130,7 +143,7 @@ q_buffered = buffer(
 repeat_branch = fallback(
     id="repeat_branch",
     track_sensitive=false,
-    [q_buffered, live_branch, security]
+    [q_gated, live_branch, security]
 )
 
 # ---------------------------------------------------------------------------

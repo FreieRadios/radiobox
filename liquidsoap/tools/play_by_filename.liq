@@ -79,6 +79,26 @@ prefetch_playing = ref(false)
 # corresponding track starts producing.
 armed_queue = ref([])
 
+# Predicate that gates the on-air switch to the repeat queue:
+# - true once the queue is actively producing audio (so we keep playing
+#   through the whole track, even past the next armed entry's target),
+# - or true once the head of armed_queue has reached its target_epoch
+#   (the moment we want to flip to repeat).
+# Used by radiobox.liq to wrap q_buffered in a switch(predicate=...) so a
+# prefetched-but-not-yet-due track does not start playing the moment its
+# request becomes ready (which previously made huge FLACs go on-air up to
+# `repeats_prefetch_lead_seconds` early).
+def prefetch_due() =
+  if prefetch_playing() then
+    true
+  elsif list.length(armed_queue()) > 0 then
+    let (_, _, head_te) = list.hd(default=("", "", 0.), armed_queue())
+    head_te > 0. and time() >= head_te
+  else
+    false
+  end
+end
+
 q_prefetch.on_track(fun (m) -> begin
   rid = m["rid"] ?? "?"
   fn  = m["filename"] ?? "?"
