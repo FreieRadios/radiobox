@@ -92,8 +92,21 @@ def prefetch_due() =
   if prefetch_playing() then
     true
   elsif list.length(armed_queue()) > 0 then
-    let (_, _, head_te) = list.hd(default=("", "", 0.), armed_queue())
-    head_te > 0. and time() >= head_te
+    let (head_fn, _, head_te) = list.hd(default=("", "", 0.), armed_queue())
+    if head_te > 0. and time() >= head_te then
+      # Latch: the head's target time arrived. From now on we want to keep
+      # the repeat queue selected for the whole track even if armed_queue
+      # is mutated by subsequent prefetches. on_track may have already
+      # fired (track is decoding into the buffer); flip the latch and pop
+      # the head here so the predicate stays true until the track ends.
+      prefetch_playing := true
+      currently_playing_path := head_fn
+      armed_queue := list.tl(armed_queue())
+      log.important("repeat_prefetch event=gate_open file=#{head_fn} target_epoch=#{head_te} now=#{time()}")
+      true
+    else
+      false
+    end
   else
     false
   end
@@ -102,19 +115,36 @@ end
 q_prefetch.on_track(fun (m) -> begin
   rid = m["rid"] ?? "?"
   fn  = m["filename"] ?? "?"
-  # Mark q_prefetch as actively producing. Cleared by prefetch_due() once
-  # q_prefetch becomes not-ready again (end-of-track, no successor queued).
-  # Required so that re-arming with the next file's future target_epoch
-  # doesn't make the switch predicate flip away mid-track.
-  prefetch_playing := true
-  currently_playing_path := fn
-  # Pop the head of armed_queue: this entry has now started playing, so the
-  # *next* head becomes the upcoming due target for prefetch_due().
-  if list.length(armed_queue()) > 0 then
+  # Determine whether this track is actually due to go on-air now. The head
+  # of armed_queue corresponds to the track that just started producing in
+  # q_prefetch (FIFO + insertion in target order).
+  head_te =
+    if list.length(armed_queue()) > 0 then
+      let (_, _, te) = list.hd(default=("", "", 0.), armed_queue())
+      te
+    else
+      0.
+    end
+  is_due = head_te > 0. and time() >= head_te
+  # Only mark q_prefetch as on-air when the track is actually due. If the
+  # queue starts producing before target_epoch (e.g. immediately after a
+  # previous track ended ~2min before the next target), we leave
+  # prefetch_playing=false so prefetch_due() keeps repeat_branch on the
+  # live_branch fallback until time() catches up to head_te. The buffered
+  # queue will keep decoding silently in the meantime.
+  if is_due then
+    prefetch_playing := true
+    currently_playing_path := fn
+    # Pop the head of armed_queue: this entry has now started playing, so
+    # the *next* head becomes the upcoming due target for prefetch_due().
     armed_queue := list.tl(armed_queue())
+    log.important(">>>>>>> repeat_prefetch event=now_playing file=#{fn} rid=#{rid} now=#{time()}")
+    log.important("repeat_prefetch event=switch_completed file=#{fn} rid=#{rid} now=#{time()}")
+  else
+    prefetch_playing := false
+    currently_playing_path := ""
+    log.important("repeat_prefetch event=track_ready_waiting file=#{fn} rid=#{rid} target_epoch=#{head_te} now=#{time()}")
   end
-  log.important(">>>>>>> repeat_prefetch event=now_playing file=#{fn} rid=#{rid} now=#{time()}")
-  log.important("repeat_prefetch event=switch_completed file=#{fn} rid=#{rid} now=#{time()}")
 end)
 
 # Helper: is this filename already pending in armed_queue?
