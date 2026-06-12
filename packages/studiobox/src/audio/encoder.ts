@@ -36,6 +36,10 @@ export class Encoder extends EventEmitter {
     ];
 
     if (this.out.harbor.enabled) {
+      // Flush every packet so the stream isn't held back in ffmpeg's ~512 KB
+      // avio buffer — critical for live latency, especially on quiet content
+      // where FLAC compresses small and the buffer would take minutes to fill.
+      a.push('-flush_packets', '1');
       if (this.out.harbor.format === 'ogg-flac') {
         a.push('-map', '0:a', '-c:a', 'flac', '-f', 'ogg');
       } else {

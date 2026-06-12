@@ -36,6 +36,17 @@ describe('Biquad.design — DC response', () => {
     expect(Math.abs(settleDC(hp, 1))).toBeLessThan(0.01);
   });
 
+  it('tolerates a missing or zero Q (shelves) without producing NaN', () => {
+    // Regression: config shelf bands routinely omit `q`; an undefined/0 Q must
+    // not yield NaN coefficients (which would poison the whole signal chain).
+    for (const q of [undefined as unknown as number, 0, NaN]) {
+      const hs = Biquad.design('highshelf', SR, 10000, q, 1.5);
+      const dc = settleDC(hs, 1);
+      expect(Number.isFinite(dc)).toBe(true);
+      expect(Number.isFinite(hs.process(0.3))).toBe(true);
+    }
+  });
+
   it('peaking filter with 0 dB gain is exact unity', () => {
     const pk = Biquad.design('peaking', SR, 1000, 1, 0);
     for (const x of [0.2, -0.5, 0.9, -0.1, 0.4]) {

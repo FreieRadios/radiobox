@@ -53,6 +53,19 @@ function resolveChannel(raw: Dict, profiles: Dict): ChannelConfig {
   }
   if (raw.processing) processing = deepMerge(processing, raw.processing);
 
+  // Normalize EQ bands so every band satisfies the EqBand type: shelves in
+  // particular routinely omit `q`, and an undefined Q would yield NaN biquad
+  // coefficients. Default to a maximally-flat 0.707 and 0 dB.
+  processing = {
+    ...processing,
+    eq: (processing.eq ?? []).map((b) => ({
+      type: b.type,
+      freq: b.freq,
+      gainDb: b.gainDb ?? 0,
+      q: b.q ?? 0.707,
+    })),
+  };
+
   return {
     source: raw.source as number | [number, number],
     role: (raw.role as ChannelConfig['role']) ?? 'unused',

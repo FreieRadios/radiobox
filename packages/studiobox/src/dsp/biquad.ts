@@ -41,7 +41,9 @@ export class Biquad {
     const w0 = (2 * Math.PI * freq) / sampleRate;
     const cw = Math.cos(w0);
     const sw = Math.sin(w0);
-    const alpha = sw / (2 * Math.max(q, 1e-4));
+    // Shelves often omit Q in config; fall back to a maximally-flat 0.707 and
+    // guard against 0/NaN so a missing value can never poison the coefficients.
+    const alpha = sw / (2 * Math.max(q || 0.707, 1e-4));
     const A = Math.pow(10, gainDb / 40);
 
     switch (type) {
