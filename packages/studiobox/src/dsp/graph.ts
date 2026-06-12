@@ -2,6 +2,7 @@ import { StudioboxConfig } from '../config/schema';
 import { ChannelStrip, StripMeters } from './channel-strip';
 import { Automix } from './automix';
 import { Ducker } from './duck';
+import { Leveler } from './leveler';
 import { Limiter } from './limiter';
 import { StereoLoudness } from './loudness';
 import { clamp, dbToGain, gainToDb, msToCoef } from './dsp-math';
@@ -35,6 +36,7 @@ interface MusicNode {
   right: number;
   gain: number;
   ducked: boolean;
+  leveler: Leveler | null; // AGC normalizing music loudness (applied pre-duck)
 }
 
 /**
@@ -80,6 +82,7 @@ export class Graph {
           right: r - 1,
           gain: dbToGain(ch.processing.gainDb),
           ducked: cfg.duck.targets.includes(ch.label),
+          leveler: ch.processing.leveler.enabled ? new Leveler(ch.processing.leveler, sr) : null,
         });
       }
     }
@@ -157,8 +160,17 @@ export class Graph {
       // --- music buses (duckable vs. not) ---
       let tgtL = 0, tgtR = 0, othL = 0, othR = 0;
       for (const mu of this.music) {
-        const l = input[mu.left][n] * mu.gain;
-        const r = input[mu.right][n] * mu.gain;
+        let l = input[mu.left][n] * mu.gain;
+        let r = input[mu.right][n] * mu.gain;
+        // Auto-level music to a consistent loudness. Drive the AGC from the
+        // mono sum and apply one gain to both sides so the stereo image is
+        // preserved. Runs before ducking, so speech still pulls music down.
+        if (mu.leveler) {
+          mu.leveler.process((l + r) * 0.5);
+          const g = dbToGain(mu.leveler.gainDbValue);
+          l *= g;
+          r *= g;
+        }
         if (mu.ducked) { tgtL += l; tgtR += r; } else { othL += l; othR += r; }
       }
       const duckGain = this.ducker.process(micBus, (tgtL + tgtR) * 0.5);
@@ -201,7 +213,9 @@ export class Graph {
     for (const mu of this.music) {
       channels.push({
         label: mu.label, role: 'music',
-        outDb: 0, gateOpen: 1, compGrDb: 0, levelerDb: 0, automixGainDb: 0,
+        outDb: 0, gateOpen: 1, compGrDb: 0,
+        levelerDb: mu.leveler ? mu.leveler.gainDbValue : 0,
+        automixGainDb: 0,
       });
     }
     this.snapshot = {
