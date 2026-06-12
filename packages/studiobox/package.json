@@ -1,0 +1,27 @@
+{
+  "name": "@freieradios/studiobox",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Live multichannel auto-mixer: captures discrete channels from a USB mixer, applies per-channel DSP + gain-sharing automix + ducking, and streams one lossless FLAC output to a Liquidsoap harbor.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "jest --config ../../jest.config.ts --rootDir ../.. packages/studiobox",
+    "dev": "nodemon -e ts,yaml --exec ts-node src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.14.9",
+    "@types/ws": "^8.5.12",
+    "nodemon": "^3.1.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  }
+}
