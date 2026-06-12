@@ -20,6 +20,13 @@ const DEFAULT_PROCESSING: ChannelProcessing = {
   gainDb: 0,
 };
 
+/** Music-channel baseline (merged over DEFAULT before profile/inline overrides).
+ *  Music sits a few dB hotter than mics and gets more boost headroom, so a quiet
+ *  source still reaches a strong level; ducking still pulls it under speech. */
+const MUSIC_OVERRIDES = {
+  leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 },
+};
+
 type Dict = Record<string, unknown>;
 const isObj = (v: unknown): v is Dict => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -46,6 +53,7 @@ function resolveChannel(raw: Dict, profiles: Dict): ChannelConfig {
   const profileName = raw.profile as string | undefined;
   let processing = DEFAULT_PROCESSING;
 
+  if (raw.role === 'music') processing = deepMerge(processing, MUSIC_OVERRIDES);
   if (profileName) {
     const p = profiles[profileName];
     if (!p) throw new Error(`channel "${raw.label}": unknown profile "${profileName}"`);

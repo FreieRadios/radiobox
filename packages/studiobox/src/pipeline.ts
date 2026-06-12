@@ -25,6 +25,13 @@ export class Pipeline {
     this.capture = new Capture(cfg.capture, makeLog('capture'));
     this.encoder = new Encoder(cfg.output, cfg.capture, makeLog('encoder'));
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
+    this.meters?.onCommand((cmd) => {
+      if (cmd.type === 'micsMuted') {
+        const muted = !!cmd.value;
+        this.graph.setMicsMuted(muted);
+        log.info(`mics ${muted ? 'muted (music only)' : 'unmuted'}`);
+      }
+    });
     this.outL = new Float32Array(cfg.capture.blockSize);
     this.outR = new Float32Array(cfg.capture.blockSize);
   }

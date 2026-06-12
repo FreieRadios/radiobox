@@ -23,7 +23,7 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -20, ratio: 3, kneeDb: 6, attackMs: 10, releaseMs: 120, makeupDb: 3 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 18, rangeDb: 15, responseMs: 2000 }
+      { enabled: true, targetLufs: -23, maxGainDb: 18, rangeDb: 15, responseMs: 1500 }
 
   # Dynamic broadcast mic (SM7B / RE20 type): clean, low handling noise.
   dynamic-broadcast:
@@ -43,7 +43,7 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -22, ratio: 3, kneeDb: 6, attackMs: 8, releaseMs: 140, makeupDb: 4 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 18, rangeDb: 15, responseMs: 2000 }
+      { enabled: true, targetLufs: -23, maxGainDb: 18, rangeDb: 15, responseMs: 1500 }
 
   # Cheap lavalier / clip-on: thin, noisy, sibilant -> work harder.
   cheap-lav:
@@ -63,7 +63,7 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -18, ratio: 4, kneeDb: 4, attackMs: 6, releaseMs: 110, makeupDb: 5 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 20, rangeDb: 16, responseMs: 2000 }
+      { enabled: true, targetLufs: -23, maxGainDb: 20, rangeDb: 16, responseMs: 1500 }
 
   # Studio condenser: detailed, sensitive -> gentle, watch sibilance.
   condenser:
@@ -82,4 +82,4 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -24, ratio: 2.5, kneeDb: 8, attackMs: 12, releaseMs: 150, makeupDb: 3 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 15, rangeDb: 14, responseMs: 2500 }
+      { enabled: true, targetLufs: -23, maxGainDb: 15, rangeDb: 14, responseMs: 1800 }

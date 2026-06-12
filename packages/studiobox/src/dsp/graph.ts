@@ -21,6 +21,7 @@ export interface MeterSnapshot {
   momentaryLufs: number;
   shortTermLufs: number;
   outPeakDb: number;
+  micsMuted: boolean;
 }
 
 interface MicNode {
@@ -59,6 +60,9 @@ export class Graph {
   private masterGainDb = 0;
   private masterCoef: number;
   private targetLufs: number;
+
+  // "music only" mode: mutes the mic bus (set live from the meters page)
+  private micsMuted = false;
 
   private snapshot: MeterSnapshot;
 
@@ -123,6 +127,7 @@ export class Graph {
       ],
       duckDepthDb: 0, limiterGrDb: 0,
       momentaryLufs: -Infinity, shortTermLufs: -Infinity, outPeakDb: -Infinity,
+      micsMuted: false,
     };
   }
 
@@ -156,6 +161,9 @@ export class Graph {
         const g = gains && slot >= 0 ? gains[slot] : 1;
         micBus += micProc[i] * g;
       }
+      // "music only" mode: drop the mic bus (also un-arms ducking, since the
+      // ducker now sees a silent mic bus, so music plays at full level).
+      if (this.micsMuted) micBus = 0;
 
       // --- music buses (duckable vs. not) ---
       let tgtL = 0, tgtR = 0, othL = 0, othR = 0;
@@ -225,7 +233,13 @@ export class Graph {
       momentaryLufs: this.outMeter.momentaryLufs,
       shortTermLufs: this.outMeter.shortTermLufs,
       outPeakDb: gainToDb(this.outPeak.value),
+      micsMuted: this.micsMuted,
     };
+  }
+
+  /** Toggle "music only" mode (mutes all mics). Driven from the meters page. */
+  setMicsMuted(muted: boolean): void {
+    this.micsMuted = muted;
   }
 
   getMeters(): MeterSnapshot {
