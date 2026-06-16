@@ -4,31 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c7fe337e-e72c-4f8f-b543-1bd63186a666" name="Changes" comment="chore(autopilot): refactor to modularize logic, add hermetic tests, and improve broadcasting/repeat handling">
+    <list default="true" id="c7fe337e-e72c-4f8f-b543-1bd63186a666" name="Changes" comment="chore(liq): refine repeat queue logic with prefetch_due gating, enhance event logging, and stabilize track sequencing">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/AGENTS.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/config/studiobox.example.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/config/studiobox.example.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/audio/encoder.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/audio/encoder.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/config/load.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/config/load.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/config/schema.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/config/schema.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/dsp/graph.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/dsp/graph.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/meters/server.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/meters/server.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/pipeline.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/pipeline.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/autopilot.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/autopilot.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/classes/api-connector-welocal.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/api-connector-welocal.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-archive.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-archive.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-recorder.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-recorder.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-schedule.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-schedule.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-schema.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-schema.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/dev.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/dev.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/examples/archive.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/archive.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/examples/export-schedule.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/export-schedule.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/examples/record.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/record.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/examples/sync-welocal.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/sync-welocal.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/helper/date-time.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/helper/date-time.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/helper/helper.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/helper/helper.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types/types.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/types.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/yarn.lock" beforeDir="false" afterPath="$PROJECT_DIR$/yarn.lock" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -36,10 +13,15 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="129" />
+    <option name="cachedIndexableFilesCount" value="164" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="main" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
@@ -48,74 +30,15 @@
     &quot;assignee&quot;: &quot;singerla&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/FreieRadios/radiobox.git",
-    "accountId": "846a7e96-312f-4dbf-b49a-21383d50e849"
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:FreieRadios/radiobox.git&quot;,
+    &quot;accountId&quot;: &quot;846a7e96-312f-4dbf-b49a-21383d50e849&quot;
   }
-}]]></component>
+}</component>
   <component name="McpProjectServerCommands">
     <commands />
     <urls />
-  </component>
-  <component name="NextEditCompletionFeaturesState">
-    <decayedCancelled>
-      <entry key="MS100" value="1.0" />
-      <entry key="MS500" value="1.0" />
-      <entry key="S2" value="1.0" />
-      <entry key="S5" value="1.0" />
-      <entry key="S10" value="1.0" />
-      <entry key="S30" value="1.0000000014995136" />
-      <entry key="S60" value="1.0000414271807863" />
-      <entry key="M2" value="1.009084289716314" />
-      <entry key="M5" value="1.316870959925944" />
-      <entry key="M10" value="2.1086175221032" />
-      <entry key="M15" value="2.694892071918778" />
-      <entry key="M30" value="3.5997165976825496" />
-      <entry key="H1" value="4.22351003870407" />
-      <entry key="H2" value="4.590493347658816" />
-      <entry key="H4" value="4.789632010167072" />
-      <entry key="D1" value="4.964132064607601" />
-      <entry key="W1" value="4.994855896561392" />
-    </decayedCancelled>
-    <decayedSelected>
-      <entry key="MS100" value="0.0" />
-      <entry key="MS500" value="0.0" />
-      <entry key="S2" value="0.0" />
-      <entry key="S5" value="0.0" />
-      <entry key="S10" value="0.0" />
-      <entry key="S30" value="0.0" />
-      <entry key="S60" value="0.0" />
-      <entry key="M2" value="0.0" />
-      <entry key="M5" value="0.0" />
-      <entry key="M10" value="0.0" />
-      <entry key="M15" value="0.0" />
-      <entry key="M30" value="0.0" />
-      <entry key="H1" value="0.0" />
-      <entry key="H2" value="0.0" />
-      <entry key="H4" value="0.0" />
-      <entry key="D1" value="0.0" />
-      <entry key="W1" value="0.0" />
-    </decayedSelected>
-    <decayedShown>
-      <entry key="MS100" value="0.9659363289248456" />
-      <entry key="MS500" value="0.9930924954370359" />
-      <entry key="S2" value="0.9982686325973925" />
-      <entry key="S5" value="0.9993070929904525" />
-      <entry key="S10" value="0.9996534864594093" />
-      <entry key="S30" value="0.999884483641948" />
-      <entry key="S60" value="0.9999836637734533" />
-      <entry key="M2" value="1.0090549242691464" />
-      <entry key="M5" value="1.3168499186036686" />
-      <entry key="M10" value="2.1085935937168068" />
-      <entry key="M15" value="2.6948692286651053" />
-      <entry key="M30" value="3.599699746749185" />
-      <entry key="H1" value="4.223499715305437" />
-      <entry key="H2" value="4.590487623862184" />
-      <entry key="H4" value="4.789628995249706" />
-      <entry key="D1" value="4.964131539728091" />
-      <entry key="W1" value="4.994855821014753" />
-    </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
   &quot;customColor&quot;: &quot;&quot;,
@@ -126,29 +49,29 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "studiobox",
-    "junie.onboarding.icon.badge.shown": "true",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "yarn",
-    "prettierjs.PrettierConfiguration.Package": "/home/tsing/WebstormProjects/radiobox/node_modules/prettier",
-    "settings.editor.selected.configurable": "settings.javascript.prettier",
-    "to.speed.mode.migration.done": "true",
-    "ts.external.directory.path": "/home/tsing/WebstormProjects/radiobox/node_modules/typescript/lib",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;yarn&quot;,
+    &quot;prettierjs.PrettierConfiguration.Package&quot;: &quot;/home/tsing/Desktop/radiobox/node_modules/prettier&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;settings.javascript.prettier&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;ts.external.directory.path&quot;: &quot;/home/tsing/Desktop/radiobox/node_modules/typescript/lib&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/liquidsoap/tools" />
@@ -157,7 +80,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-WS-261.24374.125" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-WS-261.23567.141" />
       </set>
     </attachedChunks>
   </component>
@@ -233,7 +156,39 @@
       <option name="project" value="LOCAL" />
       <updated>1762615107919</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="chore(liq): enhance scheduler and queue logic for improved repeat playout stability and hardware compatibility">
+      <option name="closed" value="true" />
+      <created>1777754378105</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1777754378105</updated>
+    </task>
+    <task id="LOCAL-00010" summary="chore(liq): simplify repeat scheduling logic and add dynamic live/repeat interval configuration">
+      <option name="closed" value="true" />
+      <created>1777757976578</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1777757976578</updated>
+    </task>
+    <task id="LOCAL-00011" summary="chore(liq): gate repeat queue with prefetch_due to prevent early playout and improve scheduling accuracy">
+      <option name="closed" value="true" />
+      <created>1777758742664</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1777758742664</updated>
+    </task>
+    <task id="LOCAL-00012" summary="chore(liq): refine repeat queue logic with prefetch_due gating, enhance event logging, and stabilize track sequencing">
+      <option name="closed" value="true" />
+      <created>1777802293532</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1777802293532</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -257,7 +212,10 @@
     <MESSAGE value="chore(liq): switch to time based filename sources during interval_repeat" />
     <MESSAGE value="fix(auto): use copy/unlink instead of move to prevent container error" />
     <MESSAGE value="chore(auto): cleanup &amp; finalize" />
-    <MESSAGE value="chore(autopilot): refactor to modularize logic, add hermetic tests, and improve broadcasting/repeat handling" />
-    <option name="LAST_COMMIT_MESSAGE" value="" />
+    <MESSAGE value="chore(liq): enhance scheduler and queue logic for improved repeat playout stability and hardware compatibility" />
+    <MESSAGE value="chore(liq): simplify repeat scheduling logic and add dynamic live/repeat interval configuration" />
+    <MESSAGE value="chore(liq): gate repeat queue with prefetch_due to prevent early playout and improve scheduling accuracy" />
+    <MESSAGE value="chore(liq): refine repeat queue logic with prefetch_due gating, enhance event logging, and stabilize track sequencing" />
+    <option name="LAST_COMMIT_MESSAGE" value="chore(liq): refine repeat queue logic with prefetch_due gating, enhance event logging, and stabilize track sequencing" />
   </component>
 </project>
