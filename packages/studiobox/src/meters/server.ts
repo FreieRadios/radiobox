@@ -101,6 +101,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  body{background:#111;color:#ddd;font:13px monospace;margin:0;height:100vh;overflow:hidden;display:flex;flex-direction:column}
  h1{font-size:16px;color:#8df;font-weight:bold;letter-spacing:.3px}
  .content{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:14px 18px;overflow:hidden}
+ .metering{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;max-width:760px}
  table{border-collapse:collapse;width:100%;max-width:760px;table-layout:fixed;flex:0 0 auto}
  td,th{padding:4px 8px;text-align:right;border-bottom:1px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  th:first-child,td:first-child{text-align:left}
@@ -140,8 +141,14 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .topbar .spacer{flex:1}
  .topbar .fld{display:flex;align-items:center;gap:6px}
  .bar-panel button{width:172px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- #ftime{margin-left:auto;text-align:right}
+ #ftime{margin-right:auto;text-align:left}
  #ftime .rem{font-size:22px;font-weight:bold;color:#ffd24a;vertical-align:middle}
+ /* Landscape (e.g. iPad rotated): two columns — metering left, files right. */
+ @media (orientation:landscape) and (min-width:700px){
+  .content{flex-direction:row;gap:22px}
+  .metering{flex:1 1 0;min-width:0;max-width:none}
+  .files{flex:1 1 0;min-width:0;max-width:none;margin-top:0}
+ }
 </style></head><body>
 <div class="topbar bar-panel">
  <h1><span class="dot">●</span>studiobox</h1>
@@ -152,6 +159,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <button id="mon" class="mon" style="display:none">● Start local playout</button>
 </div>
 <div class="content">
+<div class="metering">
 <table id="t"><colgroup><col class="c-ch"><col class="c-role"><col class="c-out"><col class="c-gate"><col class="c-comp"><col class="c-mix"></colgroup><thead><tr>
  <th>channel</th><th>role</th><th>out dB</th><th>gate</th><th>comp GR</th><th>automix</th>
 </tr></thead><tbody></tbody></table>
@@ -162,6 +170,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <span class="lbl">Lim</span><span class="v" id="lgr">–</span>
  <span class="lbl">Duck</span><span class="v" id="duck">–</span>
 </div>
+</div>
 <div class="files" id="files" style="display:none">
  <ul id="flist"></ul>
 </div>
@@ -169,9 +178,9 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <div class="footer bar-panel">
  <div class="nowplaying" id="nowplaying" style="display:none"></div>
  <div class="ctl">
-  <button id="mute">Mute mics</button>
-  <button id="stop">■ Stop file</button>
   <span id="ftime"></span>
+  <button id="stop">■ Stop file</button>
+  <button id="mute">Mute mics</button>
  </div>
 </div>
 <script>
