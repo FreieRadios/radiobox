@@ -63,6 +63,18 @@ output:
     enabled: true
     dir: "./recordings" # rolling local FLAC safety copy
     segmentSeconds: 3600
+  # Direct local hardware playout: send the finished program to a locally
+  # plugged audio device (sound card / USB interface, e.g. a Focusrite
+  # Scarlett) for monitoring or to feed a transmitter/PA. Independent of the
+  # harbor stream and the FLAC backup; starts automatically when enabled and is
+  # toggleable live from the meters page.
+  monitor:
+    enabled: false
+    backend: alsa # alsa (via aplay) | pulse (PulseAudio/PipeWire via ffmpeg)
+    # ALSA: an output PCM. Find it with `aplay -l` (e.g. hw:CARD=USB for a
+    # Scarlett). Prefer a plughw:/hw: device, not the *.analog-stereo node.
+    # Pulse: a sink name (empty selects the default sink).
+    device: "hw:CARD=USB"
 
 meters:
   enabled: true

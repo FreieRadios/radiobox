@@ -114,9 +114,22 @@ export interface BackupConfig {
   segmentSeconds: number;
 }
 
+/** Direct local hardware playout: the finished program stream is sent to a
+ *  locally plugged audio device (sound card / USB interface) for monitoring or
+ *  to feed a transmitter/PA. Independent of the harbor stream and FLAC backup. */
+export interface MonitorConfig {
+  enabled: boolean;
+  /** Output driver: `alsa` (via aplay) or `pulse` (PulseAudio/PipeWire via ffmpeg). */
+  backend: CaptureBackend;
+  /** Device name: an ALSA PCM (e.g. `hw:CARD=USB`) or a PulseAudio sink name
+   *  (empty selects the default sink). */
+  device: string;
+}
+
 export interface OutputConfig {
   harbor: HarborConfig;
   backup: BackupConfig;
+  monitor: MonitorConfig;
 }
 
 export interface MetersConfig {

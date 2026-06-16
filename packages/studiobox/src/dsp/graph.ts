@@ -24,12 +24,19 @@ export interface MeterSnapshot {
   micsMuted: boolean;
   /** Name of the file currently playing via the local file player, if any. */
   filePlaying: string | null;
+  /** Elapsed playback position of the current file, in seconds (null when idle). */
+  filePosition: number | null;
+  /** Total duration of the current file, in seconds (null when idle/unknown). */
+  fileDuration: number | null;
   /** Local FLAC recording state: true/false when available, null when the
    *  backup recorder is not configured (so the UI can hide the control). */
   recording: boolean | null;
   /** Harbor streaming state: true/false when available, null when the harbor
    *  output is not configured (so the UI can hide the control). */
   streaming: boolean | null;
+  /** Local hardware playout state: true/false when available, null when no
+   *  monitor output is configured (so the UI can hide the control). */
+  monitor: boolean | null;
 }
 
 interface MicNode {
@@ -78,6 +85,8 @@ export class Graph {
   private fileL: Float32Array;
   private fileR: Float32Array;
   private filePlaying: string | null = null;
+  private filePosition: number | null = null;
+  private fileDuration: number | null = null;
 
   // Local FLAC recording state, reported live to the meters page. null means
   // the backup recorder is not configured (the UI then hides the control).
@@ -86,6 +95,10 @@ export class Graph {
   // Harbor streaming state, reported live to the meters page. null means the
   // harbor output is not configured (the UI then hides the control).
   private streaming: boolean | null = null;
+
+  // Local hardware playout state, reported live to the meters page. null means
+  // no monitor output is configured (the UI then hides the control).
+  private monitor: boolean | null = null;
 
   private snapshot: MeterSnapshot;
 
@@ -183,8 +196,11 @@ export class Graph {
       outPeakDb: -Infinity,
       micsMuted: false,
       filePlaying: null,
+      filePosition: null,
+      fileDuration: null,
       recording: null,
       streaming: null,
+      monitor: null,
     };
   }
 
@@ -310,8 +326,11 @@ export class Graph {
       outPeakDb: gainToDb(this.outPeak.value),
       micsMuted: this.micsMuted,
       filePlaying: this.filePlaying,
+      filePosition: this.filePosition,
+      fileDuration: this.fileDuration,
       recording: this.recording,
       streaming: this.streaming,
+      monitor: this.monitor,
     };
   }
 
@@ -332,11 +351,26 @@ export class Graph {
     this.streaming = streaming;
   }
 
-  /** Feed one block of the local file player into the virtual music source. */
-  setFileBlock(l: Float32Array, r: Float32Array, playing: string | null): void {
+  /** Report the local hardware playout state to the meters page. Pass null when
+   *  no monitor output is configured so the control stays hidden. */
+  setMonitor(monitor: boolean | null): void {
+    this.monitor = monitor;
+  }
+
+  /** Feed one block of the local file player into the virtual music source,
+   *  along with its current playback position/duration (seconds) for the UI. */
+  setFileBlock(
+    l: Float32Array,
+    r: Float32Array,
+    playing: string | null,
+    position: number | null = null,
+    duration: number | null = null
+  ): void {
     this.fileL.set(l);
     this.fileR.set(r);
     this.filePlaying = playing;
+    this.filePosition = playing ? position : null;
+    this.fileDuration = playing ? duration : null;
   }
 
   getMeters(): MeterSnapshot {

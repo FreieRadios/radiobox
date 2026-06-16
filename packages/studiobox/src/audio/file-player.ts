@@ -1,4 +1,4 @@
-import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { ChildProcessWithoutNullStreams, spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { Log } from '../util/log';
 import { BYTES_PER_SAMPLE } from './format';
@@ -37,6 +37,11 @@ export class FilePlayer extends EventEmitter {
   // fadeTotal === 0 means no fade is in progress.
   private fadeTotal = 0;
   private fadeRemaining = 0;
+  // Playback position: real (non-padded) audio frames delivered via read().
+  private playedFrames = 0;
+  // Total file duration in seconds, probed async via ffprobe; null until known
+  // (or if ffprobe is unavailable / the probe fails).
+  private durationSec: number | null = null;
 
   constructor(
     private sampleRate: number,
@@ -50,12 +55,32 @@ export class FilePlayer extends EventEmitter {
     return this.current;
   }
 
+  /** Elapsed playback position in seconds (real audio delivered so far). */
+  get position(): number {
+    return this.playedFrames / this.sampleRate;
+  }
+
+  /** Total duration in seconds, or null when not yet probed / unknown. */
+  get duration(): number | null {
+    return this.durationSec;
+  }
+
+  /** Seconds left to play, or null when nothing is playing or the duration is
+   *  unknown. Clamped at 0. */
+  get remaining(): number | null {
+    if (!this.current || this.durationSec === null) return null;
+    return Math.max(0, this.durationSec - this.position);
+  }
+
   /** Start playing `file` (absolute path), replacing any current playback. */
   play(file: string): void {
     this.stop();
     this.fadeTotal = 0;
     this.fadeRemaining = 0;
+    this.playedFrames = 0;
+    this.durationSec = null;
     this.current = file;
+    this.probeDuration(file);
     const args = [
       '-hide_banner',
       '-loglevel',
@@ -115,6 +140,8 @@ export class FilePlayer extends EventEmitter {
         outR[n] = 0;
       }
     }
+    // Count only real (non-padded) frames so position tracks actual playback.
+    this.playedFrames += have;
     const consumed = have * FRAME_BYTES;
     this.leftover =
       consumed < this.leftover.length
@@ -184,5 +211,28 @@ export class FilePlayer extends EventEmitter {
     this.current = null;
     this.fadeTotal = 0;
     this.fadeRemaining = 0;
+    this.playedFrames = 0;
+    this.durationSec = null;
+  }
+
+  /** Probe the file's duration via ffprobe and cache it. Best-effort: on any
+   *  failure (ffprobe missing, unreadable metadata) the duration stays null and
+   *  the UI simply shows elapsed time instead of remaining. The result is
+   *  ignored if playback has since moved on to another file. */
+  private probeDuration(file: string): void {
+    execFile(
+      'ffprobe',
+      [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        file,
+      ],
+      (err, stdout) => {
+        if (err || this.current !== file) return;
+        const sec = parseFloat(String(stdout).trim());
+        if (Number.isFinite(sec) && sec > 0) this.durationSec = sec;
+      }
+    );
   }
 }

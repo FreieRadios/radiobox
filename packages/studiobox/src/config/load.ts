@@ -6,6 +6,8 @@ import {
   ChannelProcessing,
   FilePlayerConfig,
   FilePlayerDir,
+  MonitorConfig,
+  OutputConfig,
   StudioboxConfig,
 } from './schema';
 
@@ -118,6 +120,26 @@ function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
   };
 }
 
+/** Normalize the optional local hardware playout (monitor) block. Defaults to
+ *  disabled; backend falls back to ALSA. The device is required when enabled
+ *  (checked in validate). */
+function resolveMonitor(raw: unknown): MonitorConfig {
+  if (!isObj(raw)) return { enabled: false, backend: 'alsa', device: '' };
+  const backend = raw.backend === 'pulse' ? 'pulse' : 'alsa';
+  return {
+    enabled: !!raw.enabled,
+    backend,
+    device: typeof raw.device === 'string' ? raw.device.trim() : '',
+  };
+}
+
+/** Resolve the output block, filling in the monitor sub-config defaults so it
+ *  is always present (harbor/backup are taken from YAML as-is). */
+function resolveOutput(raw: unknown): OutputConfig {
+  const out = (isObj(raw) ? raw : {}) as unknown as OutputConfig;
+  return { ...out, monitor: resolveMonitor(isObj(raw) ? raw.monitor : undefined) };
+}
+
 function readYaml(file: string): Dict {
   const raw = fs.readFileSync(file, 'utf8');
   const parsed = yaml.load(raw);
@@ -172,7 +194,8 @@ export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
   const channels = rawChannels.map((c) => resolveChannel(c, profiles));
 
   const filePlayer = resolveFilePlayer(root.filePlayer);
-  const cfg = { ...root, channels, filePlayer } as unknown as StudioboxConfig;
+  const output = resolveOutput(root.output);
+  const cfg = { ...root, channels, filePlayer, output } as unknown as StudioboxConfig;
   validate(cfg, configPath);
   return cfg;
 }
@@ -205,5 +228,8 @@ function validate(cfg: StudioboxConfig, file: string): void {
   }
   for (const t of cfg.duck?.targets ?? []) {
     if (!labels.has(t)) fail(`duck.targets references unknown channel "${t}"`);
+  }
+  if (cfg.output?.monitor?.enabled && cfg.output.monitor.backend === 'alsa' && !cfg.output.monitor.device) {
+    fail('output.monitor.device is required when monitor is enabled with the alsa backend');
   }
 }

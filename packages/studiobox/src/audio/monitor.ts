@@ -1,0 +1,104 @@
+import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { CaptureConfig, MonitorConfig } from '../config/schema';
+import { Log } from '../util/log';
+
+/**
+ * Plays the finished stereo float stream out of a locally plugged audio device
+ * (a sound card / USB interface such as a Focusrite Scarlett) for direct local
+ * playout or monitoring. Runs in its own process so it can be toggled live from
+ * the meters page without disturbing the harbor encoder or the FLAC backup.
+ *
+ * ALSA uses `aplay` rather than ffmpeg's ALSA output: it opens the device
+ * directly and reliably, mirroring why `Capture` uses `arecord` (ffmpeg's ALSA
+ * layer mis-negotiates some USB device configurations). PulseAudio/PipeWire
+ * goes through ffmpeg, matching the capture pulse path.
+ *
+ * Events: 'exit' (code). The pipeline restarts the monitor on unexpected exit
+ * (e.g. device unplugged) while it is armed.
+ */
+export class Monitor extends EventEmitter {
+  private proc: ChildProcessWithoutNullStreams | null = null;
+
+  constructor(
+    private monitor: MonitorConfig,
+    private capture: CaptureConfig,
+    private log: Log
+  ) {
+    super();
+  }
+
+  /** True while the playout process is running. */
+  get active(): boolean {
+    return this.proc !== null;
+  }
+
+  private command(): { bin: string; args: string[] } {
+    const rate = String(this.capture.sampleRate);
+    if (this.monitor.backend === 'alsa') {
+      // aplay reads raw f32le stereo from stdin and plays it to the device,
+      // symmetric with Capture's use of arecord.
+      return {
+        bin: 'aplay',
+        args: [
+          '-D', this.monitor.device,
+          '-f', 'FLOAT_LE',
+          '-r', rate,
+          '-c', '2',
+          '-t', 'raw',
+          '-q',
+          '-', // stdin
+        ],
+      };
+    }
+    // PulseAudio/PipeWire via ffmpeg. Input options precede -i; the output is
+    // the named pulse sink (empty string selects the default sink).
+    return {
+      bin: 'ffmpeg',
+      args: [
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-f', 'f32le',
+        '-ar', rate,
+        '-ac', '2',
+        '-i', 'pipe:0',
+        '-f', 'pulse',
+        this.monitor.device || 'studiobox',
+      ],
+    };
+  }
+
+  /** Start (or restart) the playout process. No-op if already active. */
+  start(): void {
+    if (!this.monitor.enabled || this.proc) return;
+    const { bin, args } = this.command();
+    this.log.info('monitor playout:', bin, args.join(' '));
+    const proc = spawn(bin, args);
+    this.proc = proc;
+
+    proc.stderr.on('data', (d: Buffer) => {
+      const s = d.toString().trim();
+      if (s) this.log.error(`monitor ${bin}:`, s);
+    });
+    proc.on('error', (err) => this.log.error('monitor spawn error:', err.message));
+    proc.on('close', (code) => {
+      if (this.proc === proc) this.proc = null;
+      this.emit('exit', code);
+    });
+  }
+
+  /** Feed one stereo block. Returns false when not playing or on backpressure. */
+  write(buf: Buffer): boolean {
+    if (!this.proc || !this.proc.stdin.writable) return false;
+    return this.proc.stdin.write(buf);
+  }
+
+  /** Stop playout, closing the device. */
+  stop(): void {
+    if (this.proc) {
+      this.proc.stdin.end();
+      this.proc.kill('SIGTERM');
+      this.proc = null;
+    }
+  }
+}

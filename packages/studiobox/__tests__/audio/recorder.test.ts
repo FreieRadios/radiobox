@@ -37,11 +37,13 @@ describe('Recorder', () => {
     const rec = new Recorder(backup, CAPTURE, makeLog());
 
     rec.start();
-    // Feed ~0.5 s of silence; writes should be accepted while recording.
+    // Feed ~1 s of silence; at least one write should be accepted while
+    // recording. The generous window keeps this robust when the suite runs in
+    // parallel and ffmpeg is slow to become ready under CPU contention.
     let accepted = false;
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 100 && !accepted; i++) {
       if (rec.write(block(CAPTURE.blockSize)) !== false) accepted = true;
-      await new Promise((res) => setTimeout(res, 5));
+      await new Promise((res) => setTimeout(res, 10));
     }
     expect(accepted).toBe(true);
 

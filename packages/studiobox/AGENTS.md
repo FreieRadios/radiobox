@@ -95,7 +95,13 @@ operator arms it from the button),
 and a start/stop harbor-streaming control on the meters page (the `streaming`
 WebSocket command toggles the `Encoder` ffmpeg process; harbor streaming **does**
 start automatically when `output.harbor.enabled`, but can be stopped/restarted
-live, and the button is hidden when harbor is disabled).
+live, and the button is hidden when harbor is disabled),
+and direct local hardware playout (the finished program is sent to a locally
+plugged audio device — sound card / USB interface — via `output.monitor`; the
+`Monitor` process uses **aplay** for ALSA and **ffmpeg** for pulse, runs
+independently of the harbor encoder and FLAC backup, starts automatically when
+`output.monitor.enabled`, and is toggled live with the `monitor` WebSocket
+command / meters-page button).
 
 ## TODO / roadmap (pick up here)
 
