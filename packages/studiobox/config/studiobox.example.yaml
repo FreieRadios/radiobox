@@ -97,6 +97,10 @@ filePlayer:
   label: FilePlayer # shown as a music row on the meters page
   ducked: true # pulled under live speech, like the music buses
   fadeOutMs: 800 # smooth fade to silence when the operator hits "Stop file" (0 = hard cut)
+  prebufferMs: 250 # jitter buffer filled before playout starts; raise on slow
+                   # hardware (e.g. a Raspberry Pi) if startup crackles, at the
+                   # cost of more delay before audio begins
+
   # Optional music-style processing overrides (defaults match music channels):
   # processing:
   #   leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 }

@@ -20,6 +20,16 @@ export const AUDIO_EXTENSIONS = [
 
 const FRAME_BYTES = 2 * BYTES_PER_SAMPLE; // stereo f32le
 
+// Default jitter buffer: hold playout until this much audio is queued so a slow
+// decoder startup (or producer/consumer timing jitter under `-re` real-time
+// pacing) doesn't underrun and crackle. The buffer then stays ~this deep,
+// absorbing jitter. ~250 ms is inaudible as start latency for a manual "play"
+// action. Overridable per setup via `filePlayer.prebufferMs`.
+const DEFAULT_PREBUFFER_MS = 250;
+// Short ramp applied when playout begins so audio doesn't start on a waveform
+// discontinuity (a click), independent of where the file's first sample sits.
+const FADE_IN_MS = 12;
+
 /**
  * Decodes a local audio file to 48 kHz stereo float via ffmpeg and exposes it
  * one DSP block at a time through `read()`, mirroring the capture/encoder
@@ -42,12 +52,22 @@ export class FilePlayer extends EventEmitter {
   // Total file duration in seconds, probed async via ffprobe; null until known
   // (or if ffprobe is unavailable / the probe fails).
   private durationSec: number | null = null;
+  // Jitter-buffer state: true while filling the prebuffer before playout.
+  private buffering = false;
+  // Fade-in ramp remaining (samples) once playout begins.
+  private fadeInRemaining = 0;
+  private readonly prebufferBytes: number;
+  private readonly fadeInSamples: number;
 
   constructor(
     private sampleRate: number,
-    private log: Log
+    private log: Log,
+    prebufferMs: number = DEFAULT_PREBUFFER_MS
   ) {
     super();
+    const preMs = Number.isFinite(prebufferMs) && prebufferMs >= 0 ? prebufferMs : DEFAULT_PREBUFFER_MS;
+    this.prebufferBytes = Math.ceil((sampleRate * preMs) / 1000) * FRAME_BYTES;
+    this.fadeInSamples = Math.max(1, Math.ceil((sampleRate * FADE_IN_MS) / 1000));
   }
 
   /** Absolute path of the file currently playing, or null when idle. */
@@ -79,6 +99,8 @@ export class FilePlayer extends EventEmitter {
     this.fadeRemaining = 0;
     this.playedFrames = 0;
     this.durationSec = null;
+    this.buffering = true;
+    this.fadeInRemaining = 0;
     this.current = file;
     this.probeDuration(file);
     const args = [
@@ -129,6 +151,22 @@ export class FilePlayer extends EventEmitter {
         : Buffer.concat(this.queue);
       this.queue = [];
     }
+
+    // Prebuffer (jitter buffer): while filling, emit silence and don't advance
+    // playback. Start once we have PREBUFFER_MS queued, or sooner if the decoder
+    // already finished (a file shorter than the prebuffer). Ramp playout in to
+    // avoid a startup click.
+    if (this.buffering) {
+      if (this.leftover.length >= this.prebufferBytes || !this.proc) {
+        this.buffering = false;
+        this.fadeInRemaining = this.fadeInSamples;
+      } else {
+        outL.fill(0, 0, frames);
+        outR.fill(0, 0, frames);
+        return;
+      }
+    }
+
     const avail = Math.floor(this.leftover.length / FRAME_BYTES);
     const have = Math.min(frames, avail);
     for (let n = 0; n < frames; n++) {
@@ -147,6 +185,16 @@ export class FilePlayer extends EventEmitter {
       consumed < this.leftover.length
         ? Buffer.from(this.leftover.subarray(consumed))
         : Buffer.alloc(0);
+
+    // Apply the short fade-in ramp (silence -> unity) at the start of playout.
+    if (this.fadeInRemaining > 0) {
+      for (let n = 0; n < frames && this.fadeInRemaining > 0; n++) {
+        const g = 1 - this.fadeInRemaining / this.fadeInSamples;
+        outL[n] *= g;
+        outR[n] *= g;
+        this.fadeInRemaining--;
+      }
+    }
 
     // Apply the smooth fade-out gain ramp (linear to silence) when stopping.
     if (this.fadeTotal > 0) {
@@ -189,7 +237,9 @@ export class FilePlayer extends EventEmitter {
    * plain hard stop. Calling it again while a fade is in progress is a no-op.
    */
   fadeOut(ms: number): void {
-    if (!this.current || ms <= 0) {
+    // Nothing to fade if idle, no fade requested, or still prefilling the
+    // jitter buffer (no audio has played out yet) — just hard stop.
+    if (!this.current || ms <= 0 || this.buffering) {
       this.stop();
       return;
     }
@@ -213,6 +263,8 @@ export class FilePlayer extends EventEmitter {
     this.fadeRemaining = 0;
     this.playedFrames = 0;
     this.durationSec = null;
+    this.buffering = false;
+    this.fadeInRemaining = 0;
   }
 
   /** Probe the file's duration via ffprobe and cache it. Best-effort: on any

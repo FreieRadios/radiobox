@@ -116,6 +116,10 @@ function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
     label: String(raw.label ?? 'FilePlayer'),
     ducked: raw.ducked !== false,
     fadeOutMs: Number.isFinite(Number(raw.fadeOutMs)) ? Number(raw.fadeOutMs) : 800,
+    prebufferMs:
+      Number.isFinite(Number(raw.prebufferMs)) && Number(raw.prebufferMs) >= 0
+        ? Number(raw.prebufferMs)
+        : 250,
     processing,
   };
 }

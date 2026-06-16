@@ -68,6 +68,26 @@ describe('FilePlayer', () => {
     expect(l.every((v) => v === 0)).toBe(true);
   });
 
+  it('prebuffers before playout: the first read is silent and position stays 0', () => {
+    const file = makeToneFile(1);
+    const fp = new FilePlayer(SR, makeLog());
+    fp.play(file);
+
+    // Immediately after play(), the decoder has produced little/nothing and the
+    // jitter buffer is still filling, so playout is gated to silence and the
+    // position has not advanced.
+    const l = new Float32Array(BLOCK);
+    const r = new Float32Array(BLOCK);
+    l.fill(1);
+    r.fill(1);
+    fp.read(l, r, BLOCK);
+    expect(l.every((v) => v === 0)).toBe(true);
+    expect(r.every((v) => v === 0)).toBe(true);
+    expect(fp.position).toBe(0);
+
+    fp.stop();
+  });
+
   it('tracks playback position and probes duration; remaining counts down', async () => {
     const file = makeToneFile(1); // ~1 s of audio
     const fp = new FilePlayer(SR, makeLog());

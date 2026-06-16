@@ -163,6 +163,10 @@ export interface FilePlayerConfig {
   /** Fade-out duration (ms) applied when the operator stops playback so the
    *  audio is ramped to silence instead of cut abruptly. */
   fadeOutMs: number;
+  /** Jitter-buffer depth (ms) filled before playout starts. Higher values
+   *  resist startup/underrun crackle on slow hardware at the cost of more
+   *  start latency. */
+  prebufferMs: number;
   /** Music-style processing (leveler/gain) applied to the decoded audio. */
   processing: ChannelProcessing;
 }

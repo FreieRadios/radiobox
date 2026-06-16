@@ -53,7 +53,7 @@ export class Pipeline {
       ? new Monitor(cfg.output.monitor, cfg.capture, makeLog('monitor'))
       : null;
     this.filePlayer = cfg.filePlayer?.enabled
-      ? new FilePlayer(cfg.capture.sampleRate, makeLog('fileplayer'))
+      ? new FilePlayer(cfg.capture.sampleRate, makeLog('fileplayer'), cfg.filePlayer.prebufferMs)
       : null;
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
     this.meters?.onCommand((cmd) => this.onCommand(cmd.type, cmd.value));
