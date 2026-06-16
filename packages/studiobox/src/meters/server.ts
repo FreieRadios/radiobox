@@ -98,7 +98,7 @@ export class MeterServer {
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <title>studiobox meters</title>
 <style>
- body{background:#111;color:#ddd;font:13px monospace;margin:16px}
+ body{background:#111;color:#ddd;font:13px monospace;margin:16px;padding-bottom:78px}
  h1{font-size:15px;color:#7cf}
  table{border-collapse:collapse;width:100%;max-width:760px;table-layout:fixed}
  td,th{padding:4px 8px;text-align:right;border-bottom:1px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -123,19 +123,18 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .files li:hover{background:#1a1a1a}
  .files li.playing{background:#2a1830;color:#fbe}
  .files .none{color:#666}
- .files select{margin:0 0 8px;padding:5px 8px;font:13px monospace;background:#223;color:#cde;border:1px solid #456;border-radius:4px}
+ .files select{margin:0 0 8px;padding:10px 14px;font:17px monospace;min-width:280px;background:#223;color:#cde;border:1px solid #456;border-radius:4px}
  .files label{color:#7cf;margin-right:6px}
  .nowplaying{margin:8px 0;color:#fbe;font-size:15px}
  .nowplaying.idle{color:#666}
  .nowplaying b{color:#7cf}
- .ctlrow{display:flex;align-items:center;justify-content:space-between;max-width:760px;margin:10px 0}
- .ctlrow button{margin:0}
- #ftime{text-align:right}
+ .footer{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;align-items:center;gap:12px;
+  padding:12px 16px;background:#181818;border-top:1px solid #333;box-shadow:0 -2px 8px rgba(0,0,0,.5)}
+ .footer button{margin:0;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #ftime{margin-left:auto;text-align:right}
  #ftime .rem{font-size:24px;font-weight:bold;color:#ffd24a;vertical-align:middle}
- #ftime .tot{font-size:13px;color:#9ab;margin-left:6px;vertical-align:middle}
 </style></head><body>
 <h1>studiobox — live meters</h1>
-<button id="mute">Mute all mics (music only)</button>
 <button id="rec" class="rec" style="display:none">● Start recording</button>
 <button id="ship" class="ship" style="display:none">● Start streaming</button>
 <button id="mon" class="mon" style="display:none">● Start local playout</button>
@@ -151,8 +150,12 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <h2>local files — click to play through the music bus</h2>
  <div><label for="folder">folder</label><select id="folder"></select></div>
  <div class="nowplaying idle" id="nowplaying">nothing playing</div>
- <div class="ctlrow"><button id="stop">■ Stop file</button><span id="ftime"></span></div>
  <ul id="flist"></ul>
+</div>
+<div class="footer">
+ <button id="mute">Mute mics</button>
+ <button id="stop">■ Stop file</button>
+ <span id="ftime"></span>
 </div>
 <script>
  const fmt=(v,d=1)=>(v===null||v===undefined||!isFinite(v))?'–':v.toFixed(d);
@@ -160,7 +163,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  const bar=(v,max,cls)=>{const w=Math.max(0,Math.min(1,v/max))*60;return '<span class="bar '+(cls||'')+'" style="width:'+w+'px"></span>'};
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
  const mbtn=document.getElementById('mute');
- function setBtn(){mbtn.textContent=muted?'▶ Mics muted — music only (click to unmute)':'Mute all mics (music only)';mbtn.className=muted?'on':'';}
+ function setBtn(){mbtn.textContent=muted?'▶ Music only':'Mute mics';mbtn.title=muted?'Mics muted — music only (click to unmute)':'Mute all mics (music only)';mbtn.className=muted?'on':'';}
  mbtn.onclick=()=>{muted=!muted;setBtn();if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'micsMuted',value:muted}));};
  function send(cmd){if(ws&&ws.readyState===1)ws.send(JSON.stringify(cmd));}
  const rbtn=document.getElementById('rec');
@@ -181,7 +184,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   if(playing){npbox.className='nowplaying';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b>';}
   else{npbox.className='nowplaying idle';npbox.textContent='nothing playing';}}
  function updateFileTime(pos,dur){const el=document.getElementById('ftime');if(!el)return;
-  if(dur!==null&&dur!==undefined&&isFinite(dur)){el.innerHTML='<span class="rem">'+mmss(dur-(pos||0))+' left</span><span class="tot">'+mmss(pos)+' / '+mmss(dur)+'</span>';}
+  if(dur!==null&&dur!==undefined&&isFinite(dur)){el.innerHTML='<span class="rem">'+mmss(dur-(pos||0))+' left</span>';}
   else if(pos!==null&&pos!==undefined&&isFinite(pos)){el.innerHTML='<span class="rem">'+mmss(pos)+'</span>';}
   else el.innerHTML='';}
  function loadFolders(){fetch('folders').then(r=>r.json()).then(d=>{
