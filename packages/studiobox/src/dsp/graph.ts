@@ -12,6 +12,7 @@ export interface ChannelMeter extends StripMeters {
   label: string;
   role: string;
   automixGainDb: number;
+  muted: boolean;
 }
 
 export interface MeterSnapshot {
@@ -44,6 +45,7 @@ interface MicNode {
   strip: ChannelStrip;
   source: number; // 0-based
   automixSlot: number; // index into automix members, or -1
+  muted: boolean; // per-channel mute (independent of the global mic mute)
 }
 
 interface MusicNode {
@@ -55,6 +57,7 @@ interface MusicNode {
   leveler: Leveler | null; // AGC normalizing music loudness (applied pre-duck)
   virtual: boolean; // true for the local file player (fed via setFileBlock)
   meter: EnvelopeFollower; // tracks the channel's post-leveler/gain peak level
+  muted: boolean; // per-channel mute
 }
 
 /**
@@ -113,6 +116,7 @@ export class Graph {
           strip: new ChannelStrip(ch.processing, sr),
           source: (ch.source as number) - 1,
           automixSlot: members.indexOf(ch.label),
+          muted: false,
         });
       } else if (ch.role === 'music') {
         const [l, r] = ch.source as [number, number];
@@ -125,6 +129,7 @@ export class Graph {
           leveler: ch.processing.leveler.enabled ? new Leveler(ch.processing.leveler, sr) : null,
           virtual: false,
           meter: new EnvelopeFollower(sr, 1, 200),
+          muted: false,
         });
       }
     }
@@ -146,6 +151,7 @@ export class Graph {
         leveler: fp.processing.leveler.enabled ? new Leveler(fp.processing.leveler, sr) : null,
         virtual: true,
         meter: new EnvelopeFollower(sr, 1, 200),
+        muted: false,
       });
     }
     this.fileL = new Float32Array(cfg.capture.blockSize);
@@ -178,6 +184,7 @@ export class Graph {
           compGrDb: 0,
           levelerDb: 0,
           automixGainDb: 0,
+          muted: false,
         })),
         ...this.music.map((m) => ({
           label: m.label,
@@ -187,6 +194,7 @@ export class Graph {
           compGrDb: 0,
           levelerDb: 0,
           automixGainDb: 0,
+          muted: false,
         })),
       ],
       duckDepthDb: 0,
@@ -216,7 +224,10 @@ export class Graph {
       let micBus = 0;
       for (let i = 0; i < this.mics.length; i++) {
         const m = this.mics[i];
-        micProc[i] = m.strip.process(input[m.source][n]);
+        const s = m.strip.process(input[m.source][n]);
+        // Per-channel mute: keep the strip (and its meters) running, but drop
+        // the channel from the automix and the bus so it's truly silent.
+        micProc[i] = m.muted ? 0 : s;
       }
 
       // --- gain-sharing automix ---
@@ -258,6 +269,9 @@ export class Graph {
         // Track this channel's own output level (post-leveler/gain, pre-duck)
         // so the meters page shows a real "out dB" for music/file sources.
         mu.meter.process(Math.max(Math.abs(l), Math.abs(r)));
+        // Per-channel mute: meter still tracks the source, but it contributes
+        // nothing to the mix.
+        if (mu.muted) continue;
         if (mu.ducked) {
           tgtL += l;
           tgtR += r;
@@ -304,6 +318,7 @@ export class Graph {
         role: 'mic',
         ...sm,
         automixGainDb: gains && m.automixSlot >= 0 ? gainToDb(gains[m.automixSlot]) : 0,
+        muted: m.muted,
       });
     }
     for (const mu of this.music) {
@@ -315,6 +330,7 @@ export class Graph {
         compGrDb: 0,
         levelerDb: mu.leveler ? mu.leveler.gainDbValue : 0,
         automixGainDb: 0,
+        muted: mu.muted,
       });
     }
     this.snapshot = {
@@ -337,6 +353,17 @@ export class Graph {
   /** Toggle "music only" mode (mutes all mics). Driven from the meters page. */
   setMicsMuted(muted: boolean): void {
     this.micsMuted = muted;
+  }
+
+  /** Mute/unmute a single channel (mic or music) by its label. */
+  setChannelMuted(label: string, muted: boolean): void {
+    const mic = this.mics.find((m) => m.label === label);
+    if (mic) {
+      mic.muted = muted;
+      return;
+    }
+    const mu = this.music.find((m) => m.label === label);
+    if (mu) mu.muted = muted;
   }
 
   /** Report the local FLAC recording state to the meters page. Pass null when

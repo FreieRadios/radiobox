@@ -71,6 +71,14 @@ export class Pipeline {
       const muted = !!value;
       this.graph.setMicsMuted(muted);
       log.info(`mics ${muted ? 'muted (music only)' : 'unmuted'}`);
+    } else if (type === 'channelMuted') {
+      const req = isObj(value) ? value : {};
+      const label = String((req as { label?: unknown }).label ?? '');
+      const muted = !!(req as { muted?: unknown }).muted;
+      if (label) {
+        this.graph.setChannelMuted(label, muted);
+        log.info(`channel ${label} ${muted ? 'muted' : 'unmuted'}`);
+      }
     } else if (type === 'recording' && this.recorder) {
       this.recordingArmed = !!value;
       if (this.recordingArmed) this.recorder.start();

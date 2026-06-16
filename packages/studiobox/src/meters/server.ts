@@ -8,6 +8,7 @@ import { Log } from '../util/log';
  *
  *  Control protocol (client -> server, JSON over WebSocket):
  *   - { type: 'micsMuted', value: boolean }  toggle "music only" mode
+ *   - { type: 'channelMuted', value: { label, muted } } mute/unmute one channel
  *   - { type: 'recording', value: boolean }  start/stop the local FLAC recording
  *   - { type: 'streaming', value: boolean }  start/stop shipping to the harbor
  *   - { type: 'monitor', value: boolean }    start/stop local hardware playout
@@ -103,9 +104,13 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .content{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:14px 18px;overflow:hidden}
  .metering{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;max-width:760px}
  table{border-collapse:collapse;width:100%;max-width:760px;table-layout:fixed;flex:0 0 auto}
- td,th{padding:4px 8px;text-align:right;border-bottom:1px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ td,th{padding:8px 8px;text-align:right;border-bottom:1px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  th:first-child,td:first-child{text-align:left}
- col.c-ch{width:22%}col.c-role{width:12%}col.c-out{width:24%}col.c-gate{width:12%}col.c-comp{width:18%}col.c-mix{width:12%}
+ col.c-ch{width:20%}col.c-role{width:11%}col.c-out{width:22%}col.c-gate{width:10%}col.c-comp{width:15%}col.c-mix{width:10%}col.c-mute{width:12%}
+ td.mute{text-align:center;overflow:visible}
+ .mtbtn{margin:0;padding:3px 0;width:58px;font:12px monospace;background:#2a2a2a;color:#9c9;border:1px solid #4a4a4a;border-radius:4px}
+ .mtbtn:hover{border-color:#7cf}
+ .mtbtn.on{background:#3a2f1c;color:#e6c878;border-color:#8a6d2f}
  .bar{display:inline-block;height:10px;background:#3a7;vertical-align:middle}
  .gr{background:#c64}.duck{background:#c4a}
  .master{margin:12px 0;font-size:14px;flex:0 0 auto}
@@ -160,8 +165,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 </div>
 <div class="content">
 <div class="metering">
-<table id="t"><colgroup><col class="c-ch"><col class="c-role"><col class="c-out"><col class="c-gate"><col class="c-comp"><col class="c-mix"></colgroup><thead><tr>
- <th>channel</th><th>role</th><th>out dB</th><th>gate</th><th>comp GR</th><th>automix</th>
+<table id="t"><colgroup><col class="c-ch"><col class="c-role"><col class="c-out"><col class="c-gate"><col class="c-comp"><col class="c-mix"><col class="c-mute"></colgroup><thead><tr>
+ <th>channel</th><th>role</th><th>out dB</th><th>gate</th><th>comp GR</th><th>automix</th><th>mute</th>
 </tr></thead><tbody></tbody></table>
 <div class="master">
  <span class="lbl">M</span><span class="v" id="mom">–</span>
@@ -187,6 +192,33 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  const fmt=(v,d=1)=>(v===null||v===undefined||!isFinite(v))?'–':v.toFixed(d);
  const mmss=v=>{if(v===null||v===undefined||!isFinite(v))return '–';const s=Math.max(0,Math.round(v));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
  const bar=(v,max,cls)=>{const w=Math.max(0,Math.min(1,v/max))*60;return '<span class="bar '+(cls||'')+'" style="width:'+w+'px"></span>'};
+ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+ // Build the meter rows once (rebuilding only when the channel set changes) and
+ // update cell contents in place each frame. Rebuilding the whole tbody every
+ // frame would destroy the per-row mute buttons mid-click, breaking the toggle.
+ let rowEls=null;
+ function ensureRows(channels){
+  const tb=document.querySelector('#t tbody');
+  if(rowEls&&rowEls.length===channels.length&&rowEls.every((r,i)=>r.label===channels[i].label))return;
+  tb.innerHTML='';
+  rowEls=channels.map(c=>{const tr=document.createElement('tr');
+   tr.innerHTML='<td>'+esc(c.label)+'</td><td>'+esc(c.role)+'</td>'+
+    '<td class="cout"></td><td class="cgate"></td><td class="ccomp"></td><td class="cmix"></td>'+
+    '<td class="mute"><button class="mtbtn" data-label="'+esc(c.label)+'">mute</button></td>';
+   tb.appendChild(tr);
+   return {label:c.label,out:tr.querySelector('.cout'),gate:tr.querySelector('.cgate'),
+    comp:tr.querySelector('.ccomp'),mix:tr.querySelector('.cmix'),mbtn:tr.querySelector('.mtbtn')};});
+ }
+ function updateRows(channels){
+  ensureRows(channels);
+  channels.forEach((c,i)=>{const r=rowEls[i];
+   r.out.innerHTML=fmt(c.outDb)+' '+bar(c.outDb+60,60);
+   r.gate.innerHTML=bar(c.gateOpen,1);
+   r.comp.innerHTML=fmt(c.compGrDb)+' '+bar(c.compGrDb,20,'gr');
+   r.mix.textContent=fmt(c.automixGainDb);
+   r.mbtn.className='mtbtn'+(c.muted?' on':'');
+   r.mbtn.textContent=c.muted?'unmute':'mute';});
+ }
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
  const mbtn=document.getElementById('mute');
  function setBtn(){
@@ -210,6 +242,12 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  // The Stop-file button only makes sense while a file is playing.
  function setStop(){stopBtn.style.display=playing?'':'none';}
  stopBtn.onclick=()=>send({type:'stopFile'});
+ // Per-row mute toggles: the tbody is rebuilt every frame, so delegate the
+ // click to the persistent tbody and read the channel label from the button.
+ document.querySelector('#t tbody').addEventListener('click',e=>{
+  const b=e.target.closest('.mtbtn');if(!b)return;
+  send({type:'channelMuted',value:{label:b.dataset.label,muted:!b.classList.contains('on')}});
+ });
  folderSel.onchange=()=>{folder=Number(folderSel.value)||0;loadFiles();};
  const npbox=document.getElementById('nowplaying');
  function markPlaying(){[...flist.children].forEach(li=>{li.className=(li.dataset.name===playing)?'playing':'';});
@@ -249,12 +287,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
    if(s.monitor!==monitor){monitor=s.monitor;setMon();}
    if(s.filePlaying!==playing){playing=s.filePlaying;markPlaying();}
    updateFileTime(s.filePosition,s.fileDuration);
-   const tb=document.querySelector('#t tbody');
-   tb.innerHTML=s.channels.map(c=>'<tr><td>'+c.label+'</td><td>'+c.role+'</td>'+
-    '<td>'+fmt(c.outDb)+' '+bar(c.outDb+60,60)+'</td>'+
-    '<td>'+bar(c.gateOpen,1)+'</td>'+
-    '<td>'+fmt(c.compGrDb)+' '+bar(c.compGrDb,20,'gr')+'</td>'+
-    '<td>'+fmt(c.automixGainDb)+'</td></tr>').join('');
+   updateRows(s.channels);
    document.getElementById('mom').textContent=fmt(s.momentaryLufs);
    document.getElementById('st').textContent=fmt(s.shortTermLufs);
    document.getElementById('pk').textContent=fmt(s.outPeakDb);
