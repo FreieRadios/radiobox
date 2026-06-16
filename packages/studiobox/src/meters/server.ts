@@ -211,11 +211,12 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  }
  function updateRows(channels){
   ensureRows(channels);
-  channels.forEach((c,i)=>{const r=rowEls[i];
+  channels.forEach((c,i)=>{const r=rowEls[i];const mic=c.role==='mic';
    r.out.innerHTML=fmt(c.outDb)+' '+bar(c.outDb+60,60);
-   r.gate.innerHTML=bar(c.gateOpen,1);
-   r.comp.innerHTML=fmt(c.compGrDb)+' '+bar(c.compGrDb,20,'gr');
-   r.mix.textContent=fmt(c.automixGainDb);
+   // gate / comp GR / automix are mic-only concepts — blank them for music rows.
+   r.gate.innerHTML=mic?bar(c.gateOpen,1):'';
+   r.comp.innerHTML=mic?fmt(c.compGrDb)+' '+bar(c.compGrDb,20,'gr'):'';
+   r.mix.textContent=mic?fmt(c.automixGainDb):'';
    r.mbtn.className='mtbtn'+(c.muted?' on':'');
    r.mbtn.textContent=c.muted?'unmute':'mute';});
  }
