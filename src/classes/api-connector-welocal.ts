@@ -1,5 +1,5 @@
-import * as fs from "node:fs";
-import axios from "axios";
+import * as fs from 'node:fs';
+import axios from 'axios';
 import {
   AudioUploadProps,
   TimeSlot,
@@ -7,32 +7,27 @@ import {
   UploadFile,
   UploadLogEntry,
   UploadSlot,
-} from "../types/types";
-import BroadcastSchedule from "./broadcast-schedule";
-import {
-  fileExistsSync,
-  getFilename,
-  getPath,
-  writeJsonFile,
-} from "../helper/files";
-import { DateTime } from "luxon";
-import crypto from "crypto";
-import { vd } from "../helper/helper";
+} from '../types/types';
+import BroadcastSchedule from './broadcast-schedule';
+import { fileExistsSync, getFilename, getPath, writeJsonFile } from '../helper/files';
+import { DateTime } from 'luxon';
+import crypto from 'crypto';
+import { vd } from '../helper/helper';
 
 export default class ApiConnectorWelocal {
   token: string;
   baseUrl: string;
-  prepareUploadRoute = "/media/upload/prepare/";
-  finalizeUploadRoute = "/media/upload/finalize/";
-  setMediaStatusRoute = "/media/status/set/:public_media_id/";
-  setPostStatusRoute = "/post/status/set/:post_id/";
-  encodeRoute = "/media/encode/:kind/:post_id/";
+  prepareUploadRoute = '/media/upload/prepare/';
+  finalizeUploadRoute = '/media/upload/finalize/';
+  setMediaStatusRoute = '/media/status/set/:public_media_id/';
+  setPostStatusRoute = '/post/status/set/:post_id/';
+  encodeRoute = '/media/encode/:kind/:post_id/';
 
   uploadFilePath: string;
   config: UploadConfig;
   schedule: BroadcastSchedule;
   logs: UploadLogEntry[];
-  logPath = "logs";
+  logPath = 'logs';
   logFile: string;
   filePrefix: string;
   fileSuffix: string;
@@ -42,10 +37,10 @@ export default class ApiConnectorWelocal {
     this.schedule = props.schedule;
     this.uploadFilePath = props.uploadFilePath;
     this.filePrefix = props.filePrefix;
-    this.fileSuffix = props.fileSuffix || ".mp3";
+    this.fileSuffix = props.fileSuffix || '.mp3';
     this.config = {
       headers: {
-        "X-CMMS-API-AUTH-KEY": props.token,
+        'X-CMMS-API-AUTH-KEY': props.token,
       },
     };
 
@@ -56,15 +51,12 @@ export default class ApiConnectorWelocal {
   }
 
   linkLogfile() {
-    const logFilePath = this.logPath + "/" + this.logFile + ".json";
+    const logFilePath = this.logPath + '/' + this.logFile + '.json';
     if (fileExistsSync(logFilePath)) {
       try {
         this.logs = JSON.parse(fs.readFileSync(logFilePath).toString());
       } catch {
-        fs.copyFileSync(
-          logFilePath,
-          logFilePath + ".corrupted-" + crypto.randomUUID()
-        );
+        fs.copyFileSync(logFilePath, logFilePath + '.corrupted-' + crypto.randomUUID());
         console.error("Can't read logfile.");
       }
     } else {
@@ -77,12 +69,7 @@ export default class ApiConnectorWelocal {
   }
 
   getTargetStartDateTimeString(slot: TimeSlot) {
-    return getFilename(
-      this.uploadFilePath,
-      this.filePrefix,
-      slot,
-      this.fileSuffix
-    );
+    return getFilename(this.uploadFilePath, this.filePrefix, slot, this.fileSuffix);
   }
 
   async uploadNewFiles() {
@@ -111,10 +98,7 @@ export default class ApiConnectorWelocal {
       targetName: this.getTargetName(sourceFile),
       postTitle: this.getPostTitle(slot),
       postStatus: this.getPostStatus(slot),
-      uploadCategories: [
-        ...slot.broadcast.info[1].split(" "),
-        slot.broadcast.name,
-      ],
+      uploadCategories: [...slot.broadcast.info[1].split(' '), slot.broadcast.name],
       broadcast: slot.broadcast,
       slot: slot,
     };
@@ -132,10 +116,10 @@ export default class ApiConnectorWelocal {
       file.postStatus,
       file.uploadCategories
     );
-    console.log("[welocal] Upload started: " + file.sourceFile);
+    console.log('[welocal] Upload started: ' + file.sourceFile);
     await this.doUpload(file.sourceFile, uploadSlot)
       .then((response) => {
-        console.log("[welocal] Upload finished: " + file.sourceFile);
+        console.log('[welocal] Upload finished: ' + file.sourceFile);
         this.logs.push({
           sourceFile: file.sourceFile,
           targetFile: file.targetName,
@@ -154,18 +138,18 @@ export default class ApiConnectorWelocal {
 
   getPostTitle(slot: TimeSlot) {
     const title = slot.broadcast.getTitle(slot);
-    return title.replaceAll("&", "+");
+    return title.replaceAll('&', '+');
   }
 
   getPostStatus(slot: TimeSlot) {
     if (slot.broadcast.info[2]?.length) {
-      return "draft";
+      return 'draft';
     }
-    return "publish";
+    return 'publish';
   }
 
   getTargetName(sourceFile: string) {
-    return sourceFile.replaceAll(this.uploadFilePath, "");
+    return sourceFile.replaceAll(this.uploadFilePath, '');
   }
 
   checkUpload(sourceFile: string) {
@@ -173,23 +157,19 @@ export default class ApiConnectorWelocal {
       return false;
     }
     if (this.logs.find((log) => log.sourceFile === sourceFile)) {
-      console.log("Already uploaded: " + sourceFile);
+      console.log('Already uploaded: ' + sourceFile);
       return false;
     }
     return true;
   }
 
   doUpload = async (sourceFile: string, uploadSlot: UploadSlot) => {
-    await this.uploadFileToUrl(sourceFile, uploadSlot.uploadUrl).catch(
-      (err) => {
-        throw err.message;
-      }
-    );
-    const finished = await this.finalizeUpload(uploadSlot.mediaId).catch(
-      (err) => {
-        throw err.message;
-      }
-    );
+    await this.uploadFileToUrl(sourceFile, uploadSlot.uploadUrl).catch((err) => {
+      throw err.message;
+    });
+    const finished = await this.finalizeUpload(uploadSlot.mediaId).catch((err) => {
+      throw err.message;
+    });
     return finished;
   };
 
@@ -215,7 +195,7 @@ export default class ApiConnectorWelocal {
       });
 
     if (!response.data.upload_url) {
-      throw "Could not retrieve upload_url";
+      throw 'Could not retrieve upload_url';
     }
 
     return {
@@ -227,11 +207,11 @@ export default class ApiConnectorWelocal {
   uploadFileToUrl = async (sourceFile: string, uploadUrl: string) => {
     const file = fs.readFileSync(sourceFile, {});
     return axios({
-      method: "put",
+      method: 'put',
       url: uploadUrl, //API url
       data: file, // Buffer
       headers: {
-        "Content-Type": "audio/mpeg",
+        'Content-Type': 'audio/mpeg',
         ...this.config.headers,
       },
       maxContentLength: Infinity,
@@ -240,7 +220,7 @@ export default class ApiConnectorWelocal {
   };
 
   finalizeUpload = async (mediaId) => {
-    console.log("[welocal] Finalize media id" + mediaId);
+    console.log('[welocal] Finalize media id' + mediaId);
     return axios.post(
       this.baseUrl + this.finalizeUploadRoute,
       {
@@ -252,13 +232,9 @@ export default class ApiConnectorWelocal {
 
   updateMediaStatus = async (public_media_id: number) => {
     return axios.post(
-      this.baseUrl +
-        this.setMediaStatusRoute.replace(
-          ":public_media_id",
-          String(public_media_id)
-        ),
+      this.baseUrl + this.setMediaStatusRoute.replace(':public_media_id', String(public_media_id)),
       {
-        status: "publish",
+        status: 'publish',
       },
       this.config
     );
@@ -266,10 +242,9 @@ export default class ApiConnectorWelocal {
 
   updatePostStatus = async (post_id: number) => {
     return axios.post(
-      this.baseUrl +
-        this.setPostStatusRoute.replace(":post_id", String(post_id)),
+      this.baseUrl + this.setPostStatusRoute.replace(':post_id', String(post_id)),
       {
-        status: "publish",
+        status: 'publish',
       },
       this.config
     );
@@ -277,10 +252,7 @@ export default class ApiConnectorWelocal {
 
   encodePost = async (kind: string, post_id: number) => {
     return axios.get(
-      this.baseUrl +
-        this.encodeRoute
-          .replace(":kind", kind)
-          .replace(":post_id", String(post_id)),
+      this.baseUrl + this.encodeRoute.replace(':kind', kind).replace(':post_id', String(post_id)),
       this.config
     );
   };

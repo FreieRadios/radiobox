@@ -1,12 +1,10 @@
-import { DateTime } from "luxon";
-import { DateTimeInput } from "../types/types";
+import { DateTime } from 'luxon';
+import { DateTimeInput } from '../types/types';
 
 export const toDateTime = (arg: DateTimeInput, round?: boolean): DateTime => {
-  const dateTime = typeof arg === "string" ? DateTime.fromISO(arg) : arg;
+  const dateTime = typeof arg === 'string' ? DateTime.fromISO(arg) : arg;
   if (round) {
-    return dateTime
-      .minus({ minutes: dateTime.minute })
-      .minus({ seconds: dateTime.second });
+    return dateTime.minus({ minutes: dateTime.minute }).minus({ seconds: dateTime.second });
   }
   return dateTime;
 };
@@ -18,12 +16,8 @@ export const midnight = {
   millisecond: 0,
 };
 
-export const getDateStartEnd = (
-  startDay: string,
-  startTime: string,
-  hours: number
-) => {
-  const dataStartString = [startDay, "T", startTime].join("");
+export const getDateStartEnd = (startDay: string, startTime: string, hours: number) => {
+  const dataStartString = [startDay, 'T', startTime].join('');
   const dateStart = DateTime.fromISO(dataStartString);
   const dateEnd = dateStart.plus({
     hours,

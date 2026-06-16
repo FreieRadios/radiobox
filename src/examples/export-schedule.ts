@@ -1,18 +1,18 @@
-import "dotenv/config";
-import BroadcastSchema from "../classes/broadcast-schema";
-import BroadcastSchedule from "../classes/broadcast-schedule";
-import ScheduleExport from "../classes/schedule-export";
-import { vd } from "../helper/helper";
+import 'dotenv/config';
+import BroadcastSchema from '../classes/broadcast-schema';
+import BroadcastSchedule from '../classes/broadcast-schedule';
+import ScheduleExport from '../classes/schedule-export';
+import { vd } from '../helper/helper';
 
 const schedule = new BroadcastSchedule({
   schema: new BroadcastSchema({
-    schemaFile: "schema/radio-z.xlsx",
+    schemaFile: 'schema/radio-z.xlsx',
   }),
-  dateStart: "2024-08-12T00:00:00",
-  dateEnd: "2024-08-19T00:00:00",
+  dateStart: '2024-08-12T00:00:00',
+  dateEnd: '2024-08-19T00:00:00',
   repeatPadding: 1,
-  locale: "de",
-  repeatShort: " " + process.env.REPEAT_SHORT,
+  locale: 'de',
+  repeatShort: ' ' + process.env.REPEAT_SHORT,
   repeatLong: process.env.REPEAT_LONG,
   strings: {
     each: process.env.SCHEDULE_INFO_EACH,
@@ -30,9 +30,9 @@ schedule.setMergeInfo();
 
 const exporter = new ScheduleExport({
   schedule: schedule,
-  mode: "welocal-json",
-  outDir: "json",
-  filenamePrefix: "program_schema_radio-z",
+  mode: 'welocal-json',
+  outDir: 'json',
+  filenamePrefix: 'program_schema_radio-z',
 });
 
 exporter.write();

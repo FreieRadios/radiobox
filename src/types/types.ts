@@ -1,7 +1,7 @@
-import { DateTime } from "luxon";
-import BroadcastSchema from "../classes/broadcast-schema";
-import BroadcastSchedule from "../classes/broadcast-schedule";
-import BroadcastRecorder from "../classes/broadcast-recorder";
+import { DateTime } from 'luxon';
+import BroadcastSchema from '../classes/broadcast-schema';
+import BroadcastSchedule from '../classes/broadcast-schedule';
+import BroadcastRecorder from '../classes/broadcast-recorder';
 
 export type DateTimeInput = string | DateTime;
 
@@ -95,7 +95,7 @@ export type BroadcastScheduleProps = {
 
 export type ScheduleExportProps = {
   schedule: BroadcastSchedule;
-  mode: "welocal-json" | "m3u";
+  mode: 'welocal-json' | 'm3u';
   outDir?: string;
   filenamePrefix?: string;
   mp3Prefix?: string;
@@ -129,7 +129,7 @@ export type UploadFile = {
   sourceFile: string;
   targetName: string;
   postTitle: string;
-  postStatus: "draft" | "publish";
+  postStatus: 'draft' | 'publish';
   uploadCategories: string[];
   broadcast: Broadcast;
   slot: TimeSlot;
@@ -206,6 +206,6 @@ export type TimeGridJsonWelocal = {
 }[];
 
 export type FilenamePattern = {
-  mode: "DateTime" | "string" | "number";
+  mode: 'DateTime' | 'string' | 'number';
   param: string | number;
 };

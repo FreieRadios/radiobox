@@ -4,27 +4,31 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c7fe337e-e72c-4f8f-b543-1bd63186a666" name="Changes" comment="chore(auto): cleanup &amp; finalize">
-      <change afterPath="$PROJECT_DIR$/liquidsoap/tools/play_by_filename.liq" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/scripts/ffmpeg-capture.service" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/scripts/ffmpeg-playout.service" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+    <list default="true" id="c7fe337e-e72c-4f8f-b543-1bd63186a666" name="Changes" comment="chore(autopilot): refactor to modularize logic, add hermetic tests, and improve broadcasting/repeat handling">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.radiobox.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/liquidsoap/Dockerfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/docker-compose.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/play_by_filename.liq" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox-light-repeat.liq" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox-light.liq" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox-repeat-only.liq" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/radiobox.liq" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/liquidsoap/var.liq.example" beforeDir="false" afterPath="$PROJECT_DIR$/liquidsoap/var.liq.example" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/AGENTS.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/config/studiobox.example.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/config/studiobox.example.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/audio/encoder.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/audio/encoder.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/config/load.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/config/load.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/config/schema.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/config/schema.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/dsp/graph.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/dsp/graph.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/meters/server.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/meters/server.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packages/studiobox/src/pipeline.ts" beforeDir="false" afterPath="$PROJECT_DIR$/packages/studiobox/src/pipeline.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/autopilot.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/autopilot.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/helper/files.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/helper/files.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/classes/api-connector-welocal.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/api-connector-welocal.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-archive.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-archive.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-recorder.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-recorder.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-schedule.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-schedule.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/classes/broadcast-schema.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/classes/broadcast-schema.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/dev.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/dev.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/examples/archive.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/archive.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/examples/export-schedule.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/export-schedule.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/examples/record.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/record.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/examples/sync-welocal.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/examples/sync-welocal.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/helper/date-time.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/helper/date-time.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/helper/helper.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/helper/helper.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types/types.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/types.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/yarn.lock" beforeDir="false" afterPath="$PROJECT_DIR$/yarn.lock" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -32,7 +36,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="156" />
+    <option name="cachedIndexableFilesCount" value="129" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="Git.Settings">
@@ -44,15 +48,74 @@
     &quot;assignee&quot;: &quot;singerla&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings">{
-  &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;git@github.com:FreieRadios/radiobox.git&quot;,
-    &quot;accountId&quot;: &quot;846a7e96-312f-4dbf-b49a-21383d50e849&quot;
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/FreieRadios/radiobox.git",
+    "accountId": "846a7e96-312f-4dbf-b49a-21383d50e849"
   }
-}</component>
+}]]></component>
   <component name="McpProjectServerCommands">
     <commands />
     <urls />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0" />
+      <entry key="S2" value="1.0" />
+      <entry key="S5" value="1.0" />
+      <entry key="S10" value="1.0" />
+      <entry key="S30" value="1.0000000014995136" />
+      <entry key="S60" value="1.0000414271807863" />
+      <entry key="M2" value="1.009084289716314" />
+      <entry key="M5" value="1.316870959925944" />
+      <entry key="M10" value="2.1086175221032" />
+      <entry key="M15" value="2.694892071918778" />
+      <entry key="M30" value="3.5997165976825496" />
+      <entry key="H1" value="4.22351003870407" />
+      <entry key="H2" value="4.590493347658816" />
+      <entry key="H4" value="4.789632010167072" />
+      <entry key="D1" value="4.964132064607601" />
+      <entry key="W1" value="4.994855896561392" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.9659363289248456" />
+      <entry key="MS500" value="0.9930924954370359" />
+      <entry key="S2" value="0.9982686325973925" />
+      <entry key="S5" value="0.9993070929904525" />
+      <entry key="S10" value="0.9996534864594093" />
+      <entry key="S30" value="0.999884483641948" />
+      <entry key="S60" value="0.9999836637734533" />
+      <entry key="M2" value="1.0090549242691464" />
+      <entry key="M5" value="1.3168499186036686" />
+      <entry key="M10" value="2.1085935937168068" />
+      <entry key="M15" value="2.6948692286651053" />
+      <entry key="M30" value="3.599699746749185" />
+      <entry key="H1" value="4.223499715305437" />
+      <entry key="H2" value="4.590487623862184" />
+      <entry key="H4" value="4.789628995249706" />
+      <entry key="D1" value="4.964131539728091" />
+      <entry key="W1" value="4.994855821014753" />
+    </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
   &quot;customColor&quot;: &quot;&quot;,
@@ -72,17 +135,17 @@
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "main",
+    "git-widget-placeholder": "studiobox",
     "junie.onboarding.icon.badge.shown": "true",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "yarn",
-    "prettierjs.PrettierConfiguration.Package": "/home/tsing/Desktop/radiobox/node_modules/prettier",
+    "prettierjs.PrettierConfiguration.Package": "/home/tsing/WebstormProjects/radiobox/node_modules/prettier",
     "settings.editor.selected.configurable": "settings.javascript.prettier",
     "to.speed.mode.migration.done": "true",
-    "ts.external.directory.path": "/home/tsing/Desktop/radiobox/node_modules/typescript/lib",
+    "ts.external.directory.path": "/home/tsing/WebstormProjects/radiobox/node_modules/typescript/lib",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -94,7 +157,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-WS-261.23567.141" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-WS-261.24374.125" />
       </set>
     </attachedChunks>
   </component>
@@ -176,6 +239,17 @@
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="refactor(record): write flac files for repeat slots" />
     <MESSAGE value="fix(auto): repeat path" />
@@ -183,6 +257,7 @@
     <MESSAGE value="chore(liq): switch to time based filename sources during interval_repeat" />
     <MESSAGE value="fix(auto): use copy/unlink instead of move to prevent container error" />
     <MESSAGE value="chore(auto): cleanup &amp; finalize" />
-    <option name="LAST_COMMIT_MESSAGE" value="chore(auto): cleanup &amp; finalize" />
+    <MESSAGE value="chore(autopilot): refactor to modularize logic, add hermetic tests, and improve broadcasting/repeat handling" />
+    <option name="LAST_COMMIT_MESSAGE" value="" />
   </component>
 </project>

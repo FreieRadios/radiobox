@@ -1,5 +1,5 @@
-import { isLastOfMonth, nthOfMonth, timeFormats, vd } from "../helper/helper";
-import { DateTime, Settings } from "luxon";
+import { isLastOfMonth, nthOfMonth, timeFormats, vd } from '../helper/helper';
+import { DateTime, Settings } from 'luxon';
 import {
   Broadcast,
   BroadcastScheduleProps,
@@ -8,10 +8,10 @@ import {
   TimeGrid,
   TimeGridError,
   TimeSlot,
-} from "../types/types";
-import BroadcastSchema from "./broadcast-schema";
-import { toDateTime } from "../helper/date-time";
-import * as process from "node:process";
+} from '../types/types';
+import BroadcastSchema from './broadcast-schema';
+import { toDateTime } from '../helper/date-time';
+import * as process from 'node:process';
 
 /*
  * Class to build a schedule schema
@@ -37,30 +37,29 @@ export default class BroadcastSchedule {
   repeatLong: string;
   outDir: string;
   locale: string;
-  strings: BroadcastScheduleProps["strings"];
+  strings: BroadcastScheduleProps['strings'];
   _grid: TimeGrid;
 
   constructor(props: BroadcastScheduleProps) {
     this.schema = props.schema;
     this.weekdayColNames = this.schema.weekdayColNames;
 
-    this.repeatPadding =
-      props.repeatPadding !== undefined ? props.repeatPadding : 1;
+    this.repeatPadding = props.repeatPadding !== undefined ? props.repeatPadding : 1;
     this.dateStart = toDateTime(props.dateStart, true);
     this.dateEnd = toDateTime(props.dateEnd, true);
     this.gridSize = 60;
     this.maxGridLength = 10000;
 
-    this.locale = props.locale || "de";
-    this.repeatShort = props.repeatShort || "(rep.)";
-    this.repeatLong = props.repeatLong || "Repeat";
+    this.locale = props.locale || 'de';
+    this.repeatShort = props.repeatShort || '(rep.)';
+    this.repeatLong = props.repeatLong || 'Repeat';
     this.strings = props.strings || {
-      each: "Each",
-      last: "last",
-      and: "and",
-      monthly: "of month",
-      always: "always",
-      from: "from",
+      each: 'Each',
+      last: 'last',
+      and: 'and',
+      monthly: 'of month',
+      always: 'always',
+      from: 'from',
       oclock: "O'clock",
     };
 
@@ -114,10 +113,7 @@ export default class BroadcastSchedule {
   matchBroadcasts = (broadcasts: Broadcast[], timeGrid: TimeGrid) => {
     timeGrid.forEach((timeSlot) => {
       broadcasts.forEach((broadcast) => {
-        const match = this.findScheduledBroadcast(
-          broadcast.schedules,
-          timeSlot.start
-        );
+        const match = this.findScheduledBroadcast(broadcast.schedules, timeSlot.start);
         if (match) {
           if (this.pushMatches(timeSlot, match, false)) {
             timeSlot.broadcast = broadcast;
@@ -177,14 +173,13 @@ export default class BroadcastSchedule {
             })
             .toUnixInteger();
           const targetSlot = timeGrid.find(
-            (existingSlot) =>
-              existingSlot.start.toUnixInteger() === repeatTarget
+            (existingSlot) => existingSlot.start.toUnixInteger() === repeatTarget
           );
           if (repeatTarget && targetSlot) {
             if (this.pushMatches(targetSlot, schedule, true)) {
               targetSlot.broadcast = timeSlot.broadcast;
               targetSlot.repeatFrom = timeSlot;
-              schedule.repeatAt = targetSlot
+              schedule.repeatAt = targetSlot;
             }
           }
         });
@@ -272,7 +267,7 @@ export default class BroadcastSchedule {
         end: slot.end.toFormat(timeFormats.human),
         isRepeat: slot.matches[0].isRepeat,
         duration: slot.duration,
-        name: slot.matches.map((map) => map.toString()).join(", "),
+        name: slot.matches.map((map) => map.toString()).join(', '),
       };
     });
   }
@@ -280,67 +275,61 @@ export default class BroadcastSchedule {
   repeatInfoToString = (schedule: Schedule, slot: TimeSlot) => {
     const info = [
       this.repeatLong,
-      " (",
-      slot.start
-        .minus({ hours: schedule.repeatOffset })
-        .toFormat(process.env.REPEAT_DATE_FORMAT),
-      ")",
+      ' (',
+      slot.start.minus({ hours: schedule.repeatOffset }).toFormat(process.env.REPEAT_DATE_FORMAT),
+      ')',
     ];
-    return info.join("");
+    return info.join('');
   };
 
   scheduleInfoToString = (schedule: Schedule, slot: TimeSlot) => {
     const info = [];
     const weekdays = [];
     if (schedule.nthWeekdaysOfMonth.length < 5) {
-      weekdays.push(this.strings.each + " ");
+      weekdays.push(this.strings.each + ' ');
       schedule.nthWeekdaysOfMonth.forEach((weekday, i) => {
         if (weekday === -1) {
           weekdays.push(this.strings.last);
         } else {
-          weekdays.push(String(weekday) + ".");
+          weekdays.push(String(weekday) + '.');
         }
         if (schedule.nthWeekdaysOfMonth[i + 1]) {
           if (schedule.nthWeekdaysOfMonth[i + 2]) {
-            weekdays.push(", ");
+            weekdays.push(', ');
           } else {
-            weekdays.push(" " + this.strings.and + " ");
+            weekdays.push(' ' + this.strings.and + ' ');
           }
         }
       });
-      weekdays.push(" " + slot.start.weekdayLong + " " + this.strings.monthly);
+      weekdays.push(' ' + slot.start.weekdayLong + ' ' + this.strings.monthly);
     } else {
-      weekdays.push(this.strings.always + " ");
-      weekdays.push(slot.start.weekdayLong.toLowerCase() + "s");
+      weekdays.push(this.strings.always + ' ');
+      weekdays.push(slot.start.weekdayLong.toLowerCase() + 's');
     }
-    info.push(weekdays.join(""));
-    info.push(" " + this.strings.from + " ");
-    info.push(
-      slot.start.toLocaleString(DateTime.TIME_24_SIMPLE) +
-        " " +
-        this.strings.oclock
-    );
-    return info.join("");
+    info.push(weekdays.join(''));
+    info.push(' ' + this.strings.from + ' ');
+    info.push(slot.start.toLocaleString(DateTime.TIME_24_SIMPLE) + ' ' + this.strings.oclock);
+    return info.join('');
   };
 
   checkIntegrity = (autofix?: boolean) => {
     const errors = <TimeGridError[]>[];
     const getTimeString = (slot: TimeSlot) => {
-      return slot.start.setLocale("de").toLocaleString(DateTime.DATETIME_HUGE);
+      return slot.start.setLocale('de').toLocaleString(DateTime.DATETIME_HUGE);
     };
     const grid = this.getGrid() as TimeGrid;
     grid.forEach((slot, s) => {
       if (slot.matches.length === 0) {
         errors.push({
           timeSlot: slot,
-          reason: "No broadcasting matches " + getTimeString(slot),
+          reason: 'No broadcasting matches ' + getTimeString(slot),
         });
         if (autofix) {
           this.pushMatches(
             slot,
             {
-              name: "TBA",
-              info: "Unknown",
+              name: 'TBA',
+              info: 'Unknown',
             } as any,
             false
           );
@@ -348,7 +337,7 @@ export default class BroadcastSchedule {
       } else if (slot.matches.length > 1) {
         errors.push({
           timeSlot: slot,
-          reason: "Multiple matches " + getTimeString(slot),
+          reason: 'Multiple matches ' + getTimeString(slot),
         });
         if (autofix) {
           slot.matches = [slot.matches[0]];

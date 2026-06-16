@@ -1,10 +1,10 @@
-import BroadcastSchema from "../classes/broadcast-schema";
-import BroadcastSchedule from "../classes/broadcast-schedule";
-import BroadcastRecorder from "../classes/broadcast-recorder";
-import { DateTime } from "luxon";
-import "dotenv/config";
-import { timeFormats, vd } from "../helper/helper";
-import ApiConnectorWelocal from "../classes/api-connector-welocal";
+import BroadcastSchema from '../classes/broadcast-schema';
+import BroadcastSchedule from '../classes/broadcast-schedule';
+import BroadcastRecorder from '../classes/broadcast-recorder';
+import { DateTime } from 'luxon';
+import 'dotenv/config';
+import { timeFormats, vd } from '../helper/helper';
+import ApiConnectorWelocal from '../classes/api-connector-welocal';
 
 const schema = new BroadcastSchema({
   schemaFile: process.env.BROADCAST_SCHEMA_FILE,
@@ -26,16 +26,16 @@ const uploader = new ApiConnectorWelocal({
   schedule,
   token: process.env.WELOCAL_API_TOKEN,
   baseUrl: process.env.WELOCAL_API_URL,
-  uploadFilePath: "mp3/",
-  logFile: "upload-welocal",
+  uploadFilePath: 'mp3/',
+  logFile: 'upload-welocal',
   filePrefix: process.env.FILENAME_PREFIX,
-  fileSuffix: ".mp3",
+  fileSuffix: '.mp3',
 });
 
 // vd(schedule.toArray());
 // vd(uploader.getFileList());
 
-console.log("[welocal] start api sync");
+console.log('[welocal] start api sync');
 uploader.uploadNewFiles().then((resp) => {
-  console.log("[welocal] uploads finished!");
+  console.log('[welocal] uploads finished!');
 });

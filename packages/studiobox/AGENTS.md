@@ -85,32 +85,34 @@ config in `src/config/`; web meters in `src/meters/server.ts`; orchestration in
 Implemented: capture, full per-mic DSP chain, gain-sharing automix, ducking,
 master leveler + look-ahead limiter, BS.1770 loudness metering, Ogg/FLAC harbor
 streaming + rolling FLAC backup, web meters, music auto-leveling, a music-only
-mute control.
+mute control, a local audio file player on the meters page (a folder dropdown
+over the configured `filePlayer.dirs`; the selected folder's files decode to
+48 kHz stereo and route into the music path),
+and a start/stop recording control on the meters page (the rolling FLAC backup
+runs in its own ffmpeg `Recorder` process so it can be toggled live without
+disrupting the harbor stream; recording does **not** start automatically — the
+operator arms it from the button),
+and a start/stop harbor-streaming control on the meters page (the `streaming`
+WebSocket command toggles the `Encoder` ffmpeg process; harbor streaming **does**
+start automatically when `output.harbor.enabled`, but can be stopped/restarted
+live, and the button is hidden when harbor is disabled).
 
 ## TODO / roadmap (pick up here)
 
 Actionable backlog for continued development. Keep this list current as items
 land. Each item names a likely entry point and how to know it's done.
 
-- [ ] **Local audio file player on the meters page.** Add, alongside the input
-      channel level indicators, a list of audio files from a configured local
-      directory; clicking a filename plays that file through the mix as if it
-      arrived on a Flow8 input channel dedicated to **music** — i.e. routed into
-      the existing music path so it gets the same AGC loudness normalization and
-      sidechain ducking. *Entry points:* the self-contained page + WebSocket
-      control protocol in `src/meters/server.ts` (extend `MeterCommand` with
-      list/play/stop commands and add an HTTP route that returns the directory
-      listing — restrict to audio extensions, never expose paths outside the
-      configured root); a virtual "music" source feeding the music bus in
-      `src/dsp/graph.ts` (reuse `MusicNode` + its `leveler`, applied pre-duck)
-      wired in `src/pipeline.ts`; file decode to 48 kHz stereo f32 via ffmpeg in
-      `src/audio/` (mirror `capture.ts`/`encoder.ts`). Add the browsable
-      directory to `config/schema.ts` + `studiobox.example.yaml`. *Done when:*
-      the page lists audio files from the configured directory, clicking one
-      plays it into the mix at a consistent normalized loudness (same target as a
-      music input), it ducks correctly under live mic speech and honors the
-      "music only" mute, playback can be stopped/switched, and path traversal
-      outside the configured root is rejected.
+- [x] **Local audio file player on the meters page.** Done: the meters page
+      offers a folder dropdown over `filePlayer.dirs` (HTTP `/folders`) and
+      lists the selected folder's audio files (HTTP `/files?folder=N`, audio
+      extensions only) and `playFile {folder,name}`/`stopFile` WebSocket
+      commands play them through a
+      virtual "music" `MusicNode` in `src/dsp/graph.ts` (reusing the music
+      `leveler`, applied pre-duck, ducked when configured). Decode to 48 kHz
+      stereo f32 via ffmpeg lives in `src/audio/file-player.ts`; wiring and
+      path-traversal-safe resolution in `src/pipeline.ts`; config in
+      `src/config/schema.ts`/`load.ts` + `studiobox.example.yaml`. Covered by
+      `__tests__/audio/file-player.test.ts`.
 - [ ] **True-peak (oversampled) limiting.** The limiter is currently sample-peak
       only — see the note at `src/dsp/limiter.ts:55`. Add oversampled inter-sample
       peak detection so true peaks stay under the ceiling. *Done when:* a unit

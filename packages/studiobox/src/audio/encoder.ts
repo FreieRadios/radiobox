@@ -1,14 +1,12 @@
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { CaptureConfig, OutputConfig } from '../config/schema';
 import { Log } from '../util/log';
 
 /**
- * Encodes the finished stereo float stream to lossless FLAC and fans it out to
- * (a) a Liquidsoap harbor via the Icecast source protocol and (b) a rolling
- * local FLAC backup — both from a single ffmpeg process (one stdin, two outputs).
+ * Encodes the finished stereo float stream and streams it to a Liquidsoap
+ * harbor via the Icecast source protocol. The rolling local FLAC backup runs
+ * in its own process (see `Recorder`) so it can be toggled independently.
  *
  * Events: 'exit' (code). The pipeline restarts the encoder on unexpected exit
  * (e.g. harbor connection drop).
@@ -19,20 +17,30 @@ export class Encoder extends EventEmitter {
   constructor(
     private out: OutputConfig,
     private capture: CaptureConfig,
-    private log: Log,
+    private log: Log
   ) {
     super();
+  }
+
+  /** True while the harbor encoder ffmpeg process is running. */
+  get active(): boolean {
+    return this.proc !== null;
   }
 
   private args(): string[] {
     const a: string[] = [
       '-hide_banner',
-      '-loglevel', 'error',
+      '-loglevel',
+      'error',
       // input: raw stereo float from our DSP graph
-      '-f', 'f32le',
-      '-ar', String(this.capture.sampleRate),
-      '-ac', '2',
-      '-i', 'pipe:0',
+      '-f',
+      'f32le',
+      '-ar',
+      String(this.capture.sampleRate),
+      '-ac',
+      '2',
+      '-i',
+      'pipe:0',
     ];
 
     if (this.out.harbor.enabled) {
@@ -48,27 +56,11 @@ export class Encoder extends EventEmitter {
       a.push('-content_type', this.out.harbor.contentType, this.out.harbor.url);
     }
 
-    if (this.out.backup.enabled) {
-      fs.mkdirSync(this.out.backup.dir, { recursive: true });
-      const pattern = path.join(this.out.backup.dir, 'studiobox-%Y%m%d-%H%M%S.flac');
-      a.push(
-        '-map', '0:a',
-        '-c:a', 'flac', '-compression_level', '8',
-        '-f', 'segment',
-        '-segment_time', String(this.out.backup.segmentSeconds),
-        '-strftime', '1',
-        '-reset_timestamps', '1',
-        pattern,
-      );
-    }
-
     return a;
   }
 
   start(): void {
-    if (!this.out.harbor.enabled && !this.out.backup.enabled) {
-      throw new Error('output: at least one of harbor or backup must be enabled');
-    }
+    if (!this.out.harbor.enabled) return;
     const args = this.args();
     this.log.info('ffmpeg encoder:', 'ffmpeg', args.join(' ').replace(/\/\/[^@]*@/, '//***@'));
     const proc = spawn('ffmpeg', args);

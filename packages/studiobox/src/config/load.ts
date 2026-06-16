@@ -4,6 +4,8 @@ import * as yaml from 'js-yaml';
 import {
   ChannelConfig,
   ChannelProcessing,
+  FilePlayerConfig,
+  FilePlayerDir,
   StudioboxConfig,
 } from './schema';
 
@@ -14,7 +16,13 @@ const DEFAULT_PROCESSING: ChannelProcessing = {
   eq: [],
   deesser: { enabled: false, freq: 6500, thresholdDb: -28, ratio: 4 },
   compressor: {
-    enabled: true, thresholdDb: -20, ratio: 3, kneeDb: 6, attackMs: 10, releaseMs: 120, makeupDb: 3,
+    enabled: true,
+    thresholdDb: -20,
+    ratio: 3,
+    kneeDb: 6,
+    attackMs: 10,
+    releaseMs: 120,
+    makeupDb: 3,
   },
   leveler: { enabled: true, targetLufs: -23, maxGainDb: 12, rangeDb: 12, responseMs: 3000 },
   gainDb: 0,
@@ -41,6 +49,75 @@ function deepMerge<T>(base: T, src: unknown): T {
   return out as T;
 }
 
+/** Normalize EQ bands so every band satisfies the EqBand type: shelves in
+ *  particular routinely omit `q`, and an undefined Q would yield NaN biquad
+ *  coefficients. Default to a maximally-flat 0.707 and 0 dB. */
+function normalizeEq(processing: ChannelProcessing): ChannelProcessing {
+  return {
+    ...processing,
+    eq: (processing.eq ?? []).map((b) => ({
+      type: b.type,
+      freq: b.freq,
+      gainDb: b.gainDb ?? 0,
+      q: b.q ?? 0.707,
+    })),
+  };
+}
+
+/** Normalize the configured browsable folders. Accepts the new `dirs` array
+ *  (each entry a string or `{ path, label }`) and the legacy single `dir`
+ *  string for backward compatibility. Labels default to the folder basename. */
+function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
+  const toDir = (entry: unknown): FilePlayerDir | null => {
+    if (typeof entry === 'string') {
+      const p = entry.trim();
+      if (!p) return null;
+      return { path: p, label: path.basename(p.replace(/[/\\]+$/, '')) || p };
+    }
+    if (isObj(entry) && typeof entry.path === 'string') {
+      const p = entry.path.trim();
+      if (!p) return null;
+      const label =
+        typeof entry.label === 'string' && entry.label.trim()
+          ? entry.label.trim()
+          : path.basename(p.replace(/[/\\]+$/, '')) || p;
+      return { path: p, label };
+    }
+    return null;
+  };
+
+  const dirs: FilePlayerDir[] = [];
+  if (Array.isArray(raw.dirs)) {
+    for (const e of raw.dirs) {
+      const d = toDir(e);
+      if (d) dirs.push(d);
+    }
+  }
+  // Legacy single-directory form.
+  if (!dirs.length && raw.dir !== undefined) {
+    const d = toDir(raw.dir);
+    if (d) dirs.push(d);
+  }
+  if (!dirs.length) dirs.push({ path: './music', label: 'music' });
+  return dirs;
+}
+
+/** Resolve the optional local file player into a music-style source. */
+function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
+  if (!isObj(raw) || !raw.enabled) return undefined;
+  let processing = deepMerge(DEFAULT_PROCESSING, MUSIC_OVERRIDES);
+  if (raw.processing) processing = deepMerge(processing, raw.processing);
+  processing = normalizeEq(processing);
+  return {
+    enabled: true,
+    dirs: resolveFilePlayerDirs(raw),
+    label: String(raw.label ?? 'FilePlayer'),
+    ducked: raw.ducked !== false,
+    fadeOutMs: Number.isFinite(Number(raw.fadeOutMs)) ? Number(raw.fadeOutMs) : 800,
+    processing,
+  };
+}
+
 function readYaml(file: string): Dict {
   const raw = fs.readFileSync(file, 'utf8');
   const parsed = yaml.load(raw);
@@ -61,18 +138,7 @@ function resolveChannel(raw: Dict, profiles: Dict): ChannelConfig {
   }
   if (raw.processing) processing = deepMerge(processing, raw.processing);
 
-  // Normalize EQ bands so every band satisfies the EqBand type: shelves in
-  // particular routinely omit `q`, and an undefined Q would yield NaN biquad
-  // coefficients. Default to a maximally-flat 0.707 and 0 dB.
-  processing = {
-    ...processing,
-    eq: (processing.eq ?? []).map((b) => ({
-      type: b.type,
-      freq: b.freq,
-      gainDb: b.gainDb ?? 0,
-      q: b.q ?? 0.707,
-    })),
-  };
+  processing = normalizeEq(processing);
 
   return {
     source: raw.source as number | [number, number],
@@ -105,7 +171,8 @@ export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
   const rawChannels = Array.isArray(root.channels) ? (root.channels as Dict[]) : [];
   const channels = rawChannels.map((c) => resolveChannel(c, profiles));
 
-  const cfg = { ...root, channels } as unknown as StudioboxConfig;
+  const filePlayer = resolveFilePlayer(root.filePlayer);
+  const cfg = { ...root, channels, filePlayer } as unknown as StudioboxConfig;
   validate(cfg, configPath);
   return cfg;
 }

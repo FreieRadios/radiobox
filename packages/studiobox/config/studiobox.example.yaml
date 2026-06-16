@@ -68,3 +68,24 @@ meters:
   enabled: true
   port: 4445
   fps: 20
+
+# Optional: a local audio file player exposed on the meters page. The configured
+# `dirs` appear in a folder dropdown; clicking a file decodes it to 48 kHz
+# stereo and routes it into the music path, so it gets the same AGC loudness
+# normalization and (when `ducked`) sidechain ducking under live mic speech as a
+# music input. Only audio files directly inside each folder are exposed (no
+# traversal).
+filePlayer:
+  enabled: false
+  # Each entry is a browsable folder. Use `{ path, label }` to name it in the
+  # dropdown, or a bare path string (the folder's basename becomes the label).
+  dirs:
+    - { path: "./music", label: Music }
+    - { path: "./jingles", label: Jingles }
+  label: FilePlayer # shown as a music row on the meters page
+  ducked: true # pulled under live speech, like the music buses
+  fadeOutMs: 800 # smooth fade to silence when the operator hits "Stop file" (0 = hard cut)
+  # Optional music-style processing overrides (defaults match music channels):
+  # processing:
+  #   leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 }
+  #   gainDb: 0

@@ -125,6 +125,35 @@ export interface MetersConfig {
   fps: number;
 }
 
+/** One browsable folder exposed by the file player. The meters page shows a
+ *  dropdown of these and lists only the audio files directly inside the
+ *  selected one (no traversal). */
+export interface FilePlayerDir {
+  /** Filesystem path of the browsable directory. */
+  path: string;
+  /** Human-friendly name shown in the folder dropdown. */
+  label: string;
+}
+
+/** Optional local audio file player exposed on the meters page. Files from the
+ *  configured `dirs` are decoded to 48 kHz stereo and routed into the music
+ *  path so they share the music AGC loudness normalization and sidechain
+ *  ducking. */
+export interface FilePlayerConfig {
+  enabled: boolean;
+  /** Browsable root directories; only audio files directly inside are exposed. */
+  dirs: FilePlayerDir[];
+  /** Meter/label shown for the virtual music source. */
+  label: string;
+  /** Whether the player is a ducking target (pulled under live speech). */
+  ducked: boolean;
+  /** Fade-out duration (ms) applied when the operator stops playback so the
+   *  audio is ramped to silence instead of cut abruptly. */
+  fadeOutMs: number;
+  /** Music-style processing (leveler/gain) applied to the decoded audio. */
+  processing: ChannelProcessing;
+}
+
 export interface StudioboxConfig {
   capture: CaptureConfig;
   channels: ChannelConfig[];
@@ -133,4 +162,5 @@ export interface StudioboxConfig {
   master: MasterConfig;
   output: OutputConfig;
   meters: MetersConfig;
+  filePlayer?: FilePlayerConfig;
 }
