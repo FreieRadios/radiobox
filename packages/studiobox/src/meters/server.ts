@@ -98,64 +98,81 @@ export class MeterServer {
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <title>studiobox meters</title>
 <style>
- body{background:#111;color:#ddd;font:13px monospace;margin:16px;padding-bottom:78px}
- h1{font-size:15px;color:#7cf}
- table{border-collapse:collapse;width:100%;max-width:760px;table-layout:fixed}
+ body{background:#111;color:#ddd;font:13px monospace;margin:0;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+ h1{font-size:16px;color:#8df;font-weight:bold;letter-spacing:.3px}
+ .content{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:14px 18px;overflow:hidden}
+ table{border-collapse:collapse;width:100%;max-width:760px;table-layout:fixed;flex:0 0 auto}
  td,th{padding:4px 8px;text-align:right;border-bottom:1px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  th:first-child,td:first-child{text-align:left}
  col.c-ch{width:22%}col.c-role{width:12%}col.c-out{width:24%}col.c-gate{width:12%}col.c-comp{width:18%}col.c-mix{width:12%}
  .bar{display:inline-block;height:10px;background:#3a7;vertical-align:middle}
  .gr{background:#c64}.duck{background:#c4a}
- .master{margin-top:16px;font-size:14px}
- .master span{color:#7cf}
- button{margin:10px 0;padding:7px 12px;font:13px monospace;background:#223;color:#cde;border:1px solid #456;border-radius:4px;cursor:pointer}
- button.on{background:#c4a;color:#fff;border-color:#c4a}
+ .master{margin:12px 0;font-size:14px;flex:0 0 auto}
+ .master .lbl{color:#7cf;margin:0 5px 0 14px}
+ .master .lbl:first-child{margin-left:0}
+ .master .v{display:inline-block;width:6.5ch;text-align:right;color:#ddd}
+ button{margin:0;padding:8px 12px;font:13px monospace;background:#223;color:#cde;border:1px solid #456;border-radius:5px;cursor:pointer;transition:background .12s,border-color .12s}
+ button:hover{border-color:#7cf}
+ button.mic-live{background:#c33;color:#fff;border-color:#e66;font-weight:bold}
+ button.muted{background:#333;color:#9ab;border-color:#555}
  button.rec{background:#622;color:#fdd;border-color:#a44}
  button.rec.on{background:#c33;color:#fff;border-color:#c33}
  button.ship{background:#264;color:#dfd;border-color:#4a6}
  button.ship.on{background:#2a7;color:#fff;border-color:#2a7}
  button.mon{background:#234;color:#cdf;border-color:#46a}
  button.mon.on{background:#37a;color:#fff;border-color:#37a}
- .files{margin-top:16px;max-width:760px}
- .files h2{font-size:13px;color:#7cf;margin:0 0 6px}
- .files ul{list-style:none;margin:0;padding:0}
+ .files{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-top:10px;max-width:760px}
+ #flist{list-style:none;margin:0;padding:0;flex:1 1 auto;overflow-y:auto;border-top:1px solid #222}
  .files li{padding:9px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between}
  .files li:hover{background:#1a1a1a}
  .files li.playing{background:#2a1830;color:#fbe}
  .files .none{color:#666}
- .files select{margin:0 0 8px;padding:10px 14px;font:17px monospace;min-width:280px;background:#223;color:#cde;border:1px solid #456;border-radius:4px}
- .files label{color:#7cf;margin-right:6px}
- .nowplaying{margin:8px 0;color:#fbe;font-size:15px}
- .nowplaying.idle{color:#666}
+ #folder{padding:6px 10px;font:14px monospace;min-width:180px;background:#223;color:#cde;border:1px solid #456;border-radius:5px}
+ .nowplaying{color:#fbe;font-size:15px}
  .nowplaying b{color:#7cf}
- .footer{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;align-items:center;gap:12px;
-  padding:12px 16px;background:#181818;border-top:1px solid #333;box-shadow:0 -2px 8px rgba(0,0,0,.5)}
- .footer button{margin:0;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .bar-panel{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 18px;
+  background:linear-gradient(#1f1f1f,#171717);box-shadow:0 0 10px rgba(0,0,0,.55)}
+ .topbar{border-bottom:1px solid #333;flex-wrap:wrap}
+ .footer{border-top:1px solid #333;flex-direction:column;align-items:stretch;gap:8px}
+ .footer .ctl{display:flex;align-items:center;gap:10px}
+ .topbar h1{margin:0}
+ .topbar .dot{color:#3c8;margin-right:6px}
+ .topbar .spacer{flex:1}
+ .topbar .fld{display:flex;align-items:center;gap:6px}
+ .bar-panel button{width:172px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  #ftime{margin-left:auto;text-align:right}
- #ftime .rem{font-size:24px;font-weight:bold;color:#ffd24a;vertical-align:middle}
+ #ftime .rem{font-size:22px;font-weight:bold;color:#ffd24a;vertical-align:middle}
 </style></head><body>
-<h1>studiobox — live meters</h1>
-<button id="rec" class="rec" style="display:none">● Start recording</button>
-<button id="ship" class="ship" style="display:none">● Start streaming</button>
-<button id="mon" class="mon" style="display:none">● Start local playout</button>
+<div class="topbar bar-panel">
+ <h1><span class="dot">●</span>studiobox</h1>
+ <span class="spacer"></span>
+ <span class="fld" id="fldwrap"><select id="folder"></select></span>
+ <button id="rec" class="rec" style="display:none">● Start recording</button>
+ <button id="ship" class="ship" style="display:none">● Start streaming</button>
+ <button id="mon" class="mon" style="display:none">● Start local playout</button>
+</div>
+<div class="content">
 <table id="t"><colgroup><col class="c-ch"><col class="c-role"><col class="c-out"><col class="c-gate"><col class="c-comp"><col class="c-mix"></colgroup><thead><tr>
  <th>channel</th><th>role</th><th>out dB</th><th>gate</th><th>comp GR</th><th>automix</th>
 </tr></thead><tbody></tbody></table>
 <div class="master">
- momentary <span id="mom">–</span> LUFS &nbsp; short-term <span id="st">–</span> LUFS &nbsp;
- peak <span id="pk">–</span> dBFS &nbsp; limiter GR <span id="lgr">–</span> dB &nbsp;
- duck <span id="duck">–</span> dB
+ <span class="lbl">M</span><span class="v" id="mom">–</span>
+ <span class="lbl">S</span><span class="v" id="st">–</span>
+ <span class="lbl">Pk</span><span class="v" id="pk">–</span>
+ <span class="lbl">Lim</span><span class="v" id="lgr">–</span>
+ <span class="lbl">Duck</span><span class="v" id="duck">–</span>
 </div>
 <div class="files" id="files" style="display:none">
- <h2>local files — click to play through the music bus</h2>
- <div><label for="folder">folder</label><select id="folder"></select></div>
- <div class="nowplaying idle" id="nowplaying">nothing playing</div>
  <ul id="flist"></ul>
 </div>
-<div class="footer">
- <button id="mute">Mute mics</button>
- <button id="stop">■ Stop file</button>
- <span id="ftime"></span>
+</div>
+<div class="footer bar-panel">
+ <div class="nowplaying" id="nowplaying" style="display:none"></div>
+ <div class="ctl">
+  <button id="mute">Mute mics</button>
+  <button id="stop">■ Stop file</button>
+  <span id="ftime"></span>
+ </div>
 </div>
 <script>
  const fmt=(v,d=1)=>(v===null||v===undefined||!isFinite(v))?'–':v.toFixed(d);
@@ -163,7 +180,10 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  const bar=(v,max,cls)=>{const w=Math.max(0,Math.min(1,v/max))*60;return '<span class="bar '+(cls||'')+'" style="width:'+w+'px"></span>'};
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
  const mbtn=document.getElementById('mute');
- function setBtn(){mbtn.textContent=muted?'▶ Music only':'Mute mics';mbtn.title=muted?'Mics muted — music only (click to unmute)':'Mute all mics (music only)';mbtn.className=muted?'on':'';}
+ function setBtn(){
+  if(muted){mbtn.textContent='▶ Music only';mbtn.className='muted';mbtn.title='Mics muted — click to open mics';}
+  else{mbtn.textContent='● Mics open';mbtn.className='mic-live';mbtn.title='Mics are live — click for music only';}
+ }
  mbtn.onclick=()=>{muted=!muted;setBtn();if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'micsMuted',value:muted}));};
  function send(cmd){if(ws&&ws.readyState===1)ws.send(JSON.stringify(cmd));}
  const rbtn=document.getElementById('rec');
@@ -177,19 +197,23 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  mbtn2.onclick=()=>{if(monitor===null)return;monitor=!monitor;setMon();send({type:'monitor',value:monitor});};
  const filesBox=document.getElementById('files'),flist=document.getElementById('flist'),folderSel=document.getElementById('folder');
  let folder=0;
- document.getElementById('stop').onclick=()=>send({type:'stopFile'});
+ const stopBtn=document.getElementById('stop');
+ // The Stop-file button only makes sense while a file is playing.
+ function setStop(){stopBtn.style.display=playing?'':'none';}
+ stopBtn.onclick=()=>send({type:'stopFile'});
  folderSel.onchange=()=>{folder=Number(folderSel.value)||0;loadFiles();};
  const npbox=document.getElementById('nowplaying');
  function markPlaying(){[...flist.children].forEach(li=>{li.className=(li.dataset.name===playing)?'playing':'';});
-  if(playing){npbox.className='nowplaying';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b>';}
-  else{npbox.className='nowplaying idle';npbox.textContent='nothing playing';}}
+  if(playing){npbox.style.display='';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b>';}
+  else{npbox.style.display='none';}
+  setStop();}
  function updateFileTime(pos,dur){const el=document.getElementById('ftime');if(!el)return;
   if(dur!==null&&dur!==undefined&&isFinite(dur)){el.innerHTML='<span class="rem">'+mmss(dur-(pos||0))+' left</span>';}
   else if(pos!==null&&pos!==undefined&&isFinite(pos)){el.innerHTML='<span class="rem">'+mmss(pos)+'</span>';}
   else el.innerHTML='';}
  function loadFolders(){fetch('folders').then(r=>r.json()).then(d=>{
   const fl=d.folders||[];
-  folderSel.style.display=fl.length>1?'':'none';
+  document.getElementById('fldwrap').style.display=fl.length>1?'':'none';
   folderSel.innerHTML='';
   fl.forEach((label,i)=>{const o=document.createElement('option');o.value=i;
    o.textContent=label;folderSel.appendChild(o);});
@@ -234,6 +258,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  setRec();
  setShip();
  setMon();
+ setStop();
  loadFolders();
  connect();
 </script></body></html>`;
