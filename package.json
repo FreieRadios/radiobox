@@ -36,8 +36,8 @@
   },
   "dependencies": {
     "@types/node-osc": "^6.0.3",
-    "axios": "^1.13.1",
-    "basic-ftp": "^5.0.5",
+    "axios": "^1.18.0",
+    "basic-ftp": "^5.2.0",
     "dotenv": "^16.4.5",
     "luxon": "^3.4.4",
     "node-osc": "^9.1.4",
