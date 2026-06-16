@@ -215,10 +215,15 @@ export class Pipeline {
       const frames = this.cfg.capture.blockSize;
       if (this.filePlayer) {
         this.filePlayer.read(this.fileL, this.fileR, frames);
+        // Report only the basename: the snapshot field is the file *name* (the
+        // meters page shows it and matches it against the file-list rows).
+        const playingName = this.filePlayer.playing
+          ? path.basename(this.filePlayer.playing)
+          : null;
         this.graph.setFileBlock(
           this.fileL,
           this.fileR,
-          this.filePlayer.playing,
+          playingName,
           this.filePlayer.position,
           this.filePlayer.duration
         );

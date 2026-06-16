@@ -119,7 +119,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .files{margin-top:16px;max-width:760px}
  .files h2{font-size:13px;color:#7cf;margin:0 0 6px}
  .files ul{list-style:none;margin:0;padding:0}
- .files li{padding:4px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between}
+ .files li{padding:9px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between}
  .files li:hover{background:#1a1a1a}
  .files li.playing{background:#2a1830;color:#fbe}
  .files .none{color:#666}
@@ -128,7 +128,9 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .nowplaying{margin:8px 0;color:#fbe;font-size:15px}
  .nowplaying.idle{color:#666}
  .nowplaying b{color:#7cf}
- #ftime{display:inline-block;margin-left:8px}
+ .ctlrow{display:flex;align-items:center;justify-content:space-between;max-width:760px;margin:10px 0}
+ .ctlrow button{margin:0}
+ #ftime{text-align:right}
  #ftime .rem{font-size:24px;font-weight:bold;color:#ffd24a;vertical-align:middle}
  #ftime .tot{font-size:13px;color:#9ab;margin-left:6px;vertical-align:middle}
 </style></head><body>
@@ -149,7 +151,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <h2>local files — click to play through the music bus</h2>
  <div><label for="folder">folder</label><select id="folder"></select></div>
  <div class="nowplaying idle" id="nowplaying">nothing playing</div>
- <button id="stop">■ Stop file</button>
+ <div class="ctlrow"><button id="stop">■ Stop file</button><span id="ftime"></span></div>
  <ul id="flist"></ul>
 </div>
 <script>
@@ -176,7 +178,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  folderSel.onchange=()=>{folder=Number(folderSel.value)||0;loadFiles();};
  const npbox=document.getElementById('nowplaying');
  function markPlaying(){[...flist.children].forEach(li=>{li.className=(li.dataset.name===playing)?'playing':'';});
-  if(playing){npbox.className='nowplaying';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b> <span id="ftime"></span>';}
+  if(playing){npbox.className='nowplaying';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b>';}
   else{npbox.className='nowplaying idle';npbox.textContent='nothing playing';}}
  function updateFileTime(pos,dur){const el=document.getElementById('ftime');if(!el)return;
   if(dur!==null&&dur!==undefined&&isFinite(dur)){el.innerHTML='<span class="rem">'+mmss(dur-(pos||0))+' left</span><span class="tot">'+mmss(pos)+' / '+mmss(dur)+'</span>';}
