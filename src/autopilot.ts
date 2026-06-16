@@ -17,7 +17,8 @@ if (isMainModule) {
   });
 
   autopilot.log('autopilot', '... starting ...');
-  autopilot.run()
+  autopilot
+    .run()
     .then(() => {
       autopilot.log('autopilot', 'startup completed');
     })

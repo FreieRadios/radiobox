@@ -1,9 +1,9 @@
-import BroadcastSchema from "../classes/broadcast-schema";
-import BroadcastSchedule from "../classes/broadcast-schedule";
-import BroadcastRecorder from "../classes/broadcast-recorder";
-import { DateTime } from "luxon";
-import "dotenv/config";
-import { timeFormats, vd } from "../helper/helper";
+import BroadcastSchema from '../classes/broadcast-schema';
+import BroadcastSchedule from '../classes/broadcast-schedule';
+import BroadcastRecorder from '../classes/broadcast-recorder';
+import { DateTime } from 'luxon';
+import 'dotenv/config';
+import { timeFormats, vd } from '../helper/helper';
 
 // const dataStartString = [
 //   DateTime.now().toFormat("yyyy-MM-dd"),
@@ -15,11 +15,7 @@ import { timeFormats, vd } from "../helper/helper";
 //   hours: Number(process.env.RECORDER_DURATION),
 // });
 
-const dataStartString = [
-  DateTime.now().toFormat("yyyy-MM-dd"),
-  "T",
-  "120000",
-].join("");
+const dataStartString = [DateTime.now().toFormat('yyyy-MM-dd'), 'T', '120000'].join('');
 const dateStart = DateTime.fromISO(dataStartString);
 const dateEnd = dateStart.plus({
   seconds: 7200,
@@ -42,9 +38,9 @@ const recorder = new BroadcastRecorder({
   delay: 5,
 });
 
-console.log("[Recorder] starts at " + dateStart.toFormat(timeFormats.human));
-console.log("[Recorder] ends at " + dateEnd.toFormat(timeFormats.human));
+console.log('[Recorder] starts at ' + dateStart.toFormat(timeFormats.human));
+console.log('[Recorder] ends at ' + dateEnd.toFormat(timeFormats.human));
 
 recorder.start().then((resp) => {
-  console.log("[Recorder] has finished!");
+  console.log('[Recorder] has finished!');
 });

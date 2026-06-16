@@ -1,0 +1,91 @@
+# studiobox — per-setup configuration.
+# Copy to studiobox.yaml and adapt to your room/hardware.
+# Nothing here is Behringer-specific: the Flow 8 is just "an N-channel
+# capture device". Swap `capture.device` and the channel map for any
+# class-compliant USB interface.
+
+capture:
+  backend: alsa # alsa | pulse
+  # The MULTICHANNEL device, not the *.analog-stereo PulseAudio node.
+  # Find it with:  arecord -l   (e.g. hw:CARD=FLOW8 / hw:1,0)
+  # Make sure the card's profile exposes all inputs (PipeWire "Pro Audio").
+  device: "hw:CARD=FLOW8"
+  sampleRate: 48000
+  channels: 10 # total channels the device presents (Flow 8 = 8 inputs + main L/R)
+  blockSize: 1024 # frames per DSP block (latency is not critical here)
+
+# `source` is the 1-based channel index within the capture stream.
+# A stereo source (music) takes a [left, right] pair.
+# Remove/add rows freely — more mics, fewer mics, or no music at all.
+channels:
+  - { source: 1, role: mic, label: Host, profile: dynamic-broadcast }
+  - { source: 2, role: mic, label: Guest, profile: cheap-lav }
+  - { source: 3, role: mic, label: Phone, profile: generic }
+  - { source: 4, role: mic, label: Spare, profile: condenser }
+  - { source: [5, 6], role: music, label: Playout }
+  - { source: [7, 8], role: music, label: GuestBYO }
+
+# Dan Dugan-style gain-sharing automix across the listed mic labels.
+# Keeps the summed open-mic gain constant -> less noise build-up, no
+# first-syllable chopping (unlike gates).
+automix:
+  enabled: true
+  members: [Host, Guest, Phone, Spare]
+  responseMs: 120 # smoothing of the share computation
+  floorDb: -60 # mics below this are treated as silent
+
+# Sidechain ducking: mic activity attenuates the music buses.
+# Per spec, only armed while a music channel is actually playing.
+duck:
+  enabled: true
+  targets: [Playout, GuestBYO]
+  thresholdDb: -40 # mic-bus level that triggers ducking
+  musicPresentDb: -45 # arm only when music is above this
+  depthDb: -15 # how far music is pulled down
+  attackMs: 40
+  holdMs: 400
+  releaseMs: 600
+
+master:
+  targetLufs: -16 # integrated loudness target for the stream
+  truePeakDb: -1.0 # limiter ceiling
+  limiterLookaheadMs: 5
+  limiterReleaseMs: 100
+
+output:
+  harbor:
+    enabled: true
+    # ffmpeg icecast:// source URL. Use a mount configured for Ogg/FLAC.
+    url: "icecast://source:hackme@stream.radio-z.net:4444/studio-lossless"
+    format: ogg-flac # ogg-flac (lossless) | mp3 (fallback)
+    contentType: application/ogg
+  backup:
+    enabled: true
+    dir: "./recordings" # rolling local FLAC safety copy
+    segmentSeconds: 3600
+
+meters:
+  enabled: true
+  port: 4445
+  fps: 20
+
+# Optional: a local audio file player exposed on the meters page. The configured
+# `dirs` appear in a folder dropdown; clicking a file decodes it to 48 kHz
+# stereo and routes it into the music path, so it gets the same AGC loudness
+# normalization and (when `ducked`) sidechain ducking under live mic speech as a
+# music input. Only audio files directly inside each folder are exposed (no
+# traversal).
+filePlayer:
+  enabled: false
+  # Each entry is a browsable folder. Use `{ path, label }` to name it in the
+  # dropdown, or a bare path string (the folder's basename becomes the label).
+  dirs:
+    - { path: "./music", label: Music }
+    - { path: "./jingles", label: Jingles }
+  label: FilePlayer # shown as a music row on the meters page
+  ducked: true # pulled under live speech, like the music buses
+  fadeOutMs: 800 # smooth fade to silence when the operator hits "Stop file" (0 = hard cut)
+  # Optional music-style processing overrides (defaults match music channels):
+  # processing:
+  #   leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 }
+  #   gainDb: 0

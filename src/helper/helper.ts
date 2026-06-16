@@ -1,12 +1,12 @@
-import { DateTime } from "luxon";
+import { DateTime } from 'luxon';
 
 export const vd = (v: any, keys?: boolean): void => {
-  if (keys && typeof v === "object") {
+  if (keys && typeof v === 'object') {
     v = Object.keys(v);
   }
-  console.log("--------- [radiobox] ---------");
+  console.log('--------- [radiobox] ---------');
   // @ts-ignore
-  console.log(new Error().stack.split("\n")[2].trim());
+  console.log(new Error().stack.split('\n')[2].trim());
   console.dir(v, { depth: 10 });
 };
 export const nthOfMonth = (timeSlot: DateTime) => {
@@ -22,6 +22,6 @@ export const sleep = (ms: number) => {
   });
 };
 export const timeFormats = {
-  machine: "yyyyMMdd-HHmmss",
-  human: "yyyy-MM-dd HH:mm",
+  machine: 'yyyyMMdd-HHmmss',
+  human: 'yyyy-MM-dd HH:mm',
 };

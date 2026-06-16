@@ -1,12 +1,7 @@
-import { dataFromXlsx, getPath } from "../helper/files";
-import {
-  Broadcast,
-  BroadcastSchemaProps,
-  Schedule,
-  TimeSlot,
-} from "../types/types";
-import { DateTime, Settings } from "luxon";
-import { vd } from "../helper/helper";
+import { dataFromXlsx, getPath } from '../helper/files';
+import { Broadcast, BroadcastSchemaProps, Schedule, TimeSlot } from '../types/types';
+import { DateTime, Settings } from 'luxon';
+import { vd } from '../helper/helper';
 
 /*
  * Class to read a schema xlsx-file
@@ -46,7 +41,7 @@ export default class BroadcastSchema {
     this.weekdayColNames =
       props.weekdayColNames !== undefined
         ? props.weekdayColNames
-        : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
     this.getBroadcasts();
   }
@@ -75,12 +70,10 @@ export default class BroadcastSchema {
   broadcastFactory(cols: string[]): Broadcast {
     const broadcast = {
       name: cols[0],
-      info: cols.filter(
-        (cell, colId) => colId > 0 && !this.weekdayColIds.includes(colId)
-      ),
+      info: cols.filter((cell, colId) => colId > 0 && !this.weekdayColIds.includes(colId)),
       schedules: this.getSchedules(cols, cols[0]),
       getTitle: (slot?: TimeSlot, schema?: string[], glue?: string) => {
-        glue = glue || " - ";
+        glue = glue || ' - ';
         return this.getTitle(broadcast, slot, schema)
           .filter((part) => part?.length > 0)
           .join(glue);
@@ -91,48 +84,48 @@ export default class BroadcastSchema {
 
   getTitle = (broadcast: Broadcast, slot?: TimeSlot, schema?: string[]) => {
     const parts = [];
-    schema = schema || ["name", "startEndTime", "info_0"];
+    schema = schema || ['name', 'startEndTime', 'info_0'];
     schema.forEach((schemaKey) => {
-      let part = "";
+      let part = '';
       switch (schemaKey) {
-        case "name":
+        case 'name':
           part = broadcast.name;
           break;
-        case "startTime":
+        case 'startTime':
           part = slot?.start.toLocaleString(DateTime.TIME_24_SIMPLE);
           break;
-        case "startEndTime":
+        case 'startEndTime':
           part =
             slot?.start.toLocaleString(DateTime.TIME_24_SIMPLE) +
-            "-" +
+            '-' +
             slot?.end.toLocaleString(DateTime.TIME_24_SIMPLE);
           break;
-        case "endTime":
+        case 'endTime':
           part = slot?.end.toLocaleString(DateTime.TIME_24_SIMPLE);
           break;
-        case "startDate":
+        case 'startDate':
           part = slot?.start
             .setLocale(process.env.SCHEDULE_LOCALE)
             .toLocaleString(DateTime.DATE_SHORT);
           break;
-        case "endDate":
+        case 'endDate':
           part = slot?.end
             .setLocale(process.env.SCHEDULE_LOCALE)
             .toLocaleString(DateTime.DATE_SHORT);
           break;
-        case "date":
-          part = slot?.start.toFormat("yyyy-MM-dd");
+        case 'date':
+          part = slot?.start.toFormat('yyyy-MM-dd');
           break;
-        case "info_0":
+        case 'info_0':
           part = broadcast.info[0];
           break;
-        case "info_1":
+        case 'info_1':
           part = broadcast.info[1];
           break;
-        case "info_2":
+        case 'info_2':
           part = broadcast.info[2];
           break;
-        case "station":
+        case 'station':
           part = this.stationName;
           break;
         default:
@@ -173,7 +166,7 @@ export default class BroadcastSchema {
 
   parseCellJson(cell: string, weekday: number, name: string): Schedule[] {
     const blocks = cell
-      .split(";")
+      .split(';')
       .map((block: string) => this.replaceRangeArrays(block))
       .map((block: string) => this.parseJsonBlock(block))
       .map((block: Schedule) => {
@@ -186,23 +179,23 @@ export default class BroadcastSchema {
 
   replaceRangeArrays = (block: string) => {
     return block
-      .replace("[1-12]", "[1,2,3,4,5,6,7,8,9,10,11,12]")
-      .replace("[1-5]", "[1,2,3,4,5]")
-      .replace("M:", '"monthsOfYear": ')
-      .replace("D:", '"nthWeekdaysOfMonth": ')
-      .replace("H:", '"hoursOfDay": ')
-      .replace("R:", '"repeatOffset": ')
-      .replace("I:", '"info": ')
-      .replace("O:", '"overrides": ')
-      .replace("N:", '"noMerge": ');
+      .replace('[1-12]', '[1,2,3,4,5,6,7,8,9,10,11,12]')
+      .replace('[1-5]', '[1,2,3,4,5]')
+      .replace('M:', '"monthsOfYear": ')
+      .replace('D:', '"nthWeekdaysOfMonth": ')
+      .replace('H:', '"hoursOfDay": ')
+      .replace('R:', '"repeatOffset": ')
+      .replace('I:', '"info": ')
+      .replace('O:', '"overrides": ')
+      .replace('N:', '"noMerge": ');
   };
 
   parseJsonBlock = (block: string) => {
     let json = {};
     try {
-      json = JSON.parse("{" + block + "}");
+      json = JSON.parse('{' + block + '}');
     } catch (e) {
-      throw "JSON parse error";
+      throw 'JSON parse error';
     }
     return json as Schedule;
   };

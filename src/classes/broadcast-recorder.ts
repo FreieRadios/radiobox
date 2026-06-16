@@ -122,11 +122,11 @@ export default class BroadcastRecorder {
     const delay = this.delay || 0;
 
     // Determine if we're recording from a USB device or stream
-    const isUsbInput = (!this.streamUrl && this.streamDevice)
+    const isUsbInput = !this.streamUrl && this.streamDevice;
 
     // Set appropriate file extension and suffix based on input type
     const fileExtension = this.filenameSuffix;
-    const partSuffix = '-part' + fileExtension
+    const partSuffix = '-part' + fileExtension;
 
     this.onStartRecording(targetFile, currentSlot, now, seconds);
 
@@ -156,7 +156,7 @@ export default class BroadcastRecorder {
       artist,
       targetFile,
       partSuffix,
-    }
+    };
 
     if (isUsbInput) {
       // USB input recording to FLAC (lossless)
@@ -238,43 +238,67 @@ export default class BroadcastRecorder {
   }
 
   getUrlArgs(args) {
-   return [
-     '-i', this.streamUrl,
-     '-ss', args.delay.toString(),
-     '-t', args.seconds.toString(),
-     '-b:a', `${this.bitrate}k`,
-     '-metadata', `title=${args.title}`,
-     '-metadata', `album=${args.album}`,
-     '-metadata', `genre=${args.genre}`,
-     '-metadata', `date=${args.date}`,
-     '-metadata', `artist=${args.artist}`,
-     '-v', 'error',
-     '-hide_banner',
-     '-y', // Overwrite temp files
-     args.targetFile + args.partSuffix
-   ]
+    return [
+      '-i',
+      this.streamUrl,
+      '-ss',
+      args.delay.toString(),
+      '-t',
+      args.seconds.toString(),
+      '-b:a',
+      `${this.bitrate}k`,
+      '-metadata',
+      `title=${args.title}`,
+      '-metadata',
+      `album=${args.album}`,
+      '-metadata',
+      `genre=${args.genre}`,
+      '-metadata',
+      `date=${args.date}`,
+      '-metadata',
+      `artist=${args.artist}`,
+      '-v',
+      'error',
+      '-hide_banner',
+      '-y', // Overwrite temp files
+      args.targetFile + args.partSuffix,
+    ];
   }
 
   getDeviceArgs(args) {
     return [
-      '-f', 'alsa',  // Use ALSA for audio input
-      '-i', this.streamDevice,  // USB device (e.g., 'hw:1,0', 'plughw:1,0', 'pulse')
-      '-ss', args.delay.toString(),
-      '-t', args.seconds.toString(),
-      '-c:a', 'flac',  // Use FLAC codec for lossless compression
-      '-compression_level', '8',  // Maximum FLAC compression
-      '-sample_fmt', 's16',  // 16-bit sample format
-      '-ar', '44100',  // 44.1kHz sample rate
-      '-metadata', `title=${args.title}`,
-      '-metadata', `album=${args.album}`,
-      '-metadata', `genre=${args.genre}`,
-      '-metadata', `date=${args.date}`,
-      '-metadata', `artist=${args.artist}`,
-      '-v', 'error',
+      '-f',
+      'alsa', // Use ALSA for audio input
+      '-i',
+      this.streamDevice, // USB device (e.g., 'hw:1,0', 'plughw:1,0', 'pulse')
+      '-ss',
+      args.delay.toString(),
+      '-t',
+      args.seconds.toString(),
+      '-c:a',
+      'flac', // Use FLAC codec for lossless compression
+      '-compression_level',
+      '8', // Maximum FLAC compression
+      '-sample_fmt',
+      's16', // 16-bit sample format
+      '-ar',
+      '44100', // 44.1kHz sample rate
+      '-metadata',
+      `title=${args.title}`,
+      '-metadata',
+      `album=${args.album}`,
+      '-metadata',
+      `genre=${args.genre}`,
+      '-metadata',
+      `date=${args.date}`,
+      '-metadata',
+      `artist=${args.artist}`,
+      '-v',
+      'error',
       '-hide_banner',
       '-y', // Overwrite temp files
-      args.targetFile + args.partSuffix
-    ]
+      args.targetFile + args.partSuffix,
+    ];
   }
 
   async onStartup(startedAt: DateTime) {

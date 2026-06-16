@@ -1,0 +1,209 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as yaml from 'js-yaml';
+import {
+  ChannelConfig,
+  ChannelProcessing,
+  FilePlayerConfig,
+  FilePlayerDir,
+  StudioboxConfig,
+} from './schema';
+
+/** Default processing chain; profiles and per-channel overrides merge on top. */
+const DEFAULT_PROCESSING: ChannelProcessing = {
+  hpfHz: 80,
+  gate: { enabled: true, thresholdDb: -50, rangeDb: -18, attackMs: 3, holdMs: 120, releaseMs: 150 },
+  eq: [],
+  deesser: { enabled: false, freq: 6500, thresholdDb: -28, ratio: 4 },
+  compressor: {
+    enabled: true,
+    thresholdDb: -20,
+    ratio: 3,
+    kneeDb: 6,
+    attackMs: 10,
+    releaseMs: 120,
+    makeupDb: 3,
+  },
+  leveler: { enabled: true, targetLufs: -23, maxGainDb: 12, rangeDb: 12, responseMs: 3000 },
+  gainDb: 0,
+};
+
+/** Music-channel baseline (merged over DEFAULT before profile/inline overrides).
+ *  Music sits a few dB hotter than mics and gets more boost headroom, so a quiet
+ *  source still reaches a strong level; ducking still pulls it under speech. */
+const MUSIC_OVERRIDES = {
+  leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 },
+};
+
+type Dict = Record<string, unknown>;
+const isObj = (v: unknown): v is Dict => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Deep-merge `src` onto a clone of `base` (arrays replace, not concat). */
+function deepMerge<T>(base: T, src: unknown): T {
+  if (!isObj(src)) return base;
+  const out: Dict = isObj(base) ? { ...(base as Dict) } : {};
+  for (const [k, v] of Object.entries(src)) {
+    const prev = out[k];
+    out[k] = isObj(v) && isObj(prev) ? deepMerge(prev, v) : v;
+  }
+  return out as T;
+}
+
+/** Normalize EQ bands so every band satisfies the EqBand type: shelves in
+ *  particular routinely omit `q`, and an undefined Q would yield NaN biquad
+ *  coefficients. Default to a maximally-flat 0.707 and 0 dB. */
+function normalizeEq(processing: ChannelProcessing): ChannelProcessing {
+  return {
+    ...processing,
+    eq: (processing.eq ?? []).map((b) => ({
+      type: b.type,
+      freq: b.freq,
+      gainDb: b.gainDb ?? 0,
+      q: b.q ?? 0.707,
+    })),
+  };
+}
+
+/** Normalize the configured browsable folders. Accepts the new `dirs` array
+ *  (each entry a string or `{ path, label }`) and the legacy single `dir`
+ *  string for backward compatibility. Labels default to the folder basename. */
+function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
+  const toDir = (entry: unknown): FilePlayerDir | null => {
+    if (typeof entry === 'string') {
+      const p = entry.trim();
+      if (!p) return null;
+      return { path: p, label: path.basename(p.replace(/[/\\]+$/, '')) || p };
+    }
+    if (isObj(entry) && typeof entry.path === 'string') {
+      const p = entry.path.trim();
+      if (!p) return null;
+      const label =
+        typeof entry.label === 'string' && entry.label.trim()
+          ? entry.label.trim()
+          : path.basename(p.replace(/[/\\]+$/, '')) || p;
+      return { path: p, label };
+    }
+    return null;
+  };
+
+  const dirs: FilePlayerDir[] = [];
+  if (Array.isArray(raw.dirs)) {
+    for (const e of raw.dirs) {
+      const d = toDir(e);
+      if (d) dirs.push(d);
+    }
+  }
+  // Legacy single-directory form.
+  if (!dirs.length && raw.dir !== undefined) {
+    const d = toDir(raw.dir);
+    if (d) dirs.push(d);
+  }
+  if (!dirs.length) dirs.push({ path: './music', label: 'music' });
+  return dirs;
+}
+
+/** Resolve the optional local file player into a music-style source. */
+function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
+  if (!isObj(raw) || !raw.enabled) return undefined;
+  let processing = deepMerge(DEFAULT_PROCESSING, MUSIC_OVERRIDES);
+  if (raw.processing) processing = deepMerge(processing, raw.processing);
+  processing = normalizeEq(processing);
+  return {
+    enabled: true,
+    dirs: resolveFilePlayerDirs(raw),
+    label: String(raw.label ?? 'FilePlayer'),
+    ducked: raw.ducked !== false,
+    fadeOutMs: Number.isFinite(Number(raw.fadeOutMs)) ? Number(raw.fadeOutMs) : 800,
+    processing,
+  };
+}
+
+function readYaml(file: string): Dict {
+  const raw = fs.readFileSync(file, 'utf8');
+  const parsed = yaml.load(raw);
+  if (!isObj(parsed)) throw new Error(`${file}: expected a YAML mapping at the top level`);
+  return parsed;
+}
+
+/** Resolve one channel: DEFAULT <- profile <- inline `processing` override. */
+function resolveChannel(raw: Dict, profiles: Dict): ChannelConfig {
+  const profileName = raw.profile as string | undefined;
+  let processing = DEFAULT_PROCESSING;
+
+  if (raw.role === 'music') processing = deepMerge(processing, MUSIC_OVERRIDES);
+  if (profileName) {
+    const p = profiles[profileName];
+    if (!p) throw new Error(`channel "${raw.label}": unknown profile "${profileName}"`);
+    processing = deepMerge(processing, p);
+  }
+  if (raw.processing) processing = deepMerge(processing, raw.processing);
+
+  processing = normalizeEq(processing);
+
+  return {
+    source: raw.source as number | [number, number],
+    role: (raw.role as ChannelConfig['role']) ?? 'unused',
+    label: String(raw.label),
+    profile: profileName,
+    processing,
+  };
+}
+
+export interface LoadOptions {
+  /** Path to studiobox.yaml; defaults to config/studiobox.yaml then the example. */
+  configPath?: string;
+  /** Path to profiles.yaml; defaults to config/profiles.yaml. */
+  profilesPath?: string;
+}
+
+export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
+  const configDir = path.resolve(__dirname, '../../config');
+  const configPath =
+    opts.configPath ??
+    (fs.existsSync(path.join(configDir, 'studiobox.yaml'))
+      ? path.join(configDir, 'studiobox.yaml')
+      : path.join(configDir, 'studiobox.example.yaml'));
+  const profilesPath = opts.profilesPath ?? path.join(configDir, 'profiles.yaml');
+
+  const root = readYaml(configPath);
+  const profiles = (readYaml(profilesPath).profiles as Dict) ?? {};
+
+  const rawChannels = Array.isArray(root.channels) ? (root.channels as Dict[]) : [];
+  const channels = rawChannels.map((c) => resolveChannel(c, profiles));
+
+  const filePlayer = resolveFilePlayer(root.filePlayer);
+  const cfg = { ...root, channels, filePlayer } as unknown as StudioboxConfig;
+  validate(cfg, configPath);
+  return cfg;
+}
+
+/** Cheap structural validation with actionable messages. */
+function validate(cfg: StudioboxConfig, file: string): void {
+  const fail = (msg: string): never => {
+    throw new Error(`${file}: ${msg}`);
+  };
+  if (!cfg.capture?.device) fail('capture.device is required');
+  if (!cfg.capture.channels || cfg.capture.channels < 1) fail('capture.channels must be >= 1');
+  if (!cfg.channels?.length) fail('at least one channel is required');
+
+  const labels = new Set<string>();
+  for (const ch of cfg.channels) {
+    if (labels.has(ch.label)) fail(`duplicate channel label "${ch.label}"`);
+    labels.add(ch.label);
+    const srcs = Array.isArray(ch.source) ? ch.source : [ch.source];
+    for (const s of srcs) {
+      if (!Number.isInteger(s) || s < 1 || s > cfg.capture.channels) {
+        fail(`channel "${ch.label}": source ${s} out of range 1..${cfg.capture.channels}`);
+      }
+    }
+    if (ch.role === 'music' && !Array.isArray(ch.source)) {
+      fail(`channel "${ch.label}": music role needs a [left, right] source pair`);
+    }
+  }
+  for (const m of cfg.automix?.members ?? []) {
+    if (!labels.has(m)) fail(`automix.members references unknown channel "${m}"`);
+  }
+  for (const t of cfg.duck?.targets ?? []) {
+    if (!labels.has(t)) fail(`duck.targets references unknown channel "${t}"`);
+  }
+}
