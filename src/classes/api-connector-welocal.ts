@@ -75,7 +75,13 @@ export default class ApiConnectorWelocal {
   async uploadNewFiles() {
     const files = this.getFileList();
     for (const file of files) {
-      await this.upload(file);
+      // Keep the batch resilient: one file failing must not abort the
+      // uploads that follow it.
+      try {
+        await this.upload(file);
+      } catch (e) {
+        console.error('[welocal] Upload failed: ' + file.sourceFile, e);
+      }
     }
   }
 
@@ -117,23 +123,21 @@ export default class ApiConnectorWelocal {
       file.uploadCategories
     );
     console.log('[welocal] Upload started: ' + file.sourceFile);
-    await this.doUpload(file.sourceFile, uploadSlot)
-      .then((response) => {
-        console.log('[welocal] Upload finished: ' + file.sourceFile);
-        this.logs.push({
-          sourceFile: file.sourceFile,
-          targetFile: file.targetName,
-          postTitle: file.postTitle,
-          broadcastName: file.broadcast.name,
-          uploadDateTime: response.headers?.date,
-          broadcastDateTime: file.slot.start.toString(),
-          mediaId: uploadSlot.mediaId,
-        });
-        this.updateLogs();
-      })
-      .catch((e) => {
-        console.error(e);
-      });
+    // Let failures propagate: the caller must be able to tell a failed
+    // upload apart from a successful one so it can keep the source file
+    // for a later retry. We only record the log entry on success.
+    const response = await this.doUpload(file.sourceFile, uploadSlot);
+    console.log('[welocal] Upload finished: ' + file.sourceFile);
+    this.logs.push({
+      sourceFile: file.sourceFile,
+      targetFile: file.targetName,
+      postTitle: file.postTitle,
+      broadcastName: file.broadcast.name,
+      uploadDateTime: response.headers?.date,
+      broadcastDateTime: file.slot.start.toString(),
+      mediaId: uploadSlot.mediaId,
+    });
+    this.updateLogs();
   }
 
   getPostTitle(slot: TimeSlot) {

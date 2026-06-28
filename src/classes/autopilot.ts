@@ -95,25 +95,50 @@ export class Autopilot {
 
     const handler = (sourceFile: string, slot: TimeSlot) => {
       const job = (async () => {
-        try {
-          if (deps.uploaderWelocal) {
+        // Each uploader runs independently: a failure in one must not skip
+        // the other, and any failure keeps the source file on disk for a
+        // later retry instead of deleting it.
+        let allUploadsOk = true;
+
+        if (deps.uploaderWelocal) {
+          try {
             const uploadFile = deps.uploaderWelocal.getUploadFileInfo(sourceFile, slot);
             _log('welocal', `upload starting for ${sourceFile}`);
             await deps.uploaderWelocal.upload(uploadFile);
             _log('welocal', `upload finished for ${sourceFile}`);
+          } catch (err) {
+            allUploadsOk = false;
+            _logError('welocal', `upload failed for ${sourceFile}`, err);
           }
-          if (deps.uploaderNextcloud) {
+        }
+
+        if (deps.uploaderNextcloud) {
+          try {
             const uploadFile = deps.uploaderNextcloud.getUploadFileInfo(sourceFile);
             _log('nextcloud', `upload starting for ${sourceFile}`);
             await deps.uploaderNextcloud.upload(uploadFile);
             _log('nextcloud', `upload finished for ${sourceFile}`);
+          } catch (err) {
+            allUploadsOk = false;
+            _logError('nextcloud', `upload failed for ${sourceFile}`, err);
           }
+        }
+
+        if (!allUploadsOk) {
+          _logError(
+            'autopilot',
+            `keeping ${sourceFile} for a later retry because one or more uploads failed`
+          );
+          return;
+        }
+
+        try {
           if (deps.doCopyRepeat) {
             _copyRepeat(sourceFile, slot, deps.filenameSuffix);
           }
           _unlinkFile(sourceFile);
         } catch (err) {
-          _logError('autopilot', 'upload/finalize failed', err);
+          _logError('autopilot', 'finalize (copyRepeat/unlink) failed', err);
         }
       })();
       pendingJobs.push(job);
