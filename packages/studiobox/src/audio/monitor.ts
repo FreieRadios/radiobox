@@ -91,6 +91,11 @@ export class Monitor extends EventEmitter {
       const s = d.toString().trim();
       if (s) this.log.error(`monitor ${bin}:`, s);
     });
+    // If the process dies (e.g. the device is missing/unplugged), the next
+    // write races the 'close' event and the pipe emits EPIPE on stdin. Without
+    // a listener that 'error' is thrown and crashes the whole service; swallow
+    // it and let 'close' -> 'exit' drive the restart instead.
+    proc.stdin.on('error', (err) => this.log.warn(`monitor ${bin} stdin:`, err.message));
     proc.on('error', (err) => this.log.error('monitor spawn error:', err.message));
     proc.on('close', (code) => {
       if (this.proc === proc) this.proc = null;
