@@ -101,7 +101,20 @@ plugged audio device — sound card / USB interface — via `output.monitor`; th
 `Monitor` process uses **aplay** for ALSA and **ffmpeg** for pulse, runs
 independently of the harbor encoder and FLAC backup, starts automatically when
 `output.monitor.enabled`, and is toggled live with the `monitor` WebSocket
-command / meters-page button).
+command / meters-page button),
+and scheduled auto-play by filename timestamp (`filePlayer.autoPlay`; a
+TypeScript port of the liquidsoap `play_by_filename.liq` semantics in
+`src/schedule.ts` — files named `*YYYYMMDD-HHMMSS*` in the file-player folders
+start automatically at that local wallclock time, preempting current playback;
+the web page marks upcoming files and shows the next pending start),
+and a **playout-only mode** (`mode: playout` in `studiobox.yaml`): no capture,
+no DSP graph, no encoder/recorder — only FilePlayer -> Monitor plus the web UI
+(metering hidden, `channels: []` in the snapshot) and the auto-play scheduler.
+Orchestrated by `src/playout.ts` (`PlayoutPipeline`); pacing is pull-driven by
+the monitor process's stdin drain, so the sound card clocks playback and idle
+periods stream silence. Built for the memory/thermally constrained studiobox
+Pi 3, which runs this mode as `studiobox.service` (systemd) with the docker
+stack (liquidsoap/icecast/radiobox containers) disabled.
 
 ## TODO / roadmap (pick up here)
 

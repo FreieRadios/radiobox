@@ -2,10 +2,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
+  AutoPlayConfig,
   ChannelConfig,
   ChannelProcessing,
   FilePlayerConfig,
   FilePlayerDir,
+  Mode,
   MonitorConfig,
   OutputConfig,
   StudioboxConfig,
@@ -104,6 +106,19 @@ function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
   return dirs;
 }
 
+/** Normalize the optional filename-timestamp auto-play block. Defaults to
+ *  disabled; scan/grace fall back to sensible values when enabled. */
+function resolveAutoPlay(raw: unknown): AutoPlayConfig {
+  if (!isObj(raw) || !raw.enabled) return { enabled: false, scanSeconds: 10, graceSeconds: 30 };
+  const num = (v: unknown, def: number): number =>
+    Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : def;
+  return {
+    enabled: true,
+    scanSeconds: num(raw.scanSeconds, 10),
+    graceSeconds: num(raw.graceSeconds, 30),
+  };
+}
+
 /** Resolve the optional local file player into a music-style source. */
 function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
   if (!isObj(raw) || !raw.enabled) return undefined;
@@ -120,6 +135,7 @@ function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
       Number.isFinite(Number(raw.prebufferMs)) && Number(raw.prebufferMs) >= 0
         ? Number(raw.prebufferMs)
         : 250,
+    autoPlay: resolveAutoPlay(raw.autoPlay),
     processing,
   };
 }
@@ -197,9 +213,15 @@ export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
   const rawChannels = Array.isArray(root.channels) ? (root.channels as Dict[]) : [];
   const channels = rawChannels.map((c) => resolveChannel(c, profiles));
 
+  const mode: Mode = root.mode === 'playout' ? 'playout' : 'live';
   const filePlayer = resolveFilePlayer(root.filePlayer);
   const output = resolveOutput(root.output);
-  const cfg = { ...root, channels, filePlayer, output } as unknown as StudioboxConfig;
+  const cfg = { ...root, mode, channels, filePlayer, output } as unknown as StudioboxConfig;
+  // Playout-only machines don't capture; the capture block then only supplies
+  // the block clock (sample rate / block size) and may be omitted entirely.
+  if (mode === 'playout' && !cfg.capture) {
+    cfg.capture = { backend: 'alsa', device: '', sampleRate: 48000, channels: 2, blockSize: 4096 };
+  }
   validate(cfg, configPath);
   return cfg;
 }
@@ -209,6 +231,15 @@ function validate(cfg: StudioboxConfig, file: string): void {
   const fail = (msg: string): never => {
     throw new Error(`${file}: ${msg}`);
   };
+  if (cfg.mode === 'playout') {
+    // No capture in playout mode: only the file player -> monitor path runs.
+    if (!cfg.filePlayer?.enabled) fail('mode "playout" requires filePlayer.enabled');
+    if (!cfg.output?.monitor?.enabled) fail('mode "playout" requires output.monitor.enabled');
+    if (cfg.output.monitor.backend === 'alsa' && !cfg.output.monitor.device) {
+      fail('output.monitor.device is required when monitor is enabled with the alsa backend');
+    }
+    return;
+  }
   if (!cfg.capture?.device) fail('capture.device is required');
   if (!cfg.capture.channels || cfg.capture.channels < 1) fail('capture.channels must be >= 1');
   if (!cfg.channels?.length) fail('at least one channel is required');
@@ -233,7 +264,11 @@ function validate(cfg: StudioboxConfig, file: string): void {
   for (const t of cfg.duck?.targets ?? []) {
     if (!labels.has(t)) fail(`duck.targets references unknown channel "${t}"`);
   }
-  if (cfg.output?.monitor?.enabled && cfg.output.monitor.backend === 'alsa' && !cfg.output.monitor.device) {
+  if (
+    cfg.output?.monitor?.enabled &&
+    cfg.output.monitor.backend === 'alsa' &&
+    !cfg.output.monitor.device
+  ) {
     fail('output.monitor.device is required when monitor is enabled with the alsa backend');
   }
 }

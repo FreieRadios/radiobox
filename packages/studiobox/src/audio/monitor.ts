@@ -41,11 +41,16 @@ export class Monitor extends EventEmitter {
       return {
         bin: 'aplay',
         args: [
-          '-D', this.monitor.device,
-          '-f', 'FLOAT_LE',
-          '-r', rate,
-          '-c', '2',
-          '-t', 'raw',
+          '-D',
+          this.monitor.device,
+          '-f',
+          'FLOAT_LE',
+          '-r',
+          rate,
+          '-c',
+          '2',
+          '-t',
+          'raw',
           '-q',
           '-', // stdin
         ],
@@ -57,12 +62,18 @@ export class Monitor extends EventEmitter {
       bin: 'ffmpeg',
       args: [
         '-hide_banner',
-        '-loglevel', 'error',
-        '-f', 'f32le',
-        '-ar', rate,
-        '-ac', '2',
-        '-i', 'pipe:0',
-        '-f', 'pulse',
+        '-loglevel',
+        'error',
+        '-f',
+        'f32le',
+        '-ar',
+        rate,
+        '-ac',
+        '2',
+        '-i',
+        'pipe:0',
+        '-f',
+        'pulse',
         this.monitor.device || 'studiobox',
       ],
     };
@@ -91,6 +102,43 @@ export class Monitor extends EventEmitter {
   write(buf: Buffer): boolean {
     if (!this.proc || !this.proc.stdin.writable) return false;
     return this.proc.stdin.write(buf);
+  }
+
+  /**
+   * Invoke `cb` once the playout process is ready for the next block. While
+   * backpressured this waits for stdin's 'drain', which makes the sound card
+   * itself the pacing clock for a pull-driven producer (the playout-only
+   * pipeline). A watchdog timeout keeps the producer loop alive when the
+   * process dies mid-wait or no process is running at all — `cb` always fires
+   * exactly once.
+   */
+  waitWritable(cb: () => void, timeoutMs = 1000): void {
+    const stdin = this.proc?.stdin;
+    if (stdin && stdin.writable && !stdin.writableNeedDrain) {
+      // Not backpressured — yield to the event loop, don't spin synchronously.
+      setImmediate(cb);
+      return;
+    }
+    if (stdin && stdin.writable) {
+      let done = false;
+      const fire = () => {
+        if (done) return;
+        done = true;
+        stdin.removeListener('drain', fire);
+        clearTimeout(watchdog);
+        cb();
+      };
+      const watchdog = setTimeout(fire, timeoutMs);
+      watchdog.unref?.();
+      stdin.once('drain', fire);
+      return;
+    }
+    // No usable process (device unplugged / restarting): retry at roughly
+    // block cadence so the producer keeps consuming its upstream (the file
+    // player decodes in real time regardless) and playback resumes promptly
+    // once the monitor is back.
+    const t = setTimeout(cb, Math.min(timeoutMs, 100));
+    t.unref?.();
   }
 
   /** Stop playout, closing the device. */

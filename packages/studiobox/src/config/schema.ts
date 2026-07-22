@@ -148,6 +148,22 @@ export interface FilePlayerDir {
   label: string;
 }
 
+/** Scheduled auto-play by filename timestamp. Files named `*YYYYMMDD-HHMMSS*`
+ *  in the file-player folders start playing automatically when their embedded
+ *  wallclock time arrives (TypeScript port of the liquidsoap
+ *  `play_by_filename.liq` repeat scheduling, minus the prefetch machinery —
+ *  local files decode instantly, so there is nothing to prefetch). */
+export interface AutoPlayConfig {
+  enabled: boolean;
+  /** How often the folders are rescanned for due/new files, in seconds. */
+  scanSeconds: number;
+  /** How long after its timestamp a file still auto-starts, in seconds.
+   *  Covers scan-tick granularity and late daemon starts; a file older than
+   *  this never auto-plays (matching the liquidsoap lead-window semantics
+   *  where past targets are skipped). */
+  graceSeconds: number;
+}
+
 /** Optional local audio file player exposed on the meters page. Files from the
  *  configured `dirs` are decoded to 48 kHz stereo and routed into the music
  *  path so they share the music AGC loudness normalization and sidechain
@@ -167,11 +183,22 @@ export interface FilePlayerConfig {
    *  resist startup/underrun crackle on slow hardware at the cost of more
    *  start latency. */
   prebufferMs: number;
+  /** Scheduled auto-play of timestamped files (see AutoPlayConfig). */
+  autoPlay: AutoPlayConfig;
   /** Music-style processing (leveler/gain) applied to the decoded audio. */
   processing: ChannelProcessing;
 }
 
+/** Top-level operating mode.
+ *  - `live` (default): the full capture -> DSP -> outputs pipeline.
+ *  - `playout`: no capture, no DSP graph, no encoder/recorder — only the file
+ *    player feeding the local hardware output, plus the web UI and the
+ *    filename-timestamp scheduler. Built for low-memory machines (Pi) that
+ *    only need scheduled playout. */
+export type Mode = 'live' | 'playout';
+
 export interface StudioboxConfig {
+  mode: Mode;
   capture: CaptureConfig;
   channels: ChannelConfig[];
   automix: AutomixConfig;

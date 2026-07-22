@@ -4,6 +4,16 @@
 # capture device". Swap `capture.device` and the channel map for any
 # class-compliant USB interface.
 
+# Operating mode:
+#   live    (default) — the full capture -> DSP -> outputs pipeline below.
+#   playout — no capture, no DSP, no encoder/recorder: only the file player
+#             feeding `output.monitor`, the web UI (metering hidden) and the
+#             filename-timestamp auto-play. For low-memory machines that just
+#             need scheduled playout. Requires filePlayer.enabled and
+#             output.monitor.enabled; capture then only supplies the block
+#             clock (sampleRate/blockSize) and may be omitted.
+mode: live
+
 capture:
   backend: alsa # alsa | pulse
   # The MULTICHANNEL device, not the *.analog-stereo PulseAudio node.
@@ -100,6 +110,16 @@ filePlayer:
   prebufferMs: 250 # jitter buffer filled before playout starts; raise on slow
                    # hardware (e.g. a Raspberry Pi) if startup crackles, at the
                    # cost of more delay before audio begins
+
+  # Scheduled auto-play by filename timestamp (port of the liquidsoap
+  # play_by_filename repeat scheduling): a file named *YYYYMMDD-HHMMSS* in any
+  # of the folders above starts playing automatically when that local
+  # wallclock time arrives, preempting whatever is playing. The web page
+  # marks upcoming files and shows the next pending start.
+  autoPlay:
+    enabled: false
+    scanSeconds: 10 # folder rescan interval
+    graceSeconds: 30 # how late (after its timestamp) a file may still auto-start
 
   # Optional music-style processing overrides (defaults match music channels):
   # processing:

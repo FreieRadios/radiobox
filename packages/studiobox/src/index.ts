@@ -1,5 +1,6 @@
 import { loadConfig } from './config/load';
 import { Pipeline } from './pipeline';
+import { PlayoutPipeline } from './playout';
 import { makeLog } from './util/log';
 
 const log = makeLog('studiobox');
@@ -13,9 +14,13 @@ function main(): void {
   };
 
   const cfg = loadConfig({ configPath: getArg('--config'), profilesPath: getArg('--profiles') });
-  log.info(`loaded config: ${cfg.channels.map((c) => `${c.label}(${c.role})`).join(', ')}`);
 
-  const pipeline = new Pipeline(cfg);
+  // `playout` skips capture/DSP entirely — file player -> local hardware only.
+  const pipeline =
+    cfg.mode === 'playout'
+      ? (log.info('mode: playout (no capture/DSP)'), new PlayoutPipeline(cfg))
+      : (log.info(`loaded config: ${cfg.channels.map((c) => `${c.label}(${c.role})`).join(', ')}`),
+        new Pipeline(cfg));
   pipeline.start();
 
   const shutdown = (sig: string) => {

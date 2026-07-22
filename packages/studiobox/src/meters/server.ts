@@ -1,10 +1,13 @@
 import * as http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { MeterSnapshot } from '../dsp/graph';
+import { FileEntry } from '../audio/file-dirs';
 import { Log } from '../util/log';
 
 /** Headless metering: serves a tiny self-contained page and pushes meter
- *  snapshots over WebSocket at the configured frame rate.
+ *  snapshots over WebSocket at the configured frame rate. In playout mode the
+ *  snapshot carries no channels and the page hides the metering section,
+ *  showing only the file list (with auto-play schedule marks) and transport.
  *
  *  Control protocol (client -> server, JSON over WebSocket):
  *   - { type: 'micsMuted', value: boolean }  toggle "music only" mode
@@ -15,7 +18,8 @@ import { Log } from '../util/log';
  *   - { type: 'playFile', value: { folder, name } } play a file from a folder
  *   - { type: 'stopFile' }                    stop local file playback
  *  The configured folders are served over HTTP at `/folders`, and the file
- *  listing for one folder at `/files?folder=N`. */
+ *  listing for one folder at `/files?folder=N` (each row carries the parsed
+ *  auto-play timestamp, plus the server clock for skew-free comparison). */
 export interface MeterCommand {
   type: string;
   value?: unknown;
@@ -25,7 +29,7 @@ export class MeterServer {
   private server: http.Server;
   private wss: WebSocketServer;
   private onCmd: ((cmd: MeterCommand) => void) | null = null;
-  private onList: ((folder: number) => string[]) | null = null;
+  private onList: ((folder: number) => FileEntry[]) | null = null;
   private onFolders: (() => string[]) | null = null;
 
   constructor(
@@ -46,7 +50,7 @@ export class MeterServer {
         const folder = Number(q.searchParams.get('folder') ?? '0') || 0;
         const files = this.onList ? this.onList(folder) : [];
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ files }));
+        res.end(JSON.stringify({ files, now: Date.now() }));
       } else {
         res.writeHead(404);
         res.end();
@@ -70,7 +74,7 @@ export class MeterServer {
   }
 
   /** Register the provider for the `/files` directory listing. */
-  onListFiles(fn: (folder: number) => string[]): void {
+  onListFiles(fn: (folder: number) => FileEntry[]): void {
     this.onList = fn;
   }
 
@@ -129,10 +133,18 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  button.mon.on{background:#37a;color:#fff;border-color:#37a}
  .files{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-top:10px;max-width:760px}
  #flist{list-style:none;margin:0;padding:0;flex:1 1 auto;overflow-y:auto;border-top:1px solid #222}
- .files li{padding:9px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between}
+ .files li{padding:9px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
  .files li:hover{background:#1a1a1a}
  .files li.playing{background:#2a1830;color:#fbe}
  .files .none{color:#666}
+ .files li .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .files li .when{color:#667;white-space:nowrap}
+ .files li.sched .when{color:#ffd24a}
+ .files li.sched{background:#201c0e}
+ .files li.sched.playing{background:#2a1830}
+ .files li.next .when{font-weight:bold}
+ .files li.next{border-left:3px solid #ffd24a;padding-left:5px}
+ #next{color:#ffd24a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  #folder{padding:6px 10px;font:14px monospace;min-width:180px;background:#223;color:#cde;border:1px solid #456;border-radius:5px}
  .nowplaying{color:#fbe;font-size:15px}
  .nowplaying b{color:#7cf}
@@ -164,7 +176,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <button id="mon" class="mon" style="display:none">● Start local playout</button>
 </div>
 <div class="content">
-<div class="metering">
+<div class="metering" id="metering">
 <table id="t"><colgroup><col class="c-ch"><col class="c-role"><col class="c-out"><col class="c-gate"><col class="c-comp"><col class="c-mix"><col class="c-mute"></colgroup><thead><tr>
  <th>channel</th><th>role</th><th>out dB</th><th>gate</th><th>comp GR</th><th>automix</th><th>mute</th>
 </tr></thead><tbody></tbody></table>
@@ -182,6 +194,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 </div>
 <div class="footer bar-panel">
  <div class="nowplaying" id="nowplaying" style="display:none"></div>
+ <div class="nowplaying" id="next" style="display:none"></div>
  <div class="ctl">
   <span id="ftime"></span>
   <button id="stop">■ Stop file</button>
@@ -269,31 +282,76 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   folderSel.value=folder;
   loadFiles();
  }).catch(()=>{loadFiles();});}
+ // Server-clock skew (serverNow - clientNow): schedule marks compare against
+ // the *server's* clock, which is what actually triggers auto-play.
+ let clockSkew=0;
+ const srvNow=()=>Date.now()+clockSkew;
+ const fmtWhen=ms=>{const d=new Date(ms);const p=n=>String(n).padStart(2,'0');
+  const today=new Date(srvNow());const sameDay=d.toDateString()===today.toDateString();
+  return (sameDay?'':p(d.getDate())+'.'+p(d.getMonth()+1)+'. ')+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());};
+ // Re-apply schedule marks to the existing rows (which timestamps are still in
+ // the future changes as time passes, without any new fetch).
+ function markSchedule(){
+  const rows=[...flist.children].filter(li=>li.dataset.name);
+  let next=null;
+  rows.forEach(li=>{const at=Number(li.dataset.playat);
+   const up=isFinite(at)&&at>0&&at>srvNow();
+   li.classList.toggle('sched',up);
+   li.classList.remove('next');
+   if(up&&(next===null||at<Number(next.dataset.playat)))next=li;});
+  if(next)next.classList.add('next');
+ }
  function loadFiles(){fetch('files?folder='+folder).then(r=>r.json()).then(d=>{
   const fs=d.files||[];
+  if(typeof d.now==='number')clockSkew=d.now-Date.now();
   filesBox.style.display='';
   if(!fs.length){flist.innerHTML='<li class="none">no audio files in this folder</li>';return;}
   flist.innerHTML='';
-  fs.forEach(name=>{const li=document.createElement('li');li.dataset.name=name;
-   li.innerHTML='<span>'+name+'</span><span>▶</span>';
+  fs.forEach(f=>{
+   // Backward compatible: entries are {name,playAtMs} objects (or bare strings).
+   const name=typeof f==='string'?f:f.name;
+   const at=typeof f==='object'&&f&&isFinite(f.playAtMs)?f.playAtMs:null;
+   const li=document.createElement('li');li.dataset.name=name;
+   if(at!==null)li.dataset.playat=at;
+   const when=at!==null?'⏰ '+fmtWhen(at):'▶';
+   li.innerHTML='<span class="fname">'+esc(name)+'</span><span class="when">'+when+'</span>';
    li.onclick=()=>send({type:'playFile',value:{folder:folder,name:name}});flist.appendChild(li);});
+  markSchedule();
   markPlaying();
  }).catch(()=>{});}
+ // Keep the listing and its future/past marks fresh (new synced files appear,
+ // elapsed timestamps lose their highlight).
+ setInterval(loadFiles,30000);
+ setInterval(markSchedule,5000);
+ const nextBox=document.getElementById('next');
+ function setNext(n){
+  if(n&&n.name){nextBox.style.display='';
+   nextBox.innerHTML='⏰ next auto-play: <b>'+esc(n.name)+'</b> @ '+fmtWhen(n.playAtMs);}
+  else nextBox.style.display='none';
+ }
  function connect(){
   ws=new WebSocket('ws://'+location.host);
   ws.onmessage=e=>{const s=JSON.parse(e.data);
+   if(typeof s.serverNowMs==='number')clockSkew=s.serverNowMs-Date.now();
+   // Playout-only mode: no channels -> hide the whole metering/mute surface.
+   const playoutOnly=!s.channels||!s.channels.length;
+   document.getElementById('metering').style.display=playoutOnly?'none':'';
+   mbtn.style.display=playoutOnly?'none':'';
    if(typeof s.micsMuted==='boolean'&&s.micsMuted!==muted){muted=s.micsMuted;setBtn();}
    if(s.recording!==recording){recording=s.recording;setRec();}
    if(s.streaming!==streaming){streaming=s.streaming;setShip();}
    if(s.monitor!==monitor){monitor=s.monitor;setMon();}
    if(s.filePlaying!==playing){playing=s.filePlaying;markPlaying();}
+   setNext(s.nextScheduled||null);
    updateFileTime(s.filePosition,s.fileDuration);
-   updateRows(s.channels);
-   document.getElementById('mom').textContent=fmt(s.momentaryLufs);
-   document.getElementById('st').textContent=fmt(s.shortTermLufs);
-   document.getElementById('pk').textContent=fmt(s.outPeakDb);
-   document.getElementById('lgr').textContent=fmt(s.limiterGrDb);
-   document.getElementById('duck').textContent=fmt(s.duckDepthDb);
+   if(!playoutOnly){
+    updateRows(s.channels);
+    document.getElementById('mom').textContent=fmt(s.momentaryLufs);
+    document.getElementById('st').textContent=fmt(s.shortTermLufs);
+    document.getElementById('pk').textContent=fmt(s.outPeakDb);
+    document.getElementById('lgr').textContent=fmt(s.limiterGrDb);
+    document.getElementById('duck').textContent=fmt(s.duckDepthDb);
+   }
   };
   ws.onclose=()=>setTimeout(connect,1000);
  }

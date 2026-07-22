@@ -1,14 +1,15 @@
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { StudioboxConfig } from './config/schema';
 import { Capture } from './audio/capture';
 import { Encoder } from './audio/encoder';
 import { Recorder } from './audio/recorder';
 import { Monitor } from './audio/monitor';
-import { FilePlayer, AUDIO_EXTENSIONS } from './audio/file-player';
+import { FilePlayer } from './audio/file-player';
+import { FileDirs } from './audio/file-dirs';
 import { interleaveStereo } from './audio/format';
 import { Graph } from './dsp/graph';
 import { MeterServer } from './meters/server';
+import { Scheduler } from './schedule';
 import { makeLog } from './util/log';
 
 const log = makeLog('pipeline');
@@ -26,6 +27,8 @@ export class Pipeline {
   private graph: Graph;
   private meters: MeterServer | null;
   private filePlayer: FilePlayer | null;
+  private fileDirs: FileDirs | null;
+  private scheduler: Scheduler | null;
   private outL: Float32Array;
   private outR: Float32Array;
   private fileL: Float32Array;
@@ -55,10 +58,26 @@ export class Pipeline {
     this.filePlayer = cfg.filePlayer?.enabled
       ? new FilePlayer(cfg.capture.sampleRate, makeLog('fileplayer'), cfg.filePlayer.prebufferMs)
       : null;
+    this.fileDirs = cfg.filePlayer?.enabled ? new FileDirs(cfg.filePlayer.dirs, log) : null;
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
     this.meters?.onCommand((cmd) => this.onCommand(cmd.type, cmd.value));
-    this.meters?.onListFolders(() => this.listFolders());
-    this.meters?.onListFiles((folder) => this.listFiles(folder));
+    this.meters?.onListFolders(() => this.fileDirs?.folders() ?? []);
+    this.meters?.onListFiles((folder) => this.fileDirs?.entries(folder) ?? []);
+    // Filename-timestamp auto-play: scheduled files start through the same
+    // file player / music path a manual play uses.
+    this.scheduler =
+      cfg.filePlayer?.enabled && cfg.filePlayer.autoPlay.enabled
+        ? new Scheduler(
+            cfg.filePlayer.autoPlay,
+            () => this.fileDirs?.scheduled() ?? [],
+            (e) => {
+              const resolved = this.resolveFile(e.folder, e.name);
+              if (resolved) this.filePlayer?.play(resolved);
+              else log.warn(`scheduled file vanished before start: ${e.name}`);
+            },
+            log
+          )
+        : null;
     this.outL = new Float32Array(cfg.capture.blockSize);
     this.outR = new Float32Array(cfg.capture.blockSize);
     this.fileL = new Float32Array(cfg.capture.blockSize);
@@ -115,46 +134,10 @@ export class Pipeline {
     }
   }
 
-  /** Absolute path of the configured file-player folder at `index`, or null. */
-  private fileRoot(index: number): string | null {
-    const dirs = this.cfg.filePlayer?.enabled ? this.cfg.filePlayer.dirs : [];
-    const dir = dirs[index];
-    return dir ? path.resolve(dir.path) : null;
-  }
-
-  /** Labels of the configured browsable folders (dropdown order). */
-  private listFolders(): string[] {
-    return this.cfg.filePlayer?.enabled ? this.cfg.filePlayer.dirs.map((d) => d.label) : [];
-  }
-
-  /** List playable audio files directly inside the folder at `index`. */
-  private listFiles(index: number): string[] {
-    const root = this.fileRoot(index);
-    if (!root) return [];
-    try {
-      return fs
-        .readdirSync(root, { withFileTypes: true })
-        .filter((e) => e.isFile() && AUDIO_EXTENSIONS.includes(path.extname(e.name).toLowerCase()))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b));
-    } catch (err) {
-      log.warn(`cannot list ${root}: ${(err as Error).message}`);
-      return [];
-    }
-  }
-
   /** Resolve a requested filename to an absolute path inside the folder at
-   *  `index`, rejecting path traversal and disallowed extensions. */
+   *  `index` (path-traversal-safe; see FileDirs). */
   private resolveFile(index: number, name: string): string | null {
-    const root = this.fileRoot(index);
-    if (!root || !name) return null;
-    const resolved = path.resolve(root, name);
-    const rel = path.relative(root, resolved);
-    // Reject anything that escapes the root ("..") or is absolute elsewhere.
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
-    if (!AUDIO_EXTENSIONS.includes(path.extname(resolved).toLowerCase())) return null;
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
-    return resolved;
+    return this.fileDirs?.resolve(index, name) ?? null;
   }
 
   start(): void {
@@ -225,9 +208,7 @@ export class Pipeline {
         this.filePlayer.read(this.fileL, this.fileR, frames);
         // Report only the basename: the snapshot field is the file *name* (the
         // meters page shows it and matches it against the file-list rows).
-        const playingName = this.filePlayer.playing
-          ? path.basename(this.filePlayer.playing)
-          : null;
+        const playingName = this.filePlayer.playing ? path.basename(this.filePlayer.playing) : null;
         this.graph.setFileBlock(
           this.fileL,
           this.fileR,
@@ -250,19 +231,24 @@ export class Pipeline {
     });
     this.capture.start();
 
+    this.scheduler?.start();
+
     if (this.meters) {
       this.meters.start();
       const interval = Math.max(1, Math.round(1000 / this.cfg.meters.fps));
-      this.metersTimer = setInterval(
-        () => this.meters!.broadcast(this.graph.getMeters()),
-        interval
-      );
+      this.metersTimer = setInterval(() => {
+        // Refresh the "next scheduled" hint before shipping the snapshot.
+        const next = this.scheduler?.next() ?? null;
+        this.graph.setNextScheduled(next ? { name: next.name, playAtMs: next.playAtMs } : null);
+        this.meters!.broadcast(this.graph.getMeters());
+      }, interval);
     }
   }
 
   stop(): void {
     this.stopping = true;
     if (this.metersTimer) clearInterval(this.metersTimer);
+    this.scheduler?.stop();
     this.meters?.stop();
     this.filePlayer?.stop();
     this.capture.stop();

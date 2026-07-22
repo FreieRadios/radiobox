@@ -15,6 +15,10 @@ changes; see `README.md` for the role presets.
 It is a **Yarn 1 workspaces monorepo** (`packages/*`). The root package is the
 classic radiobox library; `packages/studiobox` is a newer live multichannel
 auto-mixer that shares the stack but runs as its own long-lived service.
+studiobox also has a low-footprint `mode: playout` (file player + web UI +
+timestamp-scheduled auto-play, no capture/DSP) that replaces the liquidsoap
+play-by-filename container on machines too small for the docker stack — see
+`packages/studiobox/AGENTS.md`.
 
 ## Setup
 

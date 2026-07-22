@@ -1,0 +1,24 @@
+[Unit]
+Description=Studiobox playout server (web UI + scheduled play-by-filename)
+Documentation=https://github.com/FreieRadios/radiobox
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tsing
+Group=audio
+WorkingDirectory=/home/tsing/radiobox/packages/studiobox
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+# Belt and braces on a 1 GB Pi 3: the playout server must never be able to
+# take the machine down again. Kill+restart it before the kernel OOMs.
+MemoryMax=300M
+MemoryHigh=250M
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=studiobox
+
+[Install]
+WantedBy=multi-user.target

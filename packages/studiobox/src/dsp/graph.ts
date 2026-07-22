@@ -38,6 +38,12 @@ export interface MeterSnapshot {
   /** Local hardware playout state: true/false when available, null when no
    *  monitor output is configured (so the UI can hide the control). */
   monitor: boolean | null;
+  /** Next scheduled auto-play (soonest future filename timestamp), or null
+   *  when none is pending / the scheduler is disabled. */
+  nextScheduled: { name: string; playAtMs: number } | null;
+  /** Server wallclock (epoch ms) when the snapshot was taken, so the page can
+   *  mark upcoming files against the server's clock rather than its own. */
+  serverNowMs: number;
 }
 
 interface MicNode {
@@ -102,6 +108,10 @@ export class Graph {
   // Local hardware playout state, reported live to the meters page. null means
   // no monitor output is configured (the UI then hides the control).
   private monitor: boolean | null = null;
+
+  // Next scheduled auto-play, reported to the meters page (null when the
+  // filename-timestamp scheduler is disabled or nothing is pending).
+  private nextScheduled: { name: string; playAtMs: number } | null = null;
 
   private snapshot: MeterSnapshot;
 
@@ -209,6 +219,8 @@ export class Graph {
       recording: null,
       streaming: null,
       monitor: null,
+      nextScheduled: null,
+      serverNowMs: Date.now(),
     };
   }
 
@@ -347,6 +359,8 @@ export class Graph {
       recording: this.recording,
       streaming: this.streaming,
       monitor: this.monitor,
+      nextScheduled: this.nextScheduled,
+      serverNowMs: Date.now(),
     };
   }
 
@@ -382,6 +396,12 @@ export class Graph {
    *  no monitor output is configured so the control stays hidden. */
   setMonitor(monitor: boolean | null): void {
     this.monitor = monitor;
+  }
+
+  /** Report the next scheduled auto-play to the meters page (null when the
+   *  scheduler is disabled or nothing is pending). */
+  setNextScheduled(next: { name: string; playAtMs: number } | null): void {
+    this.nextScheduled = next;
   }
 
   /** Feed one block of the local file player into the virtual music source,
