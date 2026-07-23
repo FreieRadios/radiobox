@@ -20,7 +20,7 @@ export class Automix {
     private n: number,
     sampleRate: number,
     responseMs: number,
-    floorDb: number,
+    floorDb: number
   ) {
     this.envs = Array.from({ length: n }, () => new EnvelopeFollower(sampleRate, 5, responseMs));
     this.gains = new Float32Array(n).fill(0);

@@ -65,7 +65,8 @@ export class FilePlayer extends EventEmitter {
     prebufferMs: number = DEFAULT_PREBUFFER_MS
   ) {
     super();
-    const preMs = Number.isFinite(prebufferMs) && prebufferMs >= 0 ? prebufferMs : DEFAULT_PREBUFFER_MS;
+    const preMs =
+      Number.isFinite(prebufferMs) && prebufferMs >= 0 ? prebufferMs : DEFAULT_PREBUFFER_MS;
     this.prebufferBytes = Math.ceil((sampleRate * preMs) / 1000) * FRAME_BYTES;
     this.fadeInSamples = Math.max(1, Math.ceil((sampleRate * FADE_IN_MS) / 1000));
   }
@@ -275,9 +276,12 @@ export class FilePlayer extends EventEmitter {
     execFile(
       'ffprobe',
       [
-        '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
         file,
       ],
       (err, stdout) => {

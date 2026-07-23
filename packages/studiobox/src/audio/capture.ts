@@ -17,7 +17,10 @@ export class Capture extends EventEmitter {
   private leftover: Buffer = Buffer.alloc(0);
   private readonly blockBytes: number;
 
-  constructor(private cfg: CaptureConfig, private log: Log) {
+  constructor(
+    private cfg: CaptureConfig,
+    private log: Log
+  ) {
     super();
     this.blockBytes = cfg.blockSize * cfg.channels * BYTES_PER_SAMPLE;
   }
@@ -34,11 +37,16 @@ export class Capture extends EventEmitter {
       return {
         bin: 'arecord',
         args: [
-          '-D', c.device,
-          '-f', 'FLOAT_LE',
-          '-r', String(c.sampleRate),
-          '-c', String(c.channels),
-          '-t', 'raw',
+          '-D',
+          c.device,
+          '-f',
+          'FLOAT_LE',
+          '-r',
+          String(c.sampleRate),
+          '-c',
+          String(c.channels),
+          '-t',
+          'raw',
           '-q',
           '-', // stdout
         ],
@@ -50,13 +58,20 @@ export class Capture extends EventEmitter {
       bin: 'ffmpeg',
       args: [
         '-hide_banner',
-        '-loglevel', 'error',
-        '-f', 'pulse',
-        '-ar', String(c.sampleRate),
-        '-ac', String(c.channels),
-        '-i', c.device,
-        '-f', 'f32le',
-        '-acodec', 'pcm_f32le',
+        '-loglevel',
+        'error',
+        '-f',
+        'pulse',
+        '-ar',
+        String(c.sampleRate),
+        '-ac',
+        String(c.channels),
+        '-i',
+        c.device,
+        '-f',
+        'f32le',
+        '-acodec',
+        'pcm_f32le',
         'pipe:1',
       ],
     };
@@ -83,7 +98,10 @@ export class Capture extends EventEmitter {
     let offset = 0;
     while (buf.length - offset >= this.blockBytes) {
       const block = buf.subarray(offset, offset + this.blockBytes);
-      const out: Float32Array[] = Array.from({ length: channels }, () => new Float32Array(blockSize));
+      const out: Float32Array[] = Array.from(
+        { length: channels },
+        () => new Float32Array(blockSize)
+      );
       deinterleave(block, channels, blockSize, out);
       this.emit('block', out);
       offset += this.blockBytes;

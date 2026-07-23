@@ -16,7 +16,10 @@ export class Ducker {
   private held = 0;
   private gainDb = 0;
 
-  constructor(private p: DuckConfig, sampleRate: number) {
+  constructor(
+    private p: DuckConfig,
+    sampleRate: number
+  ) {
     this.micDet = new EnvelopeFollower(sampleRate, 5, 80);
     this.musicDet = new EnvelopeFollower(sampleRate, 10, 300);
     this.atk = msToCoef(p.attackMs, sampleRate);

@@ -12,7 +12,14 @@ const ABS_OFFSET = -0.691; // BS.1770 absolute calibration offset
 
 function kWeightStage1(): Biquad {
   const b = new Biquad();
-  b.setCoeffs(1.53512485958697, -2.69169618940638, 1.19839281085285, 1, -1.69065929318241, 0.73248077421585);
+  b.setCoeffs(
+    1.53512485958697,
+    -2.69169618940638,
+    1.19839281085285,
+    1,
+    -1.69065929318241,
+    0.73248077421585
+  );
   return b;
 }
 function kWeightStage2(): Biquad {
@@ -25,7 +32,7 @@ function assert48k(sampleRate: number): void {
   if (sampleRate !== 48000) {
     throw new Error(
       `loudness: K-weighting coefficients are calibrated for 48 kHz, got ${sampleRate}. ` +
-        `Recompute the biquad coefficients for this rate before using the loudness meter.`,
+        `Recompute the biquad coefficients for this rate before using the loudness meter.`
     );
   }
 }

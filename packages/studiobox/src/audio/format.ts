@@ -8,7 +8,7 @@ export function deinterleave(
   block: Buffer,
   channels: number,
   frames: number,
-  out: Float32Array[],
+  out: Float32Array[]
 ): void {
   for (let n = 0; n < frames; n++) {
     const base = n * channels;

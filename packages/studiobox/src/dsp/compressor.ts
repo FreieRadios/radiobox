@@ -9,7 +9,10 @@ export class Compressor {
   private rel: number;
   private grDb = 0; // current (smoothed) gain reduction, >= 0
 
-  constructor(private p: CompressorParams, sampleRate: number) {
+  constructor(
+    private p: CompressorParams,
+    sampleRate: number
+  ) {
     this.det = new EnvelopeFollower(sampleRate, 1, 10);
     this.atk = msToCoef(p.attackMs, sampleRate);
     this.rel = msToCoef(p.releaseMs, sampleRate);

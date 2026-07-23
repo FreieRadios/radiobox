@@ -14,7 +14,10 @@ export class Leveler {
   private gainDb = 0;
   private readonly gateLufs = -60; // below this we assume silence and hold gain
 
-  constructor(private p: LevelerParams, sampleRate: number) {
+  constructor(
+    private p: LevelerParams,
+    sampleRate: number
+  ) {
     this.meter = new MonoLoudness(sampleRate, 3.0);
     this.coef = msToCoef(p.responseMs, sampleRate);
   }

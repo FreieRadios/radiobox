@@ -11,7 +11,10 @@ export class Gate {
   private gainDb: number;
   private held = 0;
 
-  constructor(private p: GateParams, sampleRate: number) {
+  constructor(
+    private p: GateParams,
+    sampleRate: number
+  ) {
     this.det = new EnvelopeFollower(sampleRate, 1, 10);
     this.openCoef = msToCoef(p.attackMs, sampleRate);
     this.closeCoef = msToCoef(p.releaseMs, sampleRate);

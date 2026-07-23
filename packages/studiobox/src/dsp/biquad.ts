@@ -58,10 +58,7 @@ export class Biquad {
         break;
       }
       case 'peaking': {
-        bq.setCoeffs(
-          1 + alpha * A, -2 * cw, 1 - alpha * A,
-          1 + alpha / A, -2 * cw, 1 - alpha / A,
-        );
+        bq.setCoeffs(1 + alpha * A, -2 * cw, 1 - alpha * A, 1 + alpha / A, -2 * cw, 1 - alpha / A);
         break;
       }
       case 'lowshelf': {
@@ -74,7 +71,7 @@ export class Biquad {
           A * (ap - am * cw - tsa),
           ap + am * cw + tsa,
           -2 * (am + ap * cw),
-          ap + am * cw - tsa,
+          ap + am * cw - tsa
         );
         break;
       }
@@ -88,7 +85,7 @@ export class Biquad {
           A * (ap + am * cw - tsa),
           ap - am * cw + tsa,
           2 * (am - ap * cw),
-          ap - am * cw - tsa,
+          ap - am * cw - tsa
         );
         break;
       }

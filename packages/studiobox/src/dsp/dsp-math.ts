@@ -11,8 +11,7 @@ export function msToCoef(ms: number, sampleRate: number): number {
   return Math.exp(-1 / ((ms / 1000) * sampleRate));
 }
 
-export const clamp = (x: number, lo: number, hi: number): number =>
-  x < lo ? lo : x > hi ? hi : x;
+export const clamp = (x: number, lo: number, hi: number): number => (x < lo ? lo : x > hi ? hi : x);
 
 /** Denormal guard for feedback paths. */
 export const dn = (x: number): number => (Math.abs(x) < 1e-15 ? 0 : x);

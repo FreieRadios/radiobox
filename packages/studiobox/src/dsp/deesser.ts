@@ -24,7 +24,7 @@ export class Deesser {
         releaseMs: 60,
         makeupDb: 0,
       },
-      sampleRate,
+      sampleRate
     );
   }
 
