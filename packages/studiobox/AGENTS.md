@@ -85,9 +85,16 @@ config in `src/config/`; web meters in `src/meters/server.ts`; orchestration in
 Implemented: capture, full per-mic DSP chain, gain-sharing automix, ducking,
 master leveler + look-ahead limiter, BS.1770 loudness metering, Ogg/FLAC harbor
 streaming + rolling FLAC backup, web meters, music auto-leveling, a music-only
-mute control, a local audio file player on the meters page (a folder dropdown
-over the configured `filePlayer.dirs`; the selected folder's files decode to
-48 kHz stereo and route into the music path),
+mute control, a local audio file player on the meters page (browsing the
+configured `filePlayer.dirs`; the selected folder's files decode to
+48 kHz stereo and route into the music path; folders are browsable
+recursively — subdirectory rows descend, a breadcrumb shows/changes the
+current position, and `playFile`/schedule names are folder-relative paths like
+`Musik/x.flac`; the top-right ⋮ menu holds the folder select, the
+local-playout toggle (live mode only) and a "Scheduled files" modal listing
+every future timestamped file, served by HTTP `/scheduled`; only dirs marked
+`hasScheduled: true` are scanned for auto-play timestamps, so e.g. a music
+library can never preempt the program),
 and a start/stop recording control on the meters page (the rolling FLAC backup
 runs in its own ffmpeg `Recorder` process so it can be toggled live without
 disrupting the harbor stream; recording does **not** start automatically — the
@@ -101,12 +108,19 @@ plugged audio device — sound card / USB interface — via `output.monitor`; th
 `Monitor` process uses **aplay** for ALSA and **ffmpeg** for pulse, runs
 independently of the harbor encoder and FLAC backup, starts automatically when
 `output.monitor.enabled`, and is toggled live with the `monitor` WebSocket
-command / meters-page button),
+command / meters-page button — except in playout-only mode, where the monitor
+*is* the program output and the toggle is removed),
 and scheduled auto-play by filename timestamp (`filePlayer.autoPlay`; a
 TypeScript port of the liquidsoap `play_by_filename.liq` semantics in
 `src/schedule.ts` — files named `*YYYYMMDD-HHMMSS*` in the file-player folders
-start automatically at that local wallclock time, preempting current playback;
-the web page marks upcoming files and shows the next pending start),
+start automatically at that local wallclock time — folders are rescanned every
+`scanSeconds`, but the nearest upcoming entry is armed on a precise one-shot
+timer so playback starts on the timestamp, not on the next poll — preempting
+current playback;
+the web page marks upcoming files and shows the next pending start; timestamps
+are parsed in the **server's** timezone, so the page renders all schedule times
+and a live footer clock in that zone — keep the box's system TZ set to the
+zone operators use in filenames, e.g. `timedatectl set-timezone Europe/Berlin`),
 and a **playout-only mode** (`mode: playout` in `studiobox.yaml`): no capture,
 no DSP graph, no encoder/recorder — only FilePlayer -> Monitor plus the web UI
 (metering hidden, `channels: []` in the snapshot) and the auto-play scheduler.

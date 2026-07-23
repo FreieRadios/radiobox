@@ -29,20 +29,20 @@ function writeConfig(filePlayer: string): { configPath: string; profilesPath: st
 }
 
 describe('filePlayer dirs resolution', () => {
-  it('resolves a dirs array of { path, label } entries in order', () => {
+  it('resolves a dirs array of { path, label, hasScheduled } entries in order', () => {
     const { configPath, profilesPath } = writeConfig(
       [
         'filePlayer:',
         '  enabled: true',
         '  dirs:',
         '    - { path: "./music", label: Music }',
-        '    - { path: "./jingles", label: Jingles }',
+        '    - { path: "./repeat", label: Repeat, hasScheduled: true }',
       ].join('\n')
     );
     const cfg = loadConfig({ configPath, profilesPath });
     expect(cfg.filePlayer?.dirs).toEqual([
-      { path: './music', label: 'Music' },
-      { path: './jingles', label: 'Jingles' },
+      { path: './music', label: 'Music', hasScheduled: false },
+      { path: './repeat', label: 'Repeat', hasScheduled: true },
     ]);
   });
 
@@ -51,7 +51,9 @@ describe('filePlayer dirs resolution', () => {
       ['filePlayer:', '  enabled: true', '  dirs:', '    - "/srv/audio/beds/"'].join('\n')
     );
     const cfg = loadConfig({ configPath, profilesPath });
-    expect(cfg.filePlayer?.dirs).toEqual([{ path: '/srv/audio/beds/', label: 'beds' }]);
+    expect(cfg.filePlayer?.dirs).toEqual([
+      { path: '/srv/audio/beds/', label: 'beds', hasScheduled: false },
+    ]);
   });
 
   it('falls back to the legacy single `dir` string', () => {
@@ -59,6 +61,8 @@ describe('filePlayer dirs resolution', () => {
       ['filePlayer:', '  enabled: true', '  dir: "./music"'].join('\n')
     );
     const cfg = loadConfig({ configPath, profilesPath });
-    expect(cfg.filePlayer?.dirs).toEqual([{ path: './music', label: 'music' }]);
+    expect(cfg.filePlayer?.dirs).toEqual([
+      { path: './music', label: 'music', hasScheduled: false },
+    ]);
   });
 });

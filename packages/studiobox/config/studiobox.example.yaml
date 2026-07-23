@@ -101,9 +101,13 @@ filePlayer:
   enabled: false
   # Each entry is a browsable folder. Use `{ path, label }` to name it in the
   # dropdown, or a bare path string (the folder's basename becomes the label).
+  # hasScheduled marks a dir (recursively) scanned for timestamped auto-play
+  # files; leave it off for e.g. music libraries so stray filenames can never
+  # preempt the program.
   dirs:
     - { path: "./music", label: Music }
     - { path: "./jingles", label: Jingles }
+    - { path: "./repeat", label: Repeat, hasScheduled: true }
   label: FilePlayer # shown as a music row on the meters page
   ducked: true # pulled under live speech, like the music buses
   fadeOutMs: 800 # smooth fade to silence when the operator hits "Stop file" (0 = hard cut)

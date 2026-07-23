@@ -54,7 +54,8 @@ export class PlayoutPipeline {
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
     this.meters?.onCommand((cmd) => this.onCommand(cmd.type, cmd.value));
     this.meters?.onListFolders(() => this.fileDirs.folders());
-    this.meters?.onListFiles((folder) => this.fileDirs.entries(folder));
+    this.meters?.onListFiles((folder, sub) => this.fileDirs.entries(folder, sub));
+    this.meters?.onListScheduled(() => this.scheduler?.upcoming() ?? []);
     this.scheduler = cfg.filePlayer.autoPlay.enabled
       ? new Scheduler(
           cfg.filePlayer.autoPlay,
@@ -78,12 +79,7 @@ export class PlayoutPipeline {
 
   /** Handle a control message from the web UI. */
   private onCommand(type: string, value: unknown): void {
-    if (type === 'monitor') {
-      this.monitorArmed = !!value;
-      if (this.monitorArmed) this.monitor.start();
-      else this.monitor.stop();
-      log.info(`local playout ${this.monitor.active ? 'started' : 'stopped'}`);
-    } else if (type === 'playFile') {
+    if (type === 'playFile') {
       const req = isObj(value) ? value : {};
       const folder = Number((req as { folder?: unknown }).folder ?? 0);
       const name = String((req as { name?: unknown }).name ?? '');
@@ -99,8 +95,10 @@ export class PlayoutPipeline {
       log.info(`stopping file playback${fadeMs > 0 ? ` (fade ${fadeMs}ms)` : ''}`);
       this.filePlayer.fadeOut(fadeMs);
     }
-    // recording / streaming / mute commands don't exist in playout mode; the
-    // UI hides those controls (their snapshot state is null / channels empty).
+    // recording / streaming / mute / monitor commands don't exist in playout
+    // mode; the UI hides those controls (their snapshot state is null /
+    // channels empty). Monitor in particular: it is the *only* output here,
+    // so a stop control would just be a way to silence the station.
   }
 
   /** UI snapshot: playback + schedule state, no metering (channels: []). */
@@ -120,7 +118,9 @@ export class PlayoutPipeline {
       fileDuration: playing ? this.filePlayer.duration : null,
       recording: null,
       streaming: null,
-      monitor: this.monitor.active,
+      // Deliberately not exposed as a toggle: in playout-only mode the
+      // monitor *is* the program output.
+      monitor: null,
       nextScheduled: next ? { name: next.name, playAtMs: next.playAtMs } : null,
       serverNowMs: Date.now(),
     };

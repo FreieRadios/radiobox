@@ -69,14 +69,16 @@ function normalizeEq(processing: ChannelProcessing): ChannelProcessing {
 }
 
 /** Normalize the configured browsable folders. Accepts the new `dirs` array
- *  (each entry a string or `{ path, label }`) and the legacy single `dir`
- *  string for backward compatibility. Labels default to the folder basename. */
+ *  (each entry a string or `{ path, label, hasScheduled }`) and the legacy
+ *  single `dir` string for backward compatibility. Labels default to the
+ *  folder basename; only dirs with `hasScheduled: true` are scanned for
+ *  timestamped auto-play files. */
 function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
   const toDir = (entry: unknown): FilePlayerDir | null => {
     if (typeof entry === 'string') {
       const p = entry.trim();
       if (!p) return null;
-      return { path: p, label: path.basename(p.replace(/[/\\]+$/, '')) || p };
+      return { path: p, label: path.basename(p.replace(/[/\\]+$/, '')) || p, hasScheduled: false };
     }
     if (isObj(entry) && typeof entry.path === 'string') {
       const p = entry.path.trim();
@@ -85,7 +87,7 @@ function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
         typeof entry.label === 'string' && entry.label.trim()
           ? entry.label.trim()
           : path.basename(p.replace(/[/\\]+$/, '')) || p;
-      return { path: p, label };
+      return { path: p, label, hasScheduled: entry.hasScheduled === true };
     }
     return null;
   };
@@ -102,7 +104,7 @@ function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
     const d = toDir(raw.dir);
     if (d) dirs.push(d);
   }
-  if (!dirs.length) dirs.push({ path: './music', label: 'music' });
+  if (!dirs.length) dirs.push({ path: './music', label: 'music', hasScheduled: false });
   return dirs;
 }
 

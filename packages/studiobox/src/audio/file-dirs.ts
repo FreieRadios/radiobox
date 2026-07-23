@@ -10,7 +10,12 @@ export interface FileEntry {
   name: string;
   /** Epoch ms parsed from a `YYYYMMDD-HHMMSS` filename timestamp, or null. */
   playAtMs: number | null;
+  /** True for a browsable subdirectory row (not playable). */
+  dir?: boolean;
 }
+
+/** Recursion guard for scheduled(): deeper trees are ignored, not an error. */
+const MAX_WALK_DEPTH = 8;
 
 /**
  * The configured browsable file-player folders: listing, timestamp parsing and
@@ -35,32 +40,64 @@ export class FileDirs {
     return dir ? path.resolve(dir.path) : null;
   }
 
-  /** List playable audio files directly inside the folder at `index`, each
-   *  with its parsed auto-play timestamp (when the name carries one). */
-  entries(index: number): FileEntry[] {
+  /** Absolute path of the subdirectory `sub` (posix-relative, may be '')
+   *  inside the folder at `index`, traversal-safe, or null. */
+  private subdir(index: number, sub: string): string | null {
     const root = this.root(index);
-    if (!root) return [];
+    if (!root) return null;
+    if (!sub) return root;
+    const resolved = path.resolve(root, sub);
+    const rel = path.relative(root, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    return resolved;
+  }
+
+  /** List the folder at `index` (optionally a subdirectory `sub` inside it):
+   *  subdirectory rows first, then playable audio files, each file with its
+   *  parsed auto-play timestamp (when the name carries one). Dotfiles and
+   *  dot-directories are hidden. */
+  entries(index: number, sub = ''): FileEntry[] {
+    const dir = this.subdir(index, sub);
+    if (!dir) return [];
     try {
-      return fs
-        .readdirSync(root, { withFileTypes: true })
+      const listed = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((e) => !e.name.startsWith('.'));
+      const dirs: FileEntry[] = listed
+        .filter((e) => e.isDirectory())
+        .map((e) => ({ name: e.name, playAtMs: null, dir: true }));
+      const files: FileEntry[] = listed
         .filter((e) => e.isFile() && AUDIO_EXTENSIONS.includes(path.extname(e.name).toLowerCase()))
-        .map((e) => ({ name: e.name, playAtMs: parsePlayAtMs(e.name) }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .map((e) => ({ name: e.name, playAtMs: parsePlayAtMs(e.name) }));
+      const byName = (a: FileEntry, b: FileEntry) => a.name.localeCompare(b.name);
+      return [...dirs.sort(byName), ...files.sort(byName)];
     } catch (err) {
-      this.log.warn(`cannot list ${root}: ${(err as Error).message}`);
+      this.log.warn(`cannot list ${dir}: ${(err as Error).message}`);
       return [];
     }
   }
 
-  /** Every timestamped file across all folders, as scheduler entries. */
+  /** Every timestamped file across the folders marked `hasScheduled`,
+   *  recursing into subdirectories, as scheduler entries. `name` is the
+   *  posix-relative path inside its folder (e.g.
+   *  "Musik/x-20260722-130000.flac"), which `resolve()` accepts as-is.
+   *  Symlinked directories are not followed (cycle safety); depth is capped
+   *  at MAX_WALK_DEPTH. */
   scheduled(): ScheduleEntry[] {
     const out: ScheduleEntry[] = [];
     for (let folder = 0; folder < this.dirs.length; folder++) {
-      for (const e of this.entries(folder)) {
-        if (e.playAtMs !== null) out.push({ folder, name: e.name, playAtMs: e.playAtMs });
-      }
+      if (this.dirs[folder].hasScheduled) this.walkScheduled(folder, '', 0, out);
     }
     return out;
+  }
+
+  private walkScheduled(folder: number, sub: string, depth: number, out: ScheduleEntry[]): void {
+    if (depth > MAX_WALK_DEPTH) return;
+    for (const e of this.entries(folder, sub)) {
+      const rel = sub ? `${sub}/${e.name}` : e.name;
+      if (e.dir) this.walkScheduled(folder, rel, depth + 1, out);
+      else if (e.playAtMs !== null) out.push({ folder, name: rel, playAtMs: e.playAtMs });
+    }
   }
 
   /** Resolve a requested filename to an absolute path inside the folder at

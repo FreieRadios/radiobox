@@ -146,6 +146,10 @@ export interface FilePlayerDir {
   path: string;
   /** Human-friendly name shown in the folder dropdown. */
   label: string;
+  /** Whether this directory is scanned (recursively) for timestamped
+   *  auto-play files. Off by default: a music library full of arbitrary
+   *  filenames should never be able to preempt the program. */
+  hasScheduled: boolean;
 }
 
 /** Scheduled auto-play by filename timestamp. Files named `*YYYYMMDD-HHMMSS*`

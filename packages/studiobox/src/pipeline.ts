@@ -62,7 +62,8 @@ export class Pipeline {
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
     this.meters?.onCommand((cmd) => this.onCommand(cmd.type, cmd.value));
     this.meters?.onListFolders(() => this.fileDirs?.folders() ?? []);
-    this.meters?.onListFiles((folder) => this.fileDirs?.entries(folder) ?? []);
+    this.meters?.onListFiles((folder, sub) => this.fileDirs?.entries(folder, sub) ?? []);
+    this.meters?.onListScheduled(() => this.scheduler?.upcoming() ?? []);
     // Filename-timestamp auto-play: scheduled files start through the same
     // file player / music path a manual play uses.
     this.scheduler =
