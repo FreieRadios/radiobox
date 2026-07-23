@@ -74,6 +74,9 @@ const FIRED_RETENTION_MS = 24 * 3600 * 1000;
 
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
+  /** One-shot timer aimed at the next entry's exact timestamp (see armPrecise). */
+  private precise: NodeJS.Timeout | null = null;
+  private running = false;
   /** key -> epoch ms the entry fired; pruned by retention. */
   private fired = new Map<string, number>();
 
@@ -94,6 +97,7 @@ export class Scheduler {
    *  inside the grace window at startup. */
   start(): void {
     if (this.timer) return;
+    this.running = true;
     this.tick();
     this.timer = setInterval(() => this.tick(), this.opts.scanSeconds * 1000);
     // Don't let the scan timer keep the process alive on its own.
@@ -104,8 +108,11 @@ export class Scheduler {
   }
 
   stop(): void {
+    this.running = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.precise) clearTimeout(this.precise);
+    this.precise = null;
   }
 
   /** One scan pass. Exposed (with an injectable clock) for tests. */
@@ -115,27 +122,53 @@ export class Scheduler {
     }
 
     const graceMs = this.opts.graceSeconds * 1000;
-    const due = this.list()
+    const entries = this.list();
+    const due = entries
       .filter((e) => {
         const age = nowMs - e.playAtMs;
         return age >= 0 && age <= graceMs && !this.fired.has(this.key(e));
       })
       .sort((a, b) => a.playAtMs - b.playAtMs);
-    if (!due.length) return;
 
-    // Everything due is consumed; only the *latest* target actually plays.
-    // With several targets inside one window (e.g. a late daemon start) the
-    // earlier ones are already superseded — this matches the liquidsoap
-    // preemption outcome (skip the overrun track, honour the schedule).
-    for (const e of due) this.fired.set(this.key(e), nowMs);
-    const play = due[due.length - 1];
-    for (const skipped of due.slice(0, -1)) {
-      this.log.info(`auto-play: skipping superseded ${skipped.name}`);
+    if (due.length) {
+      // Everything due is consumed; only the *latest* target actually plays.
+      // With several targets inside one window (e.g. a late daemon start) the
+      // earlier ones are already superseded — this matches the liquidsoap
+      // preemption outcome (skip the overrun track, honour the schedule).
+      for (const e of due) this.fired.set(this.key(e), nowMs);
+      const play = due[due.length - 1];
+      for (const skipped of due.slice(0, -1)) {
+        this.log.info(`auto-play: skipping superseded ${skipped.name}`);
+      }
+      this.log.info(
+        `auto-play: starting ${play.name} (target ${new Date(play.playAtMs).toISOString()})`
+      );
+      this.onPlay(play);
     }
-    this.log.info(
-      `auto-play: starting ${play.name} (target ${new Date(play.playAtMs).toISOString()})`
-    );
-    this.onPlay(play);
+
+    this.armPrecise(nowMs, entries);
+  }
+
+  /** Aim a one-shot timer at the earliest future entry when it lands before
+   *  the next periodic scan, so playback starts *on* the timestamp instead of
+   *  up to scanSeconds late. Every tick re-arms (folders are rescanned, so a
+   *  freshly synced nearer file wins); farther entries wait for a later scan
+   *  to arm them. Only active while start()ed — tests drive tick() directly
+   *  with a fake clock and must not spawn real timers. */
+  private armPrecise(nowMs: number, entries: ScheduleEntry[]): void {
+    if (this.precise) clearTimeout(this.precise);
+    this.precise = null;
+    if (!this.running) return;
+    let next: ScheduleEntry | null = null;
+    for (const e of entries) {
+      if (e.playAtMs > nowMs && (!next || e.playAtMs < next.playAtMs)) next = e;
+    }
+    if (!next) return;
+    const delay = next.playAtMs - nowMs;
+    if (delay > this.opts.scanSeconds * 1000) return; // a later scan re-arms
+    // Small cushion so the fired tick's clock is safely past the target.
+    this.precise = setTimeout(() => this.tick(), delay + 5);
+    this.precise.unref?.();
   }
 
   /** Entries whose target is still in the future, soonest first. */

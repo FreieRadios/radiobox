@@ -115,6 +115,30 @@ describe('Scheduler', () => {
     expect(played).toEqual(['dropped.flac']);
   });
 
+  it('starts a file on its exact timestamp via the precise timer, not the next scan', () => {
+    jest.useFakeTimers();
+    try {
+      const target = new Date(2026, 6, 23, 9, 42, 0).getTime();
+      const t0 = target - 3_000; // start()ed 3 s before the target
+      jest.setSystemTime(t0);
+      const files = [entry('x-20260723-094200.flac', target)];
+      const played: string[] = [];
+      const s = new Scheduler(
+        opts,
+        () => files,
+        (e) => played.push(e.name),
+        silentLog
+      );
+      s.start(); // immediate scan: nothing due yet, precise timer armed
+      expect(played).toEqual([]);
+      jest.advanceTimersByTime(3_100); // well before the 10 s scan tick
+      expect(played).toEqual(['x-20260723-094200.flac']);
+      s.stop();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('reports upcoming entries soonest-first via next()/upcoming()', () => {
     const t0 = Date.now();
     const files = [
