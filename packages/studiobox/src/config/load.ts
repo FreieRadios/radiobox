@@ -68,17 +68,46 @@ function normalizeEq(processing: ChannelProcessing): ChannelProcessing {
   };
 }
 
+/** Keyword -> emoji for the folder icon guess. First match on the label or path
+ *  wins, so order matters: put the specific words before the generic ones.
+ *  German and English both appear — the stations running this are German. */
+const DIR_ICONS: Array<[RegExp, string]> = [
+  [/jingle|trailer|sweeper|station.?id/i, '🔔'],
+  [/unterleger|instrumental|bed\b|beds\b|underscore/i, '🛏️'],
+  [/wiederhol|repeat|replay|nachhör|nachhoer/i, '🔁'],
+  [/sendung|programm|show|broadcast|sendeplan/i, '📻'],
+  [/nachricht|news|wetter|weather|magazin/i, '📰'],
+  [/werbung|spot|promo|advert/i, '📢'],
+  [/interview|beitrag|feature|wort|talk|podcast/i, '🎙️'],
+  [/thema|themen|sampler|rubrik/i, '🗂️'],
+  [/archiv|archive|alt\b|old\b/i, '📦'],
+  [/eingang|inbox|import|upload|neu\b|new\b/i, '📥'],
+  [/live|studio|mitschnitt/i, '🎛️'],
+  [/musik|music|mp3|song|track|album|playlist/i, '🎵'],
+  [/cloud|nextcloud|owncloud|sync|share|freigabe/i, '☁️'],
+];
+
+/** Guess a folder's emoji from its label (preferred) or path. Falls back to a
+ *  neutral folder glyph so every dir always has an icon. */
+export function guessDirIcon(label: string, dirPath: string): string {
+  for (const [re, icon] of DIR_ICONS) {
+    if (re.test(label) || re.test(dirPath)) return icon;
+  }
+  return '📁';
+}
+
 /** Normalize the configured browsable folders. Accepts the new `dirs` array
- *  (each entry a string or `{ path, label, hasScheduled }`) and the legacy
- *  single `dir` string for backward compatibility. Labels default to the
- *  folder basename; only dirs with `hasScheduled: true` are scanned for
- *  timestamped auto-play files. */
+ *  (each entry a string or `{ path, label, hasScheduled, hideEmpty, icon }`)
+ *  and the legacy single `dir` string for backward compatibility. Labels
+ *  default to the folder basename, icons to a keyword guess; only dirs with
+ *  `hasScheduled: true` are scanned for timestamped auto-play files. */
 function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
   const toDir = (entry: unknown): FilePlayerDir | null => {
     if (typeof entry === 'string') {
       const p = entry.trim();
       if (!p) return null;
-      return { path: p, label: path.basename(p.replace(/[/\\]+$/, '')) || p, hasScheduled: false };
+      const label = path.basename(p.replace(/[/\\]+$/, '')) || p;
+      return { path: p, label, hasScheduled: false, hideEmpty: true, icon: guessDirIcon(label, p) };
     }
     if (isObj(entry) && typeof entry.path === 'string') {
       const p = entry.path.trim();
@@ -87,7 +116,17 @@ function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
         typeof entry.label === 'string' && entry.label.trim()
           ? entry.label.trim()
           : path.basename(p.replace(/[/\\]+$/, '')) || p;
-      return { path: p, label, hasScheduled: entry.hasScheduled === true };
+      // Prune empty subfolders by default; only an explicit `false` disables it.
+      return {
+        path: p,
+        label,
+        hasScheduled: entry.hasScheduled === true,
+        hideEmpty: entry.hideEmpty !== false,
+        icon:
+          typeof entry.icon === 'string' && entry.icon.trim()
+            ? entry.icon.trim()
+            : guessDirIcon(label, p),
+      };
     }
     return null;
   };
@@ -104,7 +143,14 @@ function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
     const d = toDir(raw.dir);
     if (d) dirs.push(d);
   }
-  if (!dirs.length) dirs.push({ path: './music', label: 'music', hasScheduled: false });
+  if (!dirs.length)
+    dirs.push({
+      path: './music',
+      label: 'music',
+      hasScheduled: false,
+      hideEmpty: true,
+      icon: '🎵',
+    });
   return dirs;
 }
 

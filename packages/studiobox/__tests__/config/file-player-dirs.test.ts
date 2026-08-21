@@ -41,8 +41,8 @@ describe('filePlayer dirs resolution', () => {
     );
     const cfg = loadConfig({ configPath, profilesPath });
     expect(cfg.filePlayer?.dirs).toEqual([
-      { path: './music', label: 'Music', hasScheduled: false },
-      { path: './repeat', label: 'Repeat', hasScheduled: true },
+      { path: './music', label: 'Music', hasScheduled: false, hideEmpty: true, icon: '🎵' },
+      { path: './repeat', label: 'Repeat', hasScheduled: true, hideEmpty: true, icon: '🔁' },
     ]);
   });
 
@@ -52,7 +52,7 @@ describe('filePlayer dirs resolution', () => {
     );
     const cfg = loadConfig({ configPath, profilesPath });
     expect(cfg.filePlayer?.dirs).toEqual([
-      { path: '/srv/audio/beds/', label: 'beds', hasScheduled: false },
+      { path: '/srv/audio/beds/', label: 'beds', hasScheduled: false, hideEmpty: true, icon: '🛏️' },
     ]);
   });
 
@@ -62,7 +62,7 @@ describe('filePlayer dirs resolution', () => {
     );
     const cfg = loadConfig({ configPath, profilesPath });
     expect(cfg.filePlayer?.dirs).toEqual([
-      { path: './music', label: 'music', hasScheduled: false },
+      { path: './music', label: 'music', hasScheduled: false, hideEmpty: true, icon: '🎵' },
     ]);
   });
 });

@@ -1,9 +1,33 @@
+import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { MeterSnapshot } from '../dsp/graph';
-import { FileEntry } from '../audio/file-dirs';
+import { FileEntry, FolderEntry } from '../audio/file-dirs';
 import { ScheduleEntry } from '../schedule';
 import { Log } from '../util/log';
+
+/** Content types for the "Vorhören" (browser preview) route. Every one of
+ *  these plays natively in current browsers, so preview streams the file's own
+ *  bytes — no transcode, no extra ffmpeg, ~zero CPU on a small box, and the
+ *  browser gets real seeking and duration via HTTP range requests. Formats not
+ *  listed here (.aiff/.wma) are not previewable and the UI says so rather than
+ *  spending a Pi's CPU budget transcoding them next to the on-air chain. */
+const PREVIEW_TYPES: Record<string, string> = {
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+};
+
+/** True when the browser can play this file directly (see PREVIEW_TYPES). */
+export function isPreviewable(name: string): boolean {
+  return path.extname(name).toLowerCase() in PREVIEW_TYPES;
+}
 
 /** Headless metering: serves a tiny self-contained page and pushes meter
  *  snapshots over WebSocket at the configured frame rate. In playout mode the
@@ -32,9 +56,11 @@ export class MeterServer {
   private server: http.Server;
   private wss: WebSocketServer;
   private onCmd: ((cmd: MeterCommand) => void) | null = null;
-  private onList: ((folder: number, sub: string) => FileEntry[]) | null = null;
-  private onFolders: (() => string[]) | null = null;
+  private onList: ((folder: number, sub: string) => FileEntry[] | Promise<FileEntry[]>) | null =
+    null;
+  private onFolders: (() => FolderEntry[]) | null = null;
   private onScheduled: (() => ScheduleEntry[]) | null = null;
+  private onResolve: ((folder: number, name: string) => string | null) | null = null;
 
   constructor(
     private port: number,
@@ -53,13 +79,22 @@ export class MeterServer {
         const q = new URL(req.url ?? '/', 'http://localhost');
         const folder = Number(q.searchParams.get('folder') ?? '0') || 0;
         const sub = q.searchParams.get('path') ?? '';
-        const files = this.onList ? this.onList(folder, sub) : [];
-        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ files, now: Date.now() }));
+        Promise.resolve(this.onList ? this.onList(folder, sub) : [])
+          .then((files) => {
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ files, now: Date.now() }));
+          })
+          .catch((err: unknown) => {
+            this.log.warn(`file listing failed: ${(err as Error).message}`);
+            res.writeHead(500);
+            res.end();
+          });
       } else if (url === '/scheduled') {
         const scheduled = this.onScheduled ? this.onScheduled() : [];
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ scheduled, now: Date.now() }));
+      } else if (url === '/preview') {
+        this.servePreview(req, res);
       } else {
         res.writeHead(404);
         res.end();
@@ -83,18 +118,92 @@ export class MeterServer {
   }
 
   /** Register the provider for the `/files` directory listing. */
-  onListFiles(fn: (folder: number, sub: string) => FileEntry[]): void {
+  onListFiles(fn: (folder: number, sub: string) => FileEntry[] | Promise<FileEntry[]>): void {
     this.onList = fn;
   }
 
   /** Register the provider for the `/folders` dropdown listing. */
-  onListFolders(fn: () => string[]): void {
+  onListFolders(fn: () => FolderEntry[]): void {
     this.onFolders = fn;
   }
 
   /** Register the provider for the `/scheduled` upcoming-files listing. */
   onListScheduled(fn: () => ScheduleEntry[]): void {
     this.onScheduled = fn;
+  }
+
+  /** Register the traversal-safe folder+name -> absolute path resolver that
+   *  `/preview` uses (the same one that starts real playout). */
+  onResolveFile(fn: (folder: number, name: string) => string | null): void {
+    this.onResolve = fn;
+  }
+
+  /** "Vorhören": stream a file to the operator's browser for pre-listening.
+   *  Deliberately a plain byte range server, NOT a transcode: the browser
+   *  decodes the file itself, so this costs no CPU next to the on-air chain
+   *  and cannot disturb playout (it never touches the file player, the DSP
+   *  graph or the monitor). Honours Range so seeking works. */
+  private servePreview(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const q = new URL(req.url ?? '/', 'http://localhost');
+    const folder = Number(q.searchParams.get('folder') ?? '0') || 0;
+    const name = q.searchParams.get('name') ?? '';
+    const file = this.onResolve && name ? this.onResolve(folder, name) : null;
+    const type = file ? PREVIEW_TYPES[path.extname(file).toLowerCase()] : undefined;
+    if (!file || !type) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    let size: number;
+    try {
+      size = fs.statSync(file).size;
+    } catch {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    // Range: "bytes=start-[end]" — the only form browsers send for <audio>.
+    const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+    let start = 0;
+    let end = size - 1;
+    let status = 200;
+    const headers: Record<string, string> = {
+      'content-type': type,
+      'accept-ranges': 'bytes',
+      'cache-control': 'no-store',
+    };
+    if (m && (m[1] !== '' || m[2] !== '')) {
+      if (m[1] === '') {
+        // Suffix form ("last N bytes").
+        start = Math.max(0, size - Number(m[2]));
+      } else {
+        start = Number(m[1]);
+        if (m[2] !== '') end = Math.min(end, Number(m[2]));
+      }
+      if (!(start >= 0) || start > end || start >= size) {
+        res.writeHead(416, { 'content-range': `bytes */${size}` });
+        res.end();
+        return;
+      }
+      status = 206;
+      headers['content-range'] = `bytes ${start}-${end}/${size}`;
+    }
+    headers['content-length'] = String(end - start + 1);
+    res.writeHead(status, headers);
+    if (req.method === 'HEAD') {
+      res.end();
+      return;
+    }
+    const stream = fs.createReadStream(file, { start, end });
+    // A reload or a skip to the next file aborts the request mid-flight; tear
+    // the read down so a slow (e.g. SMB) source isn't left streaming.
+    const close = () => stream.destroy();
+    res.on('close', close);
+    stream.on('error', (err: Error) => {
+      this.log.warn(`preview failed for ${path.basename(file)}: ${err.message}`);
+      res.destroy();
+    });
+    stream.pipe(res);
   }
 
   start(): void {
@@ -123,6 +232,7 @@ const SERVER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>studiobox meters</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%238df'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%238df' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cf' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
 <style>
  body{background:#111;color:#ddd;font:13px monospace;margin:0;height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
  h1{font-size:16px;color:#8df;font-weight:bold;letter-spacing:.3px}
@@ -174,7 +284,6 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .files li.next{border-left:3px solid #ffd24a;padding-left:5px}
  #next{color:#ffd24a;overflow-wrap:anywhere}
  #next .dim{color:#997}
- #folder{padding:6px 10px;font:14px monospace;min-width:180px;background:#223;color:#cde;border:1px solid #456;border-radius:5px}
  .nowplaying{color:#fbe;font-size:15px}
  .nowplaying b{color:#7cf}
  .bar-panel{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 18px;
@@ -184,8 +293,10 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .footer .ctl{display:flex;align-items:center;gap:10px}
  .topbar h1{margin:0}
  .topbar .dot{color:#3c8;margin-right:6px}
- .topbar .spacer{flex:1}
- .topbar .fld{display:flex;align-items:center;gap:6px}
+ /* The rec/ship/⋮ cluster: an auto left margin keeps it hard right in every
+    layout (a flex spacer vanished when hidden on small screens, letting ⋮
+    drift left); it wraps as a unit and stays right-aligned when it does. */
+ .topbar .topright{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px}
  .bar-panel button{width:172px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  /* Top-right ⋮ menu: transport toggles that don't need to sit in the bar. */
  .menuwrap{position:relative}
@@ -193,8 +304,35 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:230px;display:flex;flex-direction:column;gap:6px;
   background:#1c1c1c;border:1px solid #444;border-radius:6px;padding:8px;box-shadow:0 5px 18px rgba(0,0,0,.65)}
  .menu button{width:100%;flex:none;text-align:left}
- .menu .fld{display:flex}
- .menu #folder{width:100%;min-width:0}
+ /* Folder picker: a flat one-click list (no nested <select>), divided from the
+    action buttons below and highlighting the current folder. */
+ .menu .folderlist{display:flex;flex-direction:column;gap:6px}
+ .menu .folderlist:not(:empty){border-bottom:1px solid #333;padding-bottom:8px}
+ .menu .fbtn.on{background:#2a3550;color:#cfe4ff;border-color:#4a6aa0}
+ /* Clickable logo -> welcome screen. */
+ .topbar h1{cursor:pointer;user-select:none}
+ .topbar h1:hover{color:#adf}
+ .topbar h1:hover .dot{color:#5fd}
+ /* "Vorhören" (browser pre-listen) toggle. When on it must be unmistakable:
+    amber button, amber rule under the top bar, amber-framed file list. */
+ button.cue{background:#3a2f1c;color:#e6c878;border-color:#8a6d2f}
+ button.cue.on{background:#e6a52e;color:#201603;border-color:#ffd24a;font-weight:bold}
+ body.cueing .topbar{border-bottom:2px solid #e6a52e}
+ body.cueing .files{outline:1px solid #6a5320;outline-offset:6px;border-radius:4px}
+ /* Preview player: only present while pre-listening. */
+ .cuebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+ .cuebar .cname{color:#e6c878;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 160px}
+ .cuebar audio{height:34px;max-width:100%;flex:1 1 240px}
+ /* Welcome screen: the configured sources as big clickable tiles. */
+ .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:14px;overflow-y:auto}
+ .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  padding:18px 10px;background:#20242c;border:1px solid #3a4150;border-radius:8px;cursor:pointer;
+  color:#cde;text-align:center;transition:background .12s,border-color .12s,transform .08s}
+ .tile:hover{background:#27303c;border-color:#7cf;transform:translateY(-1px)}
+ .tile.on{border-color:#8df;background:#26313f}
+ .tile .ic{font-size:30px;line-height:1}
+ .tile .nm{overflow-wrap:anywhere}
+ .mbox .sub{padding:0 14px 4px;color:#8a93a0}
  /* Scheduled-files modal (opened from the ⋮ menu). */
  .modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px}
  .mbox{background:#191919;border:1px solid #444;border-radius:8px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 6px 24px rgba(0,0,0,.7)}
@@ -222,7 +360,6 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  @media (max-width:520px){
   .content{padding:8px 10px}
   .bar-panel{padding:8px 10px;gap:8px}
-  .topbar .spacer{display:none}
   .bar-panel button{flex:1 1 auto;width:auto;min-width:0}
   #menuBtn{flex:0 0 auto;width:44px}
   .menu button{flex:none;width:100%}
@@ -235,16 +372,18 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  }
 </style></head><body>
 <div class="topbar bar-panel">
- <h1><span class="dot">●</span>studiobox</h1>
- <span class="spacer"></span>
- <button id="rec" class="rec" style="display:none">● Start recording</button>
- <button id="ship" class="ship" style="display:none">● Start streaming</button>
- <div class="menuwrap">
-  <button id="menuBtn" title="more">⋮</button>
-  <div id="menu" class="menu" style="display:none">
-   <span class="fld" id="fldwrap"><select id="folder"></select></span>
-   <button id="mon" class="mon" style="display:none">● Start local playout</button>
-   <button id="schedBtn">⏰ Scheduled files</button>
+ <h1 id="logo" title="Quellen / sources"><span class="dot">●</span>studiobox</h1>
+ <div class="topright">
+  <button id="cue" class="cue" title="Vorhören: Dateien im Browser abhören, ohne die Ausspielung zu stören">🎧 Vorhören</button>
+  <button id="rec" class="rec" style="display:none">● Start recording</button>
+  <button id="ship" class="ship" style="display:none">● Start streaming</button>
+  <div class="menuwrap">
+   <button id="menuBtn" title="more">⋮</button>
+   <div id="menu" class="menu" style="display:none">
+    <div id="folderList" class="folderlist"></div>
+    <button id="mon" class="mon" style="display:none">● Start local playout</button>
+    <button id="schedBtn">⏰ Scheduled files</button>
+   </div>
   </div>
  </div>
 </div>
@@ -267,6 +406,11 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 </div>
 </div>
 <div class="footer bar-panel">
+ <div class="cuebar" id="cuebar" style="display:none">
+  <span class="cname" id="cname"></span>
+  <audio id="cueAudio" controls preload="none"></audio>
+  <button id="cueStop">■ Vorhören stoppen</button>
+ </div>
  <div class="nowplaying" id="nowplaying" style="display:none"></div>
  <div class="nowplaying" id="next" style="display:none"></div>
  <div class="ctl">
@@ -280,6 +424,13 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <div class="mbox">
   <div class="mhead"><b>⏰ Scheduled files</b><button id="mclose">✕</button></div>
   <ul id="mlist"></ul>
+ </div>
+</div>
+<div id="welcome" class="modal" style="display:none">
+ <div class="mbox">
+  <div class="mhead"><b>👋 studiobox — Quellen</b><button id="wclose">✕</button></div>
+  <div class="sub">Ordner wählen:</div>
+  <div id="tiles" class="tiles"></div>
  </div>
 </div>
 <script>
@@ -331,9 +482,10 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  const mbtn2=document.getElementById('mon');
  function setMon(){if(monitor===null){mbtn2.style.display='none';return;}mbtn2.style.display='';mbtn2.textContent=monitor?'■ Stop local playout':'● Start local playout';mbtn2.className='mon'+(monitor?' on':'');}
  mbtn2.onclick=()=>{if(monitor===null)return;monitor=!monitor;setMon();send({type:'monitor',value:monitor});};
- const filesBox=document.getElementById('files'),flist=document.getElementById('flist'),folderSel=document.getElementById('folder');
+ const filesBox=document.getElementById('files'),flist=document.getElementById('flist'),folderList=document.getElementById('folderList');
  const crumbs=document.getElementById('crumbs');
- let folder=0,subPath='',folderLabels=[];
+ let folder=0,subPath='',folderLabels=[],folders=[];
+ const tiles=document.getElementById('tiles'),welcome=document.getElementById('welcome');
  const stopBtn=document.getElementById('stop');
  // The Stop-file button only makes sense while a file is playing.
  function setStop(){stopBtn.style.display=playing?'':'none';}
@@ -344,7 +496,10 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   const b=e.target.closest('.mtbtn');if(!b)return;
   send({type:'channelMuted',value:{label:b.dataset.label,muted:!b.classList.contains('on')}});
  });
- folderSel.onchange=()=>{folder=Number(folderSel.value)||0;subPath='';menu.style.display='none';loadFiles();};
+ // Reflect the active folder in the flat picker (highlight the current row).
+ function markFolderActive(){[...folderList.children].forEach(b=>{b.classList.toggle('on',Number(b.dataset.i)===folder);});}
+ function selectFolder(i){folder=i;subPath='';menu.style.display='none';markFolderActive();
+  [...tiles.children].forEach(t=>t.classList.toggle('on',Number(t.dataset.i)===folder));loadFiles();}
  const npbox=document.getElementById('nowplaying');
  function markPlaying(){[...flist.children].forEach(li=>{if(li.classList.contains('dir'))return;li.className=(li.dataset.name===playing)?'playing':'';});
   if(playing){npbox.style.display='';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b>';}
@@ -355,16 +510,34 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   else if(pos!==null&&pos!==undefined&&isFinite(pos)){el.innerHTML='<span class="rem">'+mmss(pos)+'</span>';}
   else el.innerHTML='';}
  function loadFolders(){fetch('folders').then(r=>r.json()).then(d=>{
-  const fl=d.folders||[];
-  folderLabels=fl;
-  document.getElementById('fldwrap').style.display=fl.length>1?'':'none';
-  folderSel.innerHTML='';
-  fl.forEach((label,i)=>{const o=document.createElement('option');o.value=i;
-   o.textContent=label;folderSel.appendChild(o);});
+  // Entries are {label,icon}; tolerate bare strings from an older server.
+  const fl=(d.folders||[]).map(f=>typeof f==='string'?{label:f,icon:'📁'}:f);
+  folders=fl;
+  folderLabels=fl.map(f=>f.label);
+  folderList.innerHTML='';
+  // One button per configured dir, straight in the ⋮ menu — no nested select.
+  // With a single folder there's nothing to pick, so the list stays empty
+  // (and its divider collapses via :not(:empty)).
+  if(fl.length>1)fl.forEach((f,i)=>{const b=document.createElement('button');
+   b.className='fbtn';b.dataset.i=i;b.textContent=(f.icon||'📁')+' '+f.label;
+   b.onclick=()=>selectFolder(i);folderList.appendChild(b);});
   if(folder>=fl.length)folder=0;
-  folderSel.value=folder;
+  // Nothing to browse (file player off) -> nothing to pre-listen to either.
+  cueBtn.style.display=fl.length?'':'none';
+  markFolderActive();
+  renderTiles();
   loadFiles();
  }).catch(()=>{loadFiles();});}
+ // Welcome screen: the same sources as the ⋮ menu, as big one-click tiles.
+ function renderTiles(){
+  tiles.innerHTML='';
+  if(!folders.length){tiles.innerHTML='<div class="sub">keine Ordner konfiguriert</div>';return;}
+  folders.forEach((f,i)=>{const t=document.createElement('div');
+   t.className='tile'+(i===folder?' on':'');t.dataset.i=i;
+   t.innerHTML='<span class="ic">'+esc(f.icon||'📁')+'</span><span class="nm">'+esc(f.label)+'</span>';
+   t.onclick=()=>{welcome.style.display='none';selectFolder(i);};
+   tiles.appendChild(t);});
+ }
  // Server-clock skew (serverNow - clientNow): schedule marks compare against
  // the *server's* clock, which is what actually triggers auto-play.
  let clockSkew=0;
@@ -428,10 +601,14 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
    const at=typeof f==='object'&&f&&isFinite(f.playAtMs)?f.playAtMs:null;
    li.dataset.name=name;
    if(at!==null)li.dataset.playat=at;
-   const when=at!==null?'⏰ '+fmtWhen(at):'▶';
+   const when=at!==null?'⏰ '+fmtWhen(at):(cueing?'🎧':'▶');
    const rel=subPath?subPath+'/'+name:name;
    li.innerHTML='<span class="fname">'+esc(name)+'</span><span class="when">'+when+'</span>';
-   li.onclick=()=>send({type:'playFile',value:{folder:folder,name:rel}});flist.appendChild(li);});
+   // In Vorhören mode a click pre-listens in the browser and leaves the
+   // on-air playout completely untouched; otherwise it starts real playout.
+   li.onclick=()=>{if(cueing)cuePlay(folder,rel,name);
+    else send({type:'playFile',value:{folder:folder,name:rel}});};
+   flist.appendChild(li);});
   markSchedule();
   markPlaying();
  }).catch(()=>{});}
@@ -497,6 +674,39 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  document.getElementById('schedBtn').onclick=()=>{menu.style.display='none';openSched();};
  document.getElementById('mclose').onclick=()=>{modal.style.display='none';};
  modal.onclick=e=>{if(e.target===modal)modal.style.display='none';};
+ // Welcome screen from the logo: pick a source as a tile.
+ document.getElementById('logo').onclick=()=>{renderTiles();welcome.style.display='';};
+ document.getElementById('wclose').onclick=()=>{welcome.style.display='none';};
+ welcome.onclick=e=>{if(e.target===welcome)welcome.style.display='none';};
+ document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;
+  welcome.style.display='none';modal.style.display='none';menu.style.display='none';});
+ // ---- Vorhören (browser pre-listen) -------------------------------------
+ // The browser fetches the file itself from /preview and decodes it locally,
+ // so pre-listening costs the box no audio work and can never interrupt the
+ // USB/on-air playout. Extensions browsers can't decode are refused up front.
+ const CUE_OK=['.mp3','.m4a','.aac','.wav','.flac','.ogg','.oga','.opus'];
+ const cueBtn=document.getElementById('cue'),cuebar=document.getElementById('cuebar'),
+  cueAudio=document.getElementById('cueAudio'),cname=document.getElementById('cname'),
+  cueStop=document.getElementById('cueStop');
+ let cueing=false;
+ function setCue(){cueBtn.className='cue'+(cueing?' on':'');
+  cueBtn.textContent=cueing?'🎧 Vorhören AN':'🎧 Vorhören';
+  document.body.classList.toggle('cueing',cueing);
+  if(!cueing)cueStopPlay();
+  // The ▶/🎧 hint on every row depends on the mode.
+  loadFiles();}
+ function cueStopPlay(){cueAudio.pause();cueAudio.removeAttribute('src');cueAudio.load();
+  cuebar.style.display='none';cname.textContent='';}
+ function cuePlay(f,rel,name){
+  const dot=name.lastIndexOf('.'),ext=dot<0?'':name.slice(dot).toLowerCase();
+  if(CUE_OK.indexOf(ext)<0){cuebar.style.display='';
+   cname.textContent='⚠ '+name+' — dieses Format kann der Browser nicht abspielen';
+   cueAudio.removeAttribute('src');return;}
+  cuebar.style.display='';cname.textContent='🎧 '+name;
+  cueAudio.src='preview?folder='+f+'&name='+encodeURIComponent(rel);
+  cueAudio.play().catch(()=>{});}
+ cueBtn.onclick=()=>{cueing=!cueing;setCue();};
+ cueStop.onclick=()=>cueStopPlay();
  setBtn();
  setRec();
  setShip();

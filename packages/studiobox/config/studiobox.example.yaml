@@ -19,7 +19,7 @@ capture:
   # The MULTICHANNEL device, not the *.analog-stereo PulseAudio node.
   # Find it with:  arecord -l   (e.g. hw:CARD=FLOW8 / hw:1,0)
   # Make sure the card's profile exposes all inputs (PipeWire "Pro Audio").
-  device: "hw:CARD=FLOW8"
+  device: 'hw:CARD=FLOW8'
   sampleRate: 48000
   channels: 10 # total channels the device presents (Flow 8 = 8 inputs + main L/R)
   blockSize: 1024 # frames per DSP block (latency is not critical here)
@@ -66,12 +66,12 @@ output:
   harbor:
     enabled: true
     # ffmpeg icecast:// source URL. Use a mount configured for Ogg/FLAC.
-    url: "icecast://source:hackme@stream.radio-z.net:4444/studio-lossless"
+    url: 'icecast://source:hackme@stream.radio-z.net:4444/studio-lossless'
     format: ogg-flac # ogg-flac (lossless) | mp3 (fallback)
     contentType: application/ogg
   backup:
     enabled: true
-    dir: "./recordings" # rolling local FLAC safety copy
+    dir: './recordings' # rolling local FLAC safety copy
     segmentSeconds: 3600
   # Direct local hardware playout: send the finished program to a locally
   # plugged audio device (sound card / USB interface, e.g. a Focusrite
@@ -84,7 +84,7 @@ output:
     # ALSA: an output PCM. Find it with `aplay -l` (e.g. hw:CARD=USB for a
     # Scarlett). Prefer a plughw:/hw: device, not the *.analog-stereo node.
     # Pulse: a sink name (empty selects the default sink).
-    device: "hw:CARD=USB"
+    device: 'hw:CARD=USB'
 
 meters:
   enabled: true
@@ -104,10 +104,16 @@ filePlayer:
   # hasScheduled marks a dir (recursively) scanned for timestamped auto-play
   # files; leave it off for e.g. music libraries so stray filenames can never
   # preempt the program.
+  # Subfolders with no audio anywhere beneath them are hidden by default so the
+  # browser only shows useful folders; set `hideEmpty: false` on a dir to list
+  # every subfolder unconditionally (e.g. if the probe is too costly on a share).
+  # `icon` is the emoji shown for the folder in the ⋮ menu and on the welcome
+  # tiles (click the studiobox logo). Omit it and one is guessed from the label
+  # (jingles -> 🔔, musik/mp3 -> 🎵, wiederholung -> 🔁, archiv -> 📦, …).
   dirs:
-    - { path: "./music", label: Music }
-    - { path: "./jingles", label: Jingles }
-    - { path: "./repeat", label: Repeat, hasScheduled: true }
+    - { path: './music', label: Music }
+    - { path: './jingles', label: Jingles }
+    - { path: './repeat', label: Repeat, hasScheduled: true, icon: '🔁' }
     # A network share (SMB/CIFS) works too: mount it first, then point at the
     # mountpoint. Mount read-only via /etc/fstab so the OS owns it, e.g.:
     #   //192.168.0.148/Musikredaktion  /mnt/musikredaktion  cifs  \
@@ -119,9 +125,10 @@ filePlayer:
   label: FilePlayer # shown as a music row on the meters page
   ducked: true # pulled under live speech, like the music buses
   fadeOutMs: 800 # smooth fade to silence when the operator hits "Stop file" (0 = hard cut)
-  prebufferMs: 250 # jitter buffer filled before playout starts; raise on slow
-                   # hardware (e.g. a Raspberry Pi) if startup crackles, at the
-                   # cost of more delay before audio begins
+  prebufferMs:
+    250 # jitter buffer filled before playout starts; raise on slow
+    # hardware (e.g. a Raspberry Pi) if startup crackles, at the
+    # cost of more delay before audio begins
 
   # Scheduled auto-play by filename timestamp (port of the liquidsoap
   # play_by_filename repeat scheduling): a file named *YYYYMMDD-HHMMSS* in any
@@ -132,6 +139,7 @@ filePlayer:
     enabled: false
     scanSeconds: 10 # folder rescan interval
     graceSeconds: 30 # how late (after its timestamp) a file may still auto-start
+
 
   # Optional music-style processing overrides (defaults match music channels):
   # processing:

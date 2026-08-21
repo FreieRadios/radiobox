@@ -150,6 +150,16 @@ export interface FilePlayerDir {
    *  auto-play files. Off by default: a music library full of arbitrary
    *  filenames should never be able to preempt the program. */
   hasScheduled: boolean;
+  /** Hide subfolders that contain no audio anywhere beneath them (bounded
+   *  probe), so the browser only shows folders with useful contents. On by
+   *  default; set `false` to list every subfolder unconditionally (e.g. on a
+   *  pathological network share where the probe is too costly). */
+  hideEmpty?: boolean;
+  /** Emoji shown for this folder in the ⋮ menu and on the welcome tiles.
+   *  The loader always fills this in (guessed from the label/path when the
+   *  config omits it — see `guessDirIcon`); optional so callers constructing a
+   *  dir directly, e.g. tests, don't have to. */
+  icon?: string;
 }
 
 /** Scheduled auto-play by filename timestamp. Files named `*YYYYMMDD-HHMMSS*`

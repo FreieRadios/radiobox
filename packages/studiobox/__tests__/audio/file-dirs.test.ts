@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { FileDirs } from '../../src/audio/file-dirs';
+import { FileDirs, PRUNE_CONCURRENCY } from '../../src/audio/file-dirs';
 import { Log } from '../../src/util/log';
 
 const silentLog: Log = { info: () => {}, warn: () => {}, error: () => {} };
@@ -86,5 +86,101 @@ describe('FileDirs', () => {
       path.join(root, 'Musik', 'Sub', 'b-20260723-094200.flac')
     );
     expect(dirs.resolve(0, '../outside.flac')).toBeNull();
+  });
+
+  it('list() matches entries() when every subfolder holds audio', async () => {
+    // Musik has audio directly, so it is kept — same rows as entries().
+    expect(await dirs.list(0)).toEqual(dirs.entries(0));
+  });
+});
+
+describe('FileDirs.list empty-folder pruning', () => {
+  /** root/
+   *    keep.mp3                 (direct audio)
+   *    Empty/                   (no audio anywhere -> hidden)
+   *      docs/report.txt
+   *    DeepMusic/               (audio buried a few levels down -> kept)
+   *      a/b/track.flac
+   *    TooDeep/                 (audio below PRUNE_DEPTH=4 -> hidden)
+   *      l1/l2/l3/l4/l5/deep.mp3
+   */
+  let root: string;
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'sbprune-'));
+    fs.writeFileSync(path.join(root, 'keep.mp3'), '');
+    fs.mkdirSync(path.join(root, 'Empty', 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'Empty', 'docs', 'report.txt'), '');
+    fs.mkdirSync(path.join(root, 'DeepMusic', 'a', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'DeepMusic', 'a', 'b', 'track.flac'), '');
+    fs.mkdirSync(path.join(root, 'TooDeep', 'l1', 'l2', 'l3', 'l4', 'l5'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'TooDeep', 'l1', 'l2', 'l3', 'l4', 'l5', 'deep.mp3'), '');
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('hides folders with no audio within the depth cap; keeps the rest', async () => {
+    const pruned = new FileDirs([{ path: root, label: 'M', hasScheduled: false }], silentLog);
+    const rows = await pruned.list(0);
+    expect(rows).toEqual([
+      { name: 'DeepMusic', playAtMs: null, dir: true },
+      { name: 'keep.mp3', playAtMs: null },
+    ]);
+  });
+
+  it('lists every subfolder unconditionally when hideEmpty is false', async () => {
+    const unpruned = new FileDirs(
+      [{ path: root, label: 'M', hasScheduled: false, hideEmpty: false }],
+      silentLog
+    );
+    const names = (await unpruned.list(0)).filter((r) => r.dir).map((r) => r.name);
+    expect(names.sort()).toEqual(['DeepMusic', 'Empty', 'TooDeep']);
+  });
+});
+
+describe('FileDirs.list probe is bounded', () => {
+  // A wide, audio-free tree: 8 folders x 6 subfolders forces the probe to walk
+  // ~57 dirs, enough to overrun the concurrency cap if it were unbounded.
+  let root: string;
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcap-'));
+    for (let a = 0; a < 8; a++)
+      for (let b = 0; b < 6; b++)
+        fs.mkdirSync(path.join(root, 'd' + a, 's' + b), { recursive: true });
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('never runs more than PRUNE_CONCURRENCY readdirs at once', async () => {
+    const real = fs.promises.readdir;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    // Delay each readdir so probes genuinely overlap, then measure the peak.
+    const spy = jest.spyOn(fs.promises, 'readdir').mockImplementation(((...args: unknown[]) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          (real as (...a: unknown[]) => Promise<unknown>)(...args).then(
+            (v) => {
+              inFlight--;
+              resolve(v);
+            },
+            (e) => {
+              inFlight--;
+              reject(e);
+            }
+          );
+        }, 8);
+      });
+    }) as unknown as typeof fs.promises.readdir);
+    try {
+      const d = new FileDirs([{ path: root, label: 'M', hasScheduled: false }], silentLog);
+      const rows = await d.list(0);
+      // No audio anywhere -> every subfolder is pruned away.
+      expect(rows).toEqual([]);
+      // Parallel (peak > 1) but never above the cap.
+      expect(maxInFlight).toBeGreaterThan(1);
+      expect(maxInFlight).toBeLessThanOrEqual(PRUNE_CONCURRENCY);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

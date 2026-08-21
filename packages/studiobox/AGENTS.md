@@ -91,12 +91,36 @@ share mounted read-only via `/etc/fstab` and pointed at by its mountpoint,
 see `studiobox.example.yaml`; the selected folder's files decode to
 48 kHz stereo and route into the music path; folders are browsable
 recursively — subdirectory rows descend, a breadcrumb shows/changes the
-current position, and `playFile`/schedule names are folder-relative paths like
-`Musik/x.flac`; the top-right ⋮ menu holds the folder select, the
+current position; the listing is served async (non-blocking readdir, so a
+slow network mount can't stall metering) by `FileDirs.list` and, unless a dir
+sets `hideEmpty: false`, subfolders with no audio anywhere within a bounded
+depth are hidden (short-circuit probe, per-dir TTL-cached, with bounded readdir
+concurrency + a wall-clock budget that fails open — a wide tree on a slow mount
+throttles instead of flooding) so only folders with useful contents show — on
+a tiny box browsing a big SMB library the probe is best turned off per-dir with
+`hideEmpty: false` (see the studiobox Pi config);
+`playFile`/schedule names are folder-relative paths like
+`Musik/x.flac`; the top-right ⋮ menu holds the flat folder list, the
 local-playout toggle (live mode only) and a "Scheduled files" modal listing
 every future timestamped file, served by HTTP `/scheduled`; only dirs marked
 `hasScheduled: true` are scanned for auto-play timestamps, so e.g. a music
-library can never preempt the program),
+library can never preempt the program; each dir carries an `icon` emoji —
+configurable, else guessed from the label by `guessDirIcon` in `config/load.ts` —
+shown in the ⋮ menu and on the welcome screen, an overlay of the configured
+sources as clickable tiles opened by clicking the studiobox logo; `/folders`
+therefore serves `{label, icon}` objects, not bare strings),
+and **"Vorhören"** — browser pre-listening (header toggle, meters page). While
+on, clicking a file streams it to the _browser_ from HTTP `/preview` instead of
+sending `playFile`, so the operator can audition without touching the on-air
+playout. It is deliberately **not** a transcode: `/preview` is a plain
+byte-range server (`Accept-Ranges`, 206/416, HEAD) handing over the file's own
+bytes, so the browser decodes it and the box spends ~no CPU — measured on the
+Pi 3, an mp3 transcode costs ~40% of a core at 1x realtime, which is not worth
+spending next to the air chain. Only formats browsers decode natively are
+offered (`PREVIEW_TYPES`/`isPreviewable` in `meters/server.ts`: mp3, m4a, aac,
+wav, flac, ogg, oga, opus); `.aiff`/`.wma` are refused in the UI rather than
+transcoded. Paths resolve through the same traversal-safe `FileDirs.resolve`
+as real playout,
 and a start/stop recording control on the meters page (the rolling FLAC backup
 runs in its own ffmpeg `Recorder` process so it can be toggled live without
 disrupting the harbor stream; recording does **not** start automatically — the
@@ -111,7 +135,7 @@ plugged audio device — sound card / USB interface — via `output.monitor`; th
 independently of the harbor encoder and FLAC backup, starts automatically when
 `output.monitor.enabled`, and is toggled live with the `monitor` WebSocket
 command / meters-page button — except in playout-only mode, where the monitor
-*is* the program output and the toggle is removed),
+_is_ the program output and the toggle is removed),
 and scheduled auto-play by filename timestamp (`filePlayer.autoPlay`; a
 TypeScript port of the liquidsoap `play_by_filename.liq` semantics in
 `src/schedule.ts` — files named `*YYYYMMDD-HHMMSS*` in the file-player folders
@@ -150,24 +174,24 @@ land. Each item names a likely entry point and how to know it's done.
       `__tests__/audio/file-player.test.ts`.
 - [ ] **True-peak (oversampled) limiting.** The limiter is currently sample-peak
       only — see the note at `src/dsp/limiter.ts:55`. Add oversampled inter-sample
-      peak detection so true peaks stay under the ceiling. *Done when:* a unit
+      peak detection so true peaks stay under the ceiling. _Done when:_ a unit
       test feeding signals with known inter-sample overshoot confirms the
       true-peak output never exceeds the ceiling; existing limiter tests stay
       green.
 - [ ] **Fuller music loudness normalization.** Build on the existing music
       auto-leveling toward proper BS.1770-targeted normalization of music pairs
-      (entry: `src/dsp/leveler.ts`, `src/dsp/loudness.ts`). *Done when:* music
+      (entry: `src/dsp/leveler.ts`, `src/dsp/loudness.ts`). _Done when:_ music
       sources converge to the configured target LUFS with tests covering the
       gain trajectory.
 - [ ] **Per-mic spectral noise suppression.** New DSP block in `src/dsp/`, wired
       into the per-mic strip in `src/dsp/channel-strip.ts` / `src/dsp/graph.ts`,
-      config-gated per channel via `config/profiles.yaml`. *Done when:* a
+      config-gated per channel via `config/profiles.yaml`. _Done when:_ a
       dedicated `__tests__/dsp/` suite passes and it can be toggled off without
       affecting the chain.
 - [ ] **Phase 2 — extract shared ffmpeg/harbor helpers into `packages/core`.**
       The capture/encoder/harbor glue (`src/audio/*`) is duplicated in spirit
       with the classic radiobox recorder; factor the common parts into a new
-      workspace both packages depend on. *Done when:* studiobox builds and tests
+      workspace both packages depend on. _Done when:_ studiobox builds and tests
       pass against the extracted package with no behavioural change.
 
 When tackling any of these, follow the DSP gotchas above (NaN/denormal guards,
