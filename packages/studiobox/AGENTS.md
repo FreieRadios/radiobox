@@ -86,7 +86,9 @@ Implemented: capture, full per-mic DSP chain, gain-sharing automix, ducking,
 master leveler + look-ahead limiter, BS.1770 loudness metering, Ogg/FLAC harbor
 streaming + rolling FLAC backup, web meters, music auto-leveling, a music-only
 mute control, a local audio file player on the meters page (browsing the
-configured `filePlayer.dirs`; the selected folder's files decode to
+configured `filePlayer.dirs` — any local path, including an SMB/CIFS network
+share mounted read-only via `/etc/fstab` and pointed at by its mountpoint,
+see `studiobox.example.yaml`; the selected folder's files decode to
 48 kHz stereo and route into the music path; folders are browsable
 recursively — subdirectory rows descend, a breadcrumb shows/changes the
 current position, and `playFile`/schedule names are folder-relative paths like

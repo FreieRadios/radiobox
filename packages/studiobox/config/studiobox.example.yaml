@@ -108,6 +108,14 @@ filePlayer:
     - { path: "./music", label: Music }
     - { path: "./jingles", label: Jingles }
     - { path: "./repeat", label: Repeat, hasScheduled: true }
+    # A network share (SMB/CIFS) works too: mount it first, then point at the
+    # mountpoint. Mount read-only via /etc/fstab so the OS owns it, e.g.:
+    #   //192.168.0.148/Musikredaktion  /mnt/musikredaktion  cifs  \
+    #     credentials=/etc/cifs/share.cred,ro,uid=1000,gid=1000,iocharset=utf8,\
+    #     nofail,x-systemd.automount,x-systemd.idle-timeout=120,_netdev  0  0
+    # Keep the login in that root-only 600 credentials file, never here. Leave
+    # hasScheduled off for a big library so stray filenames can't preempt air.
+    # - { path: "/mnt/musikredaktion", label: Musikredaktion }
   label: FilePlayer # shown as a music row on the meters page
   ducked: true # pulled under live speech, like the music buses
   fadeOutMs: 800 # smooth fade to silence when the operator hits "Stop file" (0 = hard cut)
