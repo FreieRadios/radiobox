@@ -25,6 +25,10 @@ export interface MeterSnapshot {
   micsMuted: boolean;
   /** Name of the file currently playing via the local file player, if any. */
   filePlaying: string | null;
+  /** Where that file lives in the browsable folders, so the page can offer a
+   *  jump back to it after browsing elsewhere. Null when nothing is playing
+   *  or the file sits outside the configured dirs. */
+  filePlayingAt: { folder: number; name: string } | null;
   /** Elapsed playback position of the current file, in seconds (null when idle). */
   filePosition: number | null;
   /** Total duration of the current file, in seconds (null when idle/unknown). */
@@ -94,6 +98,7 @@ export class Graph {
   private fileL: Float32Array;
   private fileR: Float32Array;
   private filePlaying: string | null = null;
+  private filePlayingAt: { folder: number; name: string } | null = null;
   private filePosition: number | null = null;
   private fileDuration: number | null = null;
 
@@ -214,6 +219,7 @@ export class Graph {
       outPeakDb: -Infinity,
       micsMuted: false,
       filePlaying: null,
+      filePlayingAt: null,
       filePosition: null,
       fileDuration: null,
       recording: null,
@@ -354,6 +360,7 @@ export class Graph {
       outPeakDb: gainToDb(this.outPeak.value),
       micsMuted: this.micsMuted,
       filePlaying: this.filePlaying,
+      filePlayingAt: this.filePlayingAt,
       filePosition: this.filePosition,
       fileDuration: this.fileDuration,
       recording: this.recording,
@@ -411,11 +418,13 @@ export class Graph {
     r: Float32Array,
     playing: string | null,
     position: number | null = null,
-    duration: number | null = null
+    duration: number | null = null,
+    at: { folder: number; name: string } | null = null
   ): void {
     this.fileL.set(l);
     this.fileR.set(r);
     this.filePlaying = playing;
+    this.filePlayingAt = playing ? at : null;
     this.filePosition = playing ? position : null;
     this.fileDuration = playing ? duration : null;
   }

@@ -88,6 +88,17 @@ describe('FileDirs', () => {
     expect(dirs.resolve(0, '../outside.flac')).toBeNull();
   });
 
+  it('locate() reverses resolve(), so the UI can jump to a playing file', () => {
+    const abs = path.join(root, 'Musik', 'Sub', 'b-20260723-094200.flac');
+    expect(dirs.locate(abs)).toEqual({ folder: 0, name: 'Musik/Sub/b-20260723-094200.flac' });
+    expect(dirs.locate(path.join(root, 'plain.flac'))).toEqual({ folder: 0, name: 'plain.flac' });
+    // Repeated calls (the snapshot asks many times a second) stay correct.
+    expect(dirs.locate(abs)).toEqual({ folder: 0, name: 'Musik/Sub/b-20260723-094200.flac' });
+    // Outside every configured folder, and the folder root itself: no location.
+    expect(dirs.locate(path.join(os.tmpdir(), 'elsewhere.flac'))).toBeNull();
+    expect(dirs.locate(root)).toBeNull();
+  });
+
   it('list() matches entries() when every subfolder holds audio', async () => {
     // Musik has audio directly, so it is kept — same rows as entries().
     expect(await dirs.list(0)).toEqual(dirs.entries(0));

@@ -3,6 +3,7 @@ import { StudioboxConfig } from './config/schema';
 import { Monitor } from './audio/monitor';
 import { FilePlayer } from './audio/file-player';
 import { FileDirs } from './audio/file-dirs';
+import { QueuePlayer } from './audio/play-queue';
 import { interleaveStereo } from './audio/format';
 import { MeterSnapshot } from './dsp/graph';
 import { MeterServer } from './meters/server';
@@ -32,6 +33,7 @@ export class PlayoutPipeline {
   private monitor: Monitor;
   private filePlayer: FilePlayer;
   private fileDirs: FileDirs;
+  private playQueue: QueuePlayer;
   private meters: MeterServer | null;
   private scheduler: Scheduler | null;
   private outL: Float32Array;
@@ -52,7 +54,16 @@ export class PlayoutPipeline {
     this.fileDirs = new FileDirs(cfg.filePlayer.dirs, log);
     this.monitor = new Monitor(cfg.output.monitor, cfg.capture, makeLog('monitor'));
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
+    // Pending play list: chains the next file when one ends by itself. Never
+    // starts audio on its own (see QueuePlayer).
+    this.playQueue = new QueuePlayer({
+      player: this.filePlayer,
+      resolve: (folder, name) => this.fileDirs.resolve(folder, name),
+      onChange: () => this.meters?.broadcastQueue(this.playQueue.list()),
+      log,
+    });
     this.meters?.onCommand((cmd) => this.onCommand(cmd.type, cmd.value));
+    this.meters?.onListQueue(() => this.playQueue.list());
     this.meters?.onListFolders(() => this.fileDirs.folders());
     this.meters?.onListFiles((folder, sub) => this.fileDirs.list(folder, sub));
     this.meters?.onListScheduled(() => this.scheduler?.upcoming() ?? []);
@@ -94,7 +105,11 @@ export class PlayoutPipeline {
     } else if (type === 'stopFile') {
       const fadeMs = this.cfg.filePlayer?.fadeOutMs ?? 0;
       log.info(`stopping file playback${fadeMs > 0 ? ` (fade ${fadeMs}ms)` : ''}`);
-      this.filePlayer.fadeOut(fadeMs);
+      // Through the queue player: an operator stop must not roll into the
+      // next pending item (the list itself is kept).
+      this.playQueue.stop(fadeMs);
+    } else if (this.playQueue.handleCommand(type, value)) {
+      // queue* command, handled there.
     }
     // recording / streaming / mute / monitor commands don't exist in playout
     // mode; the UI hides those controls (their snapshot state is null /
@@ -115,6 +130,7 @@ export class PlayoutPipeline {
       outPeakDb: -Infinity,
       micsMuted: false,
       filePlaying: playing ? path.basename(playing) : null,
+      filePlayingAt: playing ? this.fileDirs.locate(playing) : null,
       filePosition: playing ? this.filePlayer.position : null,
       fileDuration: playing ? this.filePlayer.duration : null,
       recording: null,

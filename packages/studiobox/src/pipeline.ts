@@ -6,6 +6,7 @@ import { Recorder } from './audio/recorder';
 import { Monitor } from './audio/monitor';
 import { FilePlayer } from './audio/file-player';
 import { FileDirs } from './audio/file-dirs';
+import { QueuePlayer } from './audio/play-queue';
 import { interleaveStereo } from './audio/format';
 import { Graph } from './dsp/graph';
 import { MeterServer } from './meters/server';
@@ -28,6 +29,7 @@ export class Pipeline {
   private meters: MeterServer | null;
   private filePlayer: FilePlayer | null;
   private fileDirs: FileDirs | null;
+  private playQueue: QueuePlayer | null;
   private scheduler: Scheduler | null;
   private outL: Float32Array;
   private outR: Float32Array;
@@ -60,7 +62,18 @@ export class Pipeline {
       : null;
     this.fileDirs = cfg.filePlayer?.enabled ? new FileDirs(cfg.filePlayer.dirs, log) : null;
     this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
+    // Pending play list: chains the next file when one ends by itself. Never
+    // starts audio on its own (see QueuePlayer).
+    this.playQueue = this.filePlayer
+      ? new QueuePlayer({
+          player: this.filePlayer,
+          resolve: (folder, name) => this.resolveFile(folder, name),
+          onChange: () => this.meters?.broadcastQueue(this.playQueue!.list()),
+          log,
+        })
+      : null;
     this.meters?.onCommand((cmd) => this.onCommand(cmd.type, cmd.value));
+    this.meters?.onListQueue(() => this.playQueue?.list() ?? []);
     this.meters?.onListFolders(() => this.fileDirs?.folders() ?? []);
     this.meters?.onListFiles((folder, sub) => this.fileDirs?.list(folder, sub) ?? []);
     this.meters?.onListScheduled(() => this.scheduler?.upcoming() ?? []);
@@ -129,10 +142,14 @@ export class Pipeline {
       }
       log.info(`playing file: ${path.basename(resolved)}`);
       this.filePlayer.play(resolved);
-    } else if (type === 'stopFile' && this.filePlayer) {
+    } else if (type === 'stopFile' && this.playQueue) {
       const fadeMs = this.cfg.filePlayer?.fadeOutMs ?? 0;
       log.info(`stopping file playback${fadeMs > 0 ? ` (fade ${fadeMs}ms)` : ''}`);
-      this.filePlayer.fadeOut(fadeMs);
+      // Through the queue player: an operator stop must not roll into the
+      // next pending item (the list itself is kept).
+      this.playQueue.stop(fadeMs);
+    } else if (this.playQueue?.handleCommand(type, value)) {
+      // queue* command, handled there.
     }
   }
 
@@ -216,7 +233,10 @@ export class Pipeline {
           this.fileR,
           playingName,
           this.filePlayer.position,
-          this.filePlayer.duration
+          this.filePlayer.duration,
+          // Where it came from (memoized in FileDirs): the page uses it for
+          // "jump back to the folder this is playing from".
+          this.filePlayer.playing ? (this.fileDirs?.locate(this.filePlayer.playing) ?? null) : null
         );
       }
       this.graph.process(input, this.outL, this.outR, frames);

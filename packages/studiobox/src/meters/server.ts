@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { MeterSnapshot } from '../dsp/graph';
 import { FileEntry, FolderEntry } from '../audio/file-dirs';
+import { QueueItem } from '../audio/play-queue';
 import { ScheduleEntry } from '../schedule';
 import { Log } from '../util/log';
 
@@ -42,6 +43,15 @@ export function isPreviewable(name: string): boolean {
  *   - { type: 'monitor', value: boolean }    start/stop local hardware playout
  *   - { type: 'playFile', value: { folder, name } } play a file from a folder
  *   - { type: 'stopFile' }                    stop local file playback
+ *   - { type: 'queueAdd', value: { folder, name } | { items: [...] } } enqueue
+ *   - { type: 'queueRemove', value: { id } }   drop one pending item
+ *   - { type: 'queueMove', value: { id, delta } } reorder one pending item
+ *   - { type: 'queueClear' }                  drop the whole pending list
+ *   - { type: 'queuePlay', value: { id } }     jump to a pending item now
+ *   - { type: 'queueStart' }                  start the head of the queue
+ *  The pending play list is pushed to every client as { type: 'queue', items }
+ *  whenever it changes (and once per new connection), rather than riding along
+ *  in the meter frames — it changes rarely and the frames are hot.
  *  The configured folders are served over HTTP at `/folders`, the listing of
  *  one folder (or a subdirectory inside it) at `/files?folder=N&path=REL`
  *  (subdirectory rows carry `dir:true`; file rows the parsed auto-play
@@ -61,6 +71,7 @@ export class MeterServer {
   private onFolders: (() => FolderEntry[]) | null = null;
   private onScheduled: (() => ScheduleEntry[]) | null = null;
   private onResolve: ((folder: number, name: string) => string | null) | null = null;
+  private onQueue: (() => QueueItem[]) | null = null;
 
   constructor(
     private port: number,
@@ -102,6 +113,9 @@ export class MeterServer {
     });
     this.wss = new WebSocketServer({ server: this.server });
     this.wss.on('connection', (ws) => {
+      // A fresh page knows nothing about the pending list until it changes,
+      // so hand it over on connect.
+      if (this.onQueue) ws.send(JSON.stringify({ type: 'queue', items: this.onQueue() }));
       ws.on('message', (raw) => {
         try {
           this.onCmd?.(JSON.parse(raw.toString()) as MeterCommand);
@@ -130,6 +144,19 @@ export class MeterServer {
   /** Register the provider for the `/scheduled` upcoming-files listing. */
   onListScheduled(fn: () => ScheduleEntry[]): void {
     this.onScheduled = fn;
+  }
+
+  /** Register the provider for the pending play list (sent on connect). */
+  onListQueue(fn: () => QueueItem[]): void {
+    this.onQueue = fn;
+  }
+
+  /** Push the pending play list to every connected page. */
+  broadcastQueue(items: QueueItem[]): void {
+    const msg = JSON.stringify({ type: 'queue', items });
+    for (const client of this.wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
   }
 
   /** Register the traversal-safe folder+name -> absolute path resolver that
@@ -262,16 +289,26 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  button.ship.on{background:#2a7;color:#fff;border-color:#2a7}
  button.mon{background:#234;color:#cdf;border-color:#46a}
  button.mon.on{background:#37a;color:#fff;border-color:#37a}
- .files{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-top:10px;max-width:760px}
+ /* Right-hand column: the browser (file list) above, the pending play list
+    below — they belong together and share the space next to the metering. */
+ .col2{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;max-width:760px}
+ .files{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-top:10px}
  #flist{list-style:none;margin:0;padding:0;flex:1 1 auto;overflow-y:auto;border-top:1px solid #222}
  .files li{padding:9px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
  .files li:hover{background:#1a1a1a}
  .files li.playing{background:#2a1830;color:#fbe}
  .files .none{color:#666}
- .files li .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .files li .when{color:#667;white-space:nowrap}
+ .files li .fname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .files li .when{flex:0 0 auto;color:#667;white-space:nowrap}
  .files li.dir{color:#8df}
  .files li.dir .when{color:#556}
+ .fbar{flex:0 0 auto;display:flex;align-items:center;gap:8px}
+ .fbar #crumbs{flex:1 1 auto;min-width:0}
+ /* "＋ alle" appends exactly the files listed below it — never the tree — so
+    it carries the count and is hidden when there is nothing to add. */
+ .fbar #addall{flex:0 0 auto;width:auto;margin:0;padding:3px 9px;font:12px monospace;
+  background:transparent;color:#7a8a7a;border:1px solid #3a4a3a;border-radius:4px;cursor:pointer}
+ .fbar #addall:hover{color:#cfc;border-color:#4a6a4a;background:#1d261d}
  #crumbs{flex:0 0 auto;padding:7px 8px;color:#8df;white-space:nowrap;overflow-x:auto}
  #crumbs .seg{cursor:pointer}
  #crumbs .seg:hover{text-decoration:underline}
@@ -282,8 +319,42 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .files li.sched.playing{background:#2a1830}
  .files li.next .when{font-weight:bold}
  .files li.next{border-left:3px solid #ffd24a;padding-left:5px}
+ /* The row currently being pre-listened to (Vorhören). Amber like the rest of
+    the cue chrome. It has to win over .playing/.sched/.next and their
+    combinations, hence last in the file and with the class doubled to outweigh
+    the two-class .sched.playing rule above. */
+ .files li.cued.cued{background:#4a3a16;color:#ffe2ab;border-left:3px solid #e6a52e;padding-left:5px}
+ .files li.cued .when{color:#ffd24a}
  #next{color:#ffd24a;overflow-wrap:anywhere}
  #next .dim{color:#997}
+ /* Pending play list. Same panel for both modes: on air it mirrors the box's
+    server-side queue, in Vorhören it is the browser's own audition list. */
+ .queue{flex:0 1 auto;min-height:0;display:flex;flex-direction:column;max-height:38vh;
+  margin-top:10px;border-top:1px solid #333}
+ .qhead{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:8px 4px}
+ .qhead .qt{flex:1 1 auto;min-width:0;color:#7cf;cursor:pointer;user-select:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .qhead .qt:hover{color:#adf}
+ .qhead button{flex:0 0 auto;width:auto;padding:4px 9px;font-size:12px}
+ #qlist{list-style:none;margin:0;padding:0;flex:1 1 auto;overflow-y:auto}
+ #qlist li{display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid #222}
+ #qlist li:hover{background:#1a1a1a}
+ #qlist .qn{flex:0 0 auto;width:2.5ch;text-align:right;color:#667}
+ #qlist .fname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+ #qlist .fname:hover{color:#fff}
+ #qlist .fld{color:#667}
+ #qlist .qb{flex:0 0 auto;display:flex;gap:4px}
+ #qlist .qb button{width:28px;padding:3px 0;font-size:12px;text-align:center}
+ #qlist .none{color:#666;padding:9px 8px;display:block}
+ /* Row actions stay quiet: the ⏰/🎧/▶ hint is what the eye should catch, the
+    ＋ is only an affordance. Fixed width so rows line up and the button never
+    resizes with its glyph. */
+ .files li .addbtn{flex:0 0 auto;width:26px;margin:0;padding:2px 0;font:13px monospace;text-align:center;
+  background:transparent;color:#6a7f6a;border:1px solid transparent;border-radius:4px;cursor:pointer}
+ .files li:hover .addbtn{color:#9c9}
+ .files li .addbtn:hover{color:#cfc;border-color:#4a6a4a;background:#1d261d}
+ body.cueing .queue{border-top-color:#6a5320}
+ body.cueing .qhead .qt{color:#e6c878}
  .nowplaying{color:#fbe;font-size:15px}
  .nowplaying b{color:#7cf}
  .bar-panel{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 18px;
@@ -321,6 +392,18 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  body.cueing .files{outline:1px solid #6a5320;outline-offset:6px;border-radius:4px}
  /* Preview player: only present while pre-listening. */
  .cuebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+ /* "Jump to where this is playing from" buttons (now-playing line, cue bar,
+    queue rows). Declared after .bar-panel button so the footer's fixed button
+    width doesn't apply to them. */
+ button.jump{flex:0 0 auto;width:30px;margin:0 0 0 8px;padding:2px 0;font:13px monospace;text-align:center;
+  background:transparent;color:#6d8496;border:1px solid #33475a;border-radius:4px;cursor:pointer;
+  vertical-align:middle}
+ button.jump:hover{color:#cfe;border-color:#7cf;background:#1b2733}
+ /* "Reinhören" belongs to the pre-listen family, so it wears its amber. */
+ button.jump.tune{color:#a98a4a;border-color:#4d3f1e}
+ button.jump.tune:hover{color:#ffd24a;border-color:#8a6d2f;background:#2a2211}
+ /* Row the jump landed on: flashes until the next listing refresh. */
+ .files li.focus{outline:2px solid #7cf;outline-offset:-2px}
  .cuebar .cname{color:#e6c878;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 160px}
  .cuebar audio{height:34px;max-width:100%;flex:1 1 240px}
  /* Welcome screen: the configured sources as big clickable tiles. */
@@ -333,6 +416,20 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  .tile .ic{font-size:30px;line-height:1}
  .tile .nm{overflow-wrap:anywhere}
  .mbox .sub{padding:0 14px 4px;color:#8a93a0}
+ /* Help modal: a short German manual, so a new operator can work the page
+    without being shown around. Sections that only exist in mixer mode are
+    hidden on a playout-only box (body.playout, set from the snapshot). */
+ #helpBtn{width:44px;padding:8px 0;font-size:17px;font-weight:bold}
+ .help{padding:2px 16px 16px;overflow-y:auto;line-height:1.5;color:#cbd2d9}
+ .help h4{margin:15px 0 5px;color:#8df;font-size:14px}
+ .help h4:first-child{margin-top:8px}
+ .help p{margin:5px 0}
+ .help ul{margin:5px 0;padding-left:17px}
+ .help li{margin:3px 0}
+ .help b{color:#eef}
+ .help .k{color:#e6c878;white-space:nowrap}
+ .help .note{color:#8a93a0}
+ body.playout .liveonly{display:none}
  /* Scheduled-files modal (opened from the ⋮ menu). */
  .modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px}
  .mbox{background:#191919;border:1px solid #444;border-radius:8px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 6px 24px rgba(0,0,0,.7)}
@@ -353,7 +450,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  @media (orientation:landscape) and (min-width:700px){
   .content{flex-direction:row;gap:22px}
   .metering{flex:1 1 0;min-width:0;max-width:none}
-  .files{flex:1 1 0;min-width:0;max-width:none;margin-top:0}
+  .col2{flex:1 1 0;min-width:0;max-width:none}
+  .files{margin-top:0}
  }
  /* Small portrait (phones): tighter chrome, full-width controls, and let the
     meter table scroll sideways instead of crushing its columns. */
@@ -361,7 +459,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   .content{padding:8px 10px}
   .bar-panel{padding:8px 10px;gap:8px}
   .bar-panel button{flex:1 1 auto;width:auto;min-width:0}
-  #menuBtn{flex:0 0 auto;width:44px}
+  #menuBtn,#helpBtn{flex:0 0 auto;width:44px}
   .menu button{flex:none;width:100%}
   .metering{overflow-x:auto}
   table{min-width:540px}
@@ -369,6 +467,19 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   .master .lbl{margin:0 4px 0 8px}
   .footer .ctl{flex-wrap:wrap}
   #ftime{flex:1 1 100%}
+  /* The footer's full-width button rule must not stretch the icon buttons. */
+  .bar-panel button.jump{flex:0 0 auto;width:30px}
+  /* Leave the file browser more of a small screen, and keep the queue row
+     controls thumb-sized without eating the filename. */
+  .queue{max-height:32vh}
+  .qhead{padding:6px 2px}
+  .qhead button{padding:4px 7px}
+  #qlist li{gap:6px;padding:8px 4px}
+  #qlist .qb{gap:3px}
+  #qlist .qb button{width:26px;padding:6px 0}
+  .fbar #addall{padding:3px 7px}
+  /* Finger-sized tap target for the row ＋ (no hover to help on touch). */
+  .files li .addbtn{width:34px;padding:6px 0}
  }
 </style></head><body>
 <div class="topbar bar-panel">
@@ -377,6 +488,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   <button id="cue" class="cue" title="Vorhören: Dateien im Browser abhören, ohne die Ausspielung zu stören">🎧 Vorhören</button>
   <button id="rec" class="rec" style="display:none">● Start recording</button>
   <button id="ship" class="ship" style="display:none">● Start streaming</button>
+  <button id="helpBtn" title="Hilfe / Kurzanleitung">?</button>
   <div class="menuwrap">
    <button id="menuBtn" title="more">⋮</button>
    <div id="menu" class="menu" style="display:none">
@@ -400,14 +512,26 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <span class="lbl">Duck</span><span class="v" id="duck">–</span>
 </div>
 </div>
+<div class="col2">
 <div class="files" id="files" style="display:none">
- <div id="crumbs"></div>
+ <div class="fbar"><div id="crumbs"></div><button id="addall" title="alle Dateien dieser Liste anhängen">＋ alle</button></div>
  <ul id="flist"></ul>
+</div>
+<div class="queue" id="queuebox" style="display:none">
+ <div class="qhead">
+  <span class="qt" id="qtitle" title="ein-/ausklappen">▶ Warteschlange</span>
+  <button id="qplay" title="nächsten Titel jetzt starten">▶ Start</button>
+  <button id="qsend" title="diese Liste an die Ausspielung übergeben" style="display:none">→ Playout</button>
+  <button id="qclear" title="Liste leeren">✕</button>
+ </div>
+ <ul id="qlist"></ul>
+</div>
 </div>
 </div>
 <div class="footer bar-panel">
  <div class="cuebar" id="cuebar" style="display:none">
   <span class="cname" id="cname"></span>
+  <button class="jump" id="cuejump" title="Ordner dieses Titels öffnen" style="display:none">📂</button>
   <audio id="cueAudio" controls preload="none"></audio>
   <button id="cueStop">■ Vorhören stoppen</button>
  </div>
@@ -424,6 +548,113 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  <div class="mbox">
   <div class="mhead"><b>⏰ Scheduled files</b><button id="mclose">✕</button></div>
   <ul id="mlist"></ul>
+ </div>
+</div>
+<div id="help" class="modal" style="display:none">
+ <div class="mbox">
+  <div class="mhead"><b>❓ studiobox — Kurzanleitung</b><button id="hclose">✕</button></div>
+  <div class="help">
+   <h4>Was ist studiobox?</h4>
+   <p>studiobox ist der Ausspielrechner des Senders. <b>Diese Seite ist nur die
+   Fernbedienung dazu</b> — abgespielt, aufgenommen und gestreamt wird auf dem
+   Gerät. Die Seite kann jederzeit geschlossen oder neu geladen werden, ohne die
+   Sendung zu unterbrechen. Mehrere Geräte (Tablet, Laptop) dürfen gleichzeitig
+   offen sein und zeigen denselben Stand.</p>
+   <p class="note">Einzige Ausnahme: <span class="k">Vorhören</span> und
+   <span class="k">Reinhören</span> laufen im Browser, also auf dem Kopfhörer
+   des Geräts, an dem du gerade sitzt.</p>
+
+   <h4>Dateien und Ordner</h4>
+   <ul>
+    <li>Ordner wechseln: <span class="k">⋮</span> oben rechts, oder auf das
+    studiobox-Logo klicken (Kachelübersicht der Quellen).</li>
+    <li>Zeilen mit <span class="k">📁</span> sind Unterordner — Klick öffnet
+    sie, die Pfadzeile darüber führt wieder zurück.</li>
+    <li><b>Klick auf eine Datei startet sie sofort</b> — im Normalbetrieb also
+    on air. Läuft schon etwas, wird es ersetzt.</li>
+   </ul>
+
+   <h4>Warteschlange</h4>
+   <ul>
+    <li><span class="k">＋</span> hängt eine Datei an,
+    <span class="k">＋ alle (n)</span> alle Dateien der angezeigten Liste
+    (nur diese Liste, keine Unterordner).</li>
+    <li><b>Anhängen startet nie von selbst.</b> Die Liste beginnt erst mit
+    <span class="k">▶ Start</span> — oder automatisch, sobald der gerade
+    laufende Titel zu Ende ist.</li>
+    <li><span class="k">↑ ↓</span> sortieren, <span class="k">✕</span> entfernt,
+    <span class="k">📂</span> springt zum Ordner des Titels.</li>
+    <li>Klick auf den Namen spielt ihn sofort — die Titel darüber fallen dabei
+    aus der Liste.</li>
+    <li><span class="k">■ Stop file</span> beendet die Wiedergabe, ohne
+    weiterzuschalten; die Liste bleibt erhalten.</li>
+    <li class="note">Die Liste lebt nur im Arbeitsspeicher: nach einem Neustart
+    des Geräts ist sie leer. Für garantierte Sendungen die Zeitsteuerung
+    benutzen (siehe unten).</li>
+   </ul>
+
+   <h4>Vorhören und Reinhören</h4>
+   <ul>
+    <li><span class="k">🎧 Vorhören</span> einschalten: ein Klick auf eine Datei
+    spielt sie dann <b>nur im Browser</b> ab. Die Ausspielung bleibt völlig
+    unberührt. Die Seite bekommt dazu einen gelben Rahmen.</li>
+    <li>Ist die Vorhören-Liste leer, läuft der Ordner einfach weiter — Titel für
+    Titel. Mit <span class="k">＋</span> gebaute Listen haben Vorrang.</li>
+    <li><span class="k">→ Playout</span> übergibt die vorgehörte Liste an die
+    Ausspielung.</li>
+    <li><span class="k">👂</span> neben dem laufenden Titel ist
+    <b>Reinhören</b>: du hörst die laufende Ausspielung an genau der Stelle mit,
+    an der sie gerade ist. Ein gerade vorgehörter Titel rutscht dabei oben in
+    die Vorhören-Liste und kommt danach zurück.</li>
+    <li class="note">Formate, die Browser nicht abspielen (.wma, .aiff), werden
+    zum Vorhören nicht angeboten — auf dem Gerät laufen sie trotzdem.</li>
+   </ul>
+
+   <h4>Zeitgesteuerte Sendungen</h4>
+   <ul>
+    <li>Dateien mit einem Zeitstempel im Namen
+    (<span class="k">JJJJMMTT-HHMMSS</span>, z. B.
+    <span class="k">magazin-20260722-130000.flac</span>) starten automatisch zu
+    dieser Zeit und haben Vorrang vor allem, was gerade läuft.</li>
+    <li>Solche Dateien sind gelb markiert; der nächste Start steht in der
+    Fußzeile, alle kommenden unter
+    <span class="k">⋮ → Scheduled files</span>.</li>
+    <li>Danach läuft die Warteschlange normal weiter.</li>
+    <li class="note">Alle Zeiten sind die Uhrzeit des Geräts — sie steht mit
+    Zeitzone unten links.</li>
+   </ul>
+
+   <div class="liveonly">
+    <h4>Aufnahme, Stream, Ausspielung</h4>
+    <ul>
+     <li><span class="k">● Start recording</span> schreibt eine lokale
+     Sicherheitsaufnahme (FLAC). Sie läuft <b>nicht</b> automatisch.</li>
+     <li><span class="k">● Start streaming</span> schickt das fertige Programm
+     an den Server (Icecast/Harbor).</li>
+     <li><span class="k">⋮ → Start local playout</span> gibt das Programm
+     zusätzlich auf der angeschlossenen Soundkarte aus.</li>
+    </ul>
+
+    <h4>Pegel</h4>
+    <ul>
+     <li>Pro Kanal: Aussteuerung, <b>gate</b> (offen/zu),
+     <b>comp GR</b> (Kompressor-Absenkung), <b>automix</b> (automatische
+     Mikrofonmischung) und <span class="k">mute</span>.</li>
+     <li>Unten: <b>M</b>/<b>S</b> Lautheit (LUFS), <b>Pk</b> Spitzenpegel,
+     <b>Lim</b> Limiter, <b>Duck</b> Absenkung der Musik unter Sprache.</li>
+     <li><span class="k">● Mics open</span> / <span class="k">▶ Music only</span>
+     schaltet alle Mikrofone stumm bzw. wieder auf.</li>
+    </ul>
+   </div>
+
+   <h4>Wenn etwas nicht stimmt</h4>
+   <ul>
+    <li>Zeigt die Seite nichts mehr an, verbindet sie sich von selbst neu —
+    einfach kurz warten oder neu laden. Die Sendung läuft dabei weiter.</li>
+    <li>Netzwerkordner können langsam sein: eine Liste kann einen Moment
+    brauchen, das stört die Ausspielung aber nicht.</li>
+   </ul>
+  </div>
  </div>
 </div>
 <div id="welcome" class="modal" style="display:none">
@@ -466,6 +697,12 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
    r.mbtn.textContent=c.muted?'unmute':'mute';});
  }
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
+ // Where the playing file lives ({folder,name}), so the page can jump back to
+ // it — the server reports it because only the box knows how playback started.
+ let playingAt=null, playingAtKey='';
+ // Its playback position (seconds) and when that frame arrived, so Reinhören
+ // can seek to where the box is *now*, not where it was one frame ago.
+ let playPos=null, playPosAt=0;
  const mbtn=document.getElementById('mute');
  function setBtn(){
   if(muted){mbtn.textContent='▶ Music only';mbtn.className='muted';mbtn.title='Mics muted — click to open mics';}
@@ -501,8 +738,20 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  function selectFolder(i){folder=i;subPath='';menu.style.display='none';markFolderActive();
   [...tiles.children].forEach(t=>t.classList.toggle('on',Number(t.dataset.i)===folder));loadFiles();}
  const npbox=document.getElementById('nowplaying');
- function markPlaying(){[...flist.children].forEach(li=>{if(li.classList.contains('dir'))return;li.className=(li.dataset.name===playing)?'playing':'';});
-  if(playing){npbox.style.display='';npbox.innerHTML='♪ now playing: <b>'+playing.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</b>';}
+ function markPlaying(){[...flist.children].forEach(li=>{if(li.classList.contains('dir'))return;
+  li.classList.toggle('playing',li.dataset.name===playing);});
+  // The box moved on to another file: what is being listened in to is not the
+  // on-air file any more, so stop calling it that.
+  if(cueLive&&(!playingAt||playingAt.folder!==cueFolder||playingAt.name!==cueRel)){
+   cueLive=false;cueLabel();}
+  if(playing){npbox.style.display='';
+   // Reinhören needs a location to fetch from and a format the browser plays.
+   const canTune=!!playingAt&&cuePlayable(playing);
+   npbox.innerHTML='♪ now playing: <b>'+esc(playing)+'</b>'+
+    (playingAt?'<button class="jump" title="Ordner des laufenden Titels öffnen">📂</button>':'')+
+    (canTune?'<button class="jump tune" title="Reinhören: die laufende Ausspielung an der aktuellen Stelle im Browser mithören">👂</button>':'');
+   if(playingAt)npbox.querySelector('.jump').onclick=()=>gotoFile(playingAt.folder,playingAt.name);
+   if(canTune)npbox.querySelector('.tune').onclick=tuneIn;}
   else{npbox.style.display='none';}
   setStop();}
  function updateFileTime(pos,dur){const el=document.getElementById('ftime');if(!el)return;
@@ -524,6 +773,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   if(folder>=fl.length)folder=0;
   // Nothing to browse (file player off) -> nothing to pre-listen to either.
   cueBtn.style.display=fl.length?'':'none';
+  renderQueue();
   markFolderActive();
   renderTiles();
   loadFiles();
@@ -580,13 +830,20 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   const i=Number(s.dataset.i);
   subPath=i<0?'':subPath.split('/').slice(0,i+1).join('/');
   loadFiles();};
- function loadFiles(){fetch('files?folder='+folder+'&path='+encodeURIComponent(subPath)).then(r=>r.json()).then(d=>{
+ // The optional focus argument (a bare filename) marks the row a jump landed
+ // on, so the file you came looking for is visible instead of somewhere down a
+ // long listing.
+ function loadFiles(focus){fetch('files?folder='+folder+'&path='+encodeURIComponent(subPath)).then(r=>r.json()).then(d=>{
   const fs=d.files||[];
   if(typeof d.now==='number')clockSkew=d.now-Date.now();
   filesBox.style.display='';
   renderCrumbs();
+  addall.style.display='none';
   flist.innerHTML='';
-  if(!fs.length){flist.innerHTML='<li class="none">no audio files in this folder</li>';return;}
+  if(!fs.length){flist.innerHTML='<li class="none">no audio files in this folder</li>';cueSync([]);return;}
+  // Files this browser could pre-listen to, in listing order — the queue
+  // Vorhören auto-advances through.
+  const cueable=[];
   fs.forEach(f=>{
    // Backward compatible: entries are {name,playAtMs} objects (or bare strings).
    const name=typeof f==='string'?f:f.name;
@@ -599,19 +856,46 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
     flist.appendChild(li);return;
    }
    const at=typeof f==='object'&&f&&isFinite(f.playAtMs)?f.playAtMs:null;
+   const rel=subPath?subPath+'/'+name:name;
    li.dataset.name=name;
+   li.dataset.rel=rel;
    if(at!==null)li.dataset.playat=at;
    const when=at!==null?'⏰ '+fmtWhen(at):(cueing?'🎧':'▶');
-   const rel=subPath?subPath+'/'+name:name;
-   li.innerHTML='<span class="fname">'+esc(name)+'</span><span class="when">'+when+'</span>';
+   const idx=cuePlayable(name)?cueable.push({rel:rel,name:name})-1:-1;
+   // A ＋ per row appends to the pending list of whichever mode is active;
+   // in Vorhören a file the browser can't decode gets no ＋ at all.
+   const canAdd=!cueing||idx>=0;
+   li.innerHTML='<span class="fname">'+esc(name)+'</span><span class="when">'+when+'</span>'+
+    (canAdd?'<button class="addbtn" title="an die Warteschlange anhängen">＋</button>':'');
+   if(canAdd)li.querySelector('.addbtn').onclick=e=>{e.stopPropagation();enqueue(folder,rel);};
    // In Vorhören mode a click pre-listens in the browser and leaves the
    // on-air playout completely untouched; otherwise it starts real playout.
-   li.onclick=()=>{if(cueing)cuePlay(folder,rel,name);
+   li.onclick=()=>{if(cueing)cueStart(folder,subPath,cueable,idx,name);
     else send({type:'playFile',value:{folder:folder,name:rel}});};
    flist.appendChild(li);});
+  // "＋ alle" appends what is listed here — subdirectory rows are not files,
+  // so a folder holding only subfolders (or, in Vorhören, only formats the
+  // browser can't decode) offers no button at all.
+  const addable=cueing?cueable.length:flist.children.length-fs.filter(f=>f&&f.dir).length;
+  if(addable>0){addall.style.display='';addall.textContent='＋ alle ('+addable+')';}
+  cueSync(cueable);
   markSchedule();
   markPlaying();
+  markCue();
+  if(focus){const li=[...flist.children].find(l=>l.dataset.name===focus);
+   if(li){li.classList.add('focus');if(li.scrollIntoView)li.scrollIntoView({block:'center'});}}
  }).catch(()=>{});}
+ // Jump to where a file lives (the file on air, the one being pre-listened to,
+ // or a queue row) and flash its row: after browsing around, finding the way
+ // back to it is otherwise a hunt through the tree.
+ function gotoFile(f,rel){
+  if(f===null||f===undefined||!rel)return;
+  const p=String(rel).split('/');const base=p.pop();
+  folder=Number(f);subPath=p.join('/');
+  markFolderActive();
+  [...tiles.children].forEach(t=>t.classList.toggle('on',Number(t.dataset.i)===folder));
+  welcome.style.display='none';menu.style.display='none';
+  loadFiles(base);}
  // Keep the listing and its future/past marks fresh (new synced files appear,
  // elapsed timestamps lose their highlight).
  setInterval(loadFiles,30000);
@@ -630,17 +914,27 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  function connect(){
   ws=new WebSocket('ws://'+location.host);
   ws.onmessage=e=>{const s=JSON.parse(e.data);
+   // The pending play list is pushed separately (on change / on connect).
+   if(s.type==='queue'){qItems=s.items||[];renderQueue();return;}
    if(typeof s.serverNowMs==='number')clockSkew=s.serverNowMs-Date.now();
    // Playout-only mode: no channels -> hide the whole metering/mute surface.
    const playoutOnly=!s.channels||!s.channels.length;
+   // The help text only describes controls this box actually has.
+   document.body.classList.toggle('playout',playoutOnly);
    document.getElementById('metering').style.display=playoutOnly?'none':'';
    mbtn.style.display=playoutOnly?'none':'';
    if(typeof s.micsMuted==='boolean'&&s.micsMuted!==muted){muted=s.micsMuted;setBtn();}
    if(s.recording!==recording){recording=s.recording;setRec();}
    if(s.streaming!==streaming){streaming=s.streaming;setShip();}
    if(s.monitor!==monitor){monitor=s.monitor;setMon();}
-   if(s.filePlaying!==playing){playing=s.filePlaying;markPlaying();}
+   // Two files in different folders can share a basename, so the location is
+   // part of what makes the now-playing line stale, not just the name.
+   const atKey=s.filePlayingAt?s.filePlayingAt.folder+':'+s.filePlayingAt.name:'';
+   if(s.filePlaying!==playing||atKey!==playingAtKey){
+    playing=s.filePlaying;playingAt=s.filePlayingAt||null;playingAtKey=atKey;markPlaying();}
    setNext(s.nextScheduled||null);
+   playPos=typeof s.filePosition==='number'&&isFinite(s.filePosition)?s.filePosition:null;
+   playPosAt=Date.now();
    updateFileTime(s.filePosition,s.fileDuration);
    if(!playoutOnly){
     updateRows(s.channels);
@@ -671,6 +965,11 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
     li.innerHTML='<span class="fname">'+fl+esc(e.name)+'</span><span class="when">'+fmtWhen(e.playAtMs)+'</span>';
     mlist.appendChild(li);});
   }).catch(()=>{mlist.innerHTML='<li class="none">could not load the schedule</li>';});}
+ // Help modal (header "?"): a short German manual for new operators.
+ const help=document.getElementById('help');
+ document.getElementById('helpBtn').onclick=e=>{e.stopPropagation();menu.style.display='none';help.style.display='';};
+ document.getElementById('hclose').onclick=()=>{help.style.display='none';};
+ help.onclick=e=>{if(e.target===help)help.style.display='none';};
  document.getElementById('schedBtn').onclick=()=>{menu.style.display='none';openSched();};
  document.getElementById('mclose').onclick=()=>{modal.style.display='none';};
  modal.onclick=e=>{if(e.target===modal)modal.style.display='none';};
@@ -679,7 +978,83 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  document.getElementById('wclose').onclick=()=>{welcome.style.display='none';};
  welcome.onclick=e=>{if(e.target===welcome)welcome.style.display='none';};
  document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;
-  welcome.style.display='none';modal.style.display='none';menu.style.display='none';});
+  welcome.style.display='none';modal.style.display='none';menu.style.display='none';
+  help.style.display='none';});
+ // ---- Warteschlange / pending play list ----------------------------------
+ // One panel, two lists: on air it mirrors the *server's* queue (the box is
+ // the player, so the list lives there and every open page sees the same one,
+ // pushed over the WebSocket); in Vorhören it is this browser's own audition
+ // list (the <audio> element is the player, so it can only live here).
+ // Enqueuing never starts audio by itself — like the recorder, playout is
+ // armed by the operator (▶ Start), and a running file chains on when it ends.
+ const queuebox=document.getElementById('queuebox'),qlist=document.getElementById('qlist'),
+  qtitle=document.getElementById('qtitle'),qplayBtn=document.getElementById('qplay'),
+  qsend=document.getElementById('qsend'),qclear=document.getElementById('qclear'),
+  addall=document.getElementById('addall');
+ let qItems=[],cueList=[],cueSeq=0,qOpen=true;
+ const curQueue=()=>cueing?cueList:qItems;
+ // "Musik / Sub / track.flac" with everything but the filename dimmed.
+ function qName(it){const p=String(it.name).split('/');const base=p.pop();
+  const fld=(!cueing&&folderLabels.length>1)?esc(folderLabels[it.folder]||'')+' / ':'';
+  const dir=p.length?esc(p.join(' / '))+' / ':'';
+  return (fld||dir?'<span class="fld">'+fld+dir+'</span>':'')+esc(base);}
+ function renderQueue(){
+  const items=curQueue();
+  // An empty queue has nothing to show and nothing to start — the panel only
+  // exists once something is in it (the ＋ buttons bring it back).
+  queuebox.style.display=folders.length&&items.length?'':'none';
+  qtitle.textContent=(cueing?'🎧 Vorhören-Queue':'▶ Warteschlange')+' ('+items.length+')'+(qOpen?'':' ▸');
+  qsend.style.display=cueing?'':'none';
+  qlist.style.display=qOpen?'':'none';
+  qlist.innerHTML='';
+  if(!items.length)return;
+  items.forEach((it,i)=>{const li=document.createElement('li');
+   li.innerHTML='<span class="qn">'+(i+1)+'</span>'+
+    '<span class="fname" title="jetzt abspielen (übersprungene Titel fallen raus)">'+qName(it)+'</span>'+
+    '<span class="qb"><button data-a="go" title="Ordner dieses Titels öffnen">📂</button>'+
+    '<button data-a="up" title="nach oben">↑</button>'+
+    '<button data-a="dn" title="nach unten">↓</button>'+
+    '<button data-a="rm" title="entfernen">✕</button></span>';
+   li.querySelector('.fname').onclick=()=>qJump(it);
+   [...li.querySelectorAll('.qb button')].forEach(b=>{b.onclick=e=>{e.stopPropagation();qAct(b.dataset.a,it);};});
+   qlist.appendChild(li);});
+ }
+ // Append one file to the active queue. On air the server owns the list, so we
+ // only send the command and re-render when it echoes back.
+ function enqueue(f,rel){
+  if(cueing){cueList.push({id:++cueSeq,folder:f,name:rel});renderQueue();cueLabel();}
+  else send({type:'queueAdd',value:{folder:f,name:rel}});}
+ // Jumping means the entries above it are dropped, not silently played later.
+ function qJump(it){
+  if(!cueing){send({type:'queuePlay',value:{id:it.id}});return;}
+  const i=cueList.findIndex(e=>e.id===it.id);
+  if(i<0)return;
+  cueList.splice(0,i+1);cuePlayItem(it);renderQueue();}
+ function qAct(a,it){
+  if(a==='go'){gotoFile(it.folder,it.name);return;}
+  if(!cueing){send(a==='rm'?{type:'queueRemove',value:{id:it.id}}
+   :{type:'queueMove',value:{id:it.id,delta:a==='up'?-1:1}});return;}
+  const i=cueList.findIndex(e=>e.id===it.id);
+  if(i<0)return;
+  if(a==='rm')cueList.splice(i,1);
+  else{const to=Math.max(0,Math.min(cueList.length-1,i+(a==='up'?-1:1)));
+   if(to!==i)cueList.splice(to,0,cueList.splice(i,1)[0]);}
+  renderQueue();cueLabel();}
+ qtitle.onclick=()=>{qOpen=!qOpen;renderQueue();};
+ qplayBtn.onclick=()=>{if(!cueing){send({type:'queueStart'});return;}
+  if(cueList.length){cuePlayItem(cueList.shift());renderQueue();}};
+ qclear.onclick=()=>{if(cueing){cueList=[];renderQueue();cueLabel();}else send({type:'queueClear'});};
+ // Hand the audition list over to the box in one message. The cue list is kept
+ // (it is the operator's working set), the on-air list simply grows by it.
+ qsend.onclick=()=>{if(!cueList.length)return;
+  send({type:'queueAdd',value:{items:cueList.map(i=>({folder:i.folder,name:i.name}))}});
+  qsend.textContent='✓ übernommen';setTimeout(()=>{qsend.textContent='→ Playout';},1500);};
+ // "＋ alle": every file of the listing on screen, in one go (in Vorhören only
+ // the ones this browser can actually decode).
+ addall.onclick=()=>{const rows=[...flist.children].filter(li=>li.dataset.rel&&(!cueing||cuePlayable(li.dataset.name)));
+  if(!rows.length)return;
+  if(cueing){rows.forEach(li=>cueList.push({id:++cueSeq,folder:folder,name:li.dataset.rel}));renderQueue();cueLabel();}
+  else send({type:'queueAdd',value:{items:rows.map(li=>({folder:folder,name:li.dataset.rel}))}});};
  // ---- Vorhören (browser pre-listen) -------------------------------------
  // The browser fetches the file itself from /preview and decodes it locally,
  // so pre-listening costs the box no audio work and can never interrupt the
@@ -687,24 +1062,106 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  const CUE_OK=['.mp3','.m4a','.aac','.wav','.flac','.ogg','.oga','.opus'];
  const cueBtn=document.getElementById('cue'),cuebar=document.getElementById('cuebar'),
   cueAudio=document.getElementById('cueAudio'),cname=document.getElementById('cname'),
-  cueStop=document.getElementById('cueStop');
+  cueStop=document.getElementById('cueStop'),cuejump=document.getElementById('cuejump');
+ cuejump.onclick=()=>gotoFile(cueFolder,cueRel);
  let cueing=false;
+ // Two things drive pre-listen auto-advance, in this order:
+ //  1. cueList — the *explicit* Vorhören queue the operator built with ＋.
+ //  2. cueRoll — a snapshot of the listing a click started in, pinned to the
+ //     folder/subpath it came from, so simply clicking a file auditions that
+ //     folder straight through. Browsing elsewhere meanwhile changes nothing;
+ //     the highlight only shows while that same folder is on screen.
+ let cueRoll=[],cueRollIdx=-1,cueFolder=-1,cueSub='',cueRel=null,cueName='';
+ // Reinhören state: seconds to seek to once the browser knows the duration,
+ // and whether what is being pre-listened to is the on-air file itself.
+ let cueSeek=0,cueLive=false;
+ const cuePlayable=n=>{const dot=n.lastIndexOf('.');return CUE_OK.indexOf(dot<0?'':n.slice(dot).toLowerCase())>=0;};
  function setCue(){cueBtn.className='cue'+(cueing?' on':'');
   cueBtn.textContent=cueing?'🎧 Vorhören AN':'🎧 Vorhören';
   document.body.classList.toggle('cueing',cueing);
   if(!cueing)cueStopPlay();
+  // The panel shows the queue of whichever mode is active.
+  renderQueue();
   // The ▶/🎧 hint on every row depends on the mode.
   loadFiles();}
- function cueStopPlay(){cueAudio.pause();cueAudio.removeAttribute('src');cueAudio.load();
-  cuebar.style.display='none';cname.textContent='';}
- function cuePlay(f,rel,name){
-  const dot=name.lastIndexOf('.'),ext=dot<0?'':name.slice(dot).toLowerCase();
-  if(CUE_OK.indexOf(ext)<0){cuebar.style.display='';
+ // Highlight the row being pre-listened to — only when the listing on screen is
+ // the one the queue belongs to.
+ function markCue(){const here=cueing&&cueRel!==null&&cueFolder===folder&&cueSub===subPath;
+  [...flist.children].forEach(li=>li.classList.toggle('cued',here&&li.dataset.rel===cueRel));}
+ // A refresh (30 s poll, or navigating back) of the queue's *own* folder adopts
+ // the fresh listing so newly synced files join the queue; the position follows
+ // the file that is playing. Listings of any other folder are ignored.
+ function cueSync(list){
+  if(cueRel===null||cueFolder!==folder||cueSub!==subPath)return;
+  const i=list.findIndex(e=>e.rel===cueRel);
+  if(i<0)return; // the current file vanished — keep the old roll rather than jump
+  cueRoll=list;cueRollIdx=i;cueLabel();}
+ // "🎧 <file> (n/total) · N in der Queue" for the footer.
+ function cueLabel(){if(!cueName)return;
+  const roll=cueRollIdx>=0&&cueRoll.length>1?' ('+(cueRollIdx+1)+'/'+cueRoll.length+')':'';
+  const q=cueList.length?' · '+cueList.length+' in der Queue':'';
+  cname.textContent=(cueLive?'👂 on air: ':'🎧 ')+cueName+roll+q;}
+ function cueStopPlay(){cueRoll=[];cueRollIdx=-1;cueFolder=-1;cueSub='';cueRel=null;cueName='';
+  cueSeek=0;cueLive=false;
+  cueAudio.pause();cueAudio.removeAttribute('src');cueAudio.load();
+  cuebar.style.display='none';cuejump.style.display='none';cname.textContent='';markCue();}
+ function cueStart(f,sub,roll,idx,name){
+  if(idx<0){ // not a format the browser decodes — say so instead of burning CPU
+   cueStopPlay();cuebar.style.display='';
    cname.textContent='⚠ '+name+' — dieses Format kann der Browser nicht abspielen';
-   cueAudio.removeAttribute('src');return;}
-  cuebar.style.display='';cname.textContent='🎧 '+name;
+   return;}
+  cueFolder=f;cueSub=sub;cueRoll=roll;cueRollIdx=idx;cuePlayCurrent();}
+ function cuePlayCurrent(){const e=cueRoll[cueRollIdx];
+  if(!e){cueStopPlay();return;}
+  cueName=e.name;cuePlay(cueFolder,e.rel);}
+ // Play one entry of the *explicit* queue. It may live in another folder, so
+ // it takes over: the folder roll is dropped and auto-advance continues down
+ // the queue (and stops when it runs out).
+ function cuePlayItem(it,seek){const p=String(it.name).split('/');
+  cueRoll=[];cueRollIdx=-1;cueFolder=it.folder;cueSub=p.slice(0,-1).join('/');
+  cueName=p[p.length-1];cuePlay(it.folder,it.name,seek);}
+ function cuePlay(f,rel,seek){cueRel=rel;cueSeek=seek>0?seek:0;cueLive=false;
+  cuebar.style.display='';cuejump.style.display='';
+  cueLabel();
   cueAudio.src='preview?folder='+f+'&name='+encodeURIComponent(rel);
-  cueAudio.play().catch(()=>{});}
+  cueAudio.play().catch(()=>{});
+  markCue();renderQueue();}
+ // Auto-advance when a preview finishes (or the browser chokes on a file):
+ // the explicit queue wins, otherwise walk on through the folder roll; running
+ // out of both stops. The cueRel guard makes this a no-op once nothing is
+ // cued, so the 'error' the <audio> may emit while being torn down can't
+ // bounce back in here.
+ function cueNext(){
+  if(cueRel===null)return;
+  if(cueList.length){cuePlayItem(cueList.shift());renderQueue();return;}
+  if(cueRollIdx>=0&&cueRollIdx+1<cueRoll.length){cueRollIdx++;cuePlayCurrent();return;}
+  cueStopPlay();}
+ cueAudio.addEventListener('ended',cueNext);
+ cueAudio.addEventListener('error',cueNext);
+ // Seeking is only possible once the browser has the file's duration; /preview
+ // serves byte ranges, so this is a real seek, not a re-download.
+ cueAudio.addEventListener('loadedmetadata',()=>{
+  if(cueSeek<=0)return;
+  const dur=cueAudio.duration;
+  const t=isFinite(dur)&&dur>0?Math.min(cueSeek,dur-0.25):cueSeek;
+  cueSeek=0;
+  try{cueAudio.currentTime=Math.max(0,t);}catch(e){/* not seekable: play from the top */}});
+ // "Reinhören": listen in to what is on air, at the position the box is at.
+ // Whatever was being auditioned is parked at the head of the Vorhören queue
+ // so it comes back when the on-air file's preview runs out.
+ function tuneIn(){
+  if(!playingAt)return;
+  const p=String(playingAt.name).split('/');const base=p[p.length-1];
+  if(!cuePlayable(base)){cuebar.style.display='';cueName='';
+   cname.textContent='⚠ '+base+' — dieses Format kann der Browser nicht abspielen';return;}
+  if(cueRel!==null&&cueName)cueList.unshift({id:++cueSeq,folder:cueFolder,name:cueRel});
+  if(!cueing){cueing=true;setCue();}
+  // The frame is up to one meter tick old; add its age so the seek lands on
+  // what is on air now rather than a moment ago.
+  const at=playPos===null?0:playPos+(Date.now()-playPosAt)/1000;
+  cuePlayItem({folder:playingAt.folder,name:playingAt.name},at);
+  cueLive=true;cueLabel();
+  renderQueue();}
  cueBtn.onclick=()=>{cueing=!cueing;setCue();};
  cueStop.onclick=()=>cueStopPlay();
  setBtn();

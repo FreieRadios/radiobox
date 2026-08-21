@@ -120,7 +120,75 @@ spending next to the air chain. Only formats browsers decode natively are
 offered (`PREVIEW_TYPES`/`isPreviewable` in `meters/server.ts`: mp3, m4a, aac,
 wav, flac, ogg, oga, opus); `.aiff`/`.wma` are refused in the UI rather than
 transcoded. Paths resolve through the same traversal-safe `FileDirs.resolve`
-as real playout,
+as real playout. The pre-listened row is highlighted in the listing (amber
+`.cued`, distinct from the on-air `.playing` mark), and when a preview ends the
+page auto-advances to the next previewable file. The queue is a _snapshot_ of
+the listing Vorhören was started in, pinned to its folder/subpath, so browsing
+elsewhere meanwhile neither redirects nor stops the auto-advance; only a
+refresh of that same folder adopts the fresh listing (keeping the position on
+the file that is playing), and the highlight shows only while that folder is on
+screen,
+and a **Warteschlange** — a pending play list for both modes, in one panel under
+the file browser. On air it lives on the **server** (`src/audio/play-queue.ts`:
+`PlayQueue` is the pure ordered list, `QueuePlayer` the glue to `FilePlayer`,
+wired identically in `pipeline.ts` and `playout.ts`), because the box is the
+player: every open page sees the same list, pushed as a `{type:'queue',items}`
+WebSocket message on change and on connect (deliberately _not_ inside the hot
+meter frames). The server list is authoritative — the page only sends commands
+(`queueAdd`, one file or a batch, `queueRemove`, `queueMove`, `queueClear`,
+`queuePlay` = jump, `queueStart`) and renders what comes back. Items carry a
+stable server-assigned `id`, so a command from a slightly stale page can never
+hit the wrong row (indices would); the list is capped at `MAX_QUEUE` (500) so
+"＋ alle" on a big SMB folder stays bounded; and it is **in-memory only** — a
+restart comes up empty, the filename-timestamp schedule remains the guarantee
+for program playout. The semantics are on-air safety calls, not defaults:
+enqueuing **never** starts audio (the operator arms playout with ▶ Start, the
+same way the recorder is armed), auto-advance chains only from playback that
+ended by itself, an operator ■ Stop ends playback without rolling into the next
+item (the list itself survives), a scheduled auto-play preempts as before and
+the queue continues once it ends, and files that vanished from the share are
+skipped instead of stalling the list. The panel is only on screen while the active list holds something (an empty
+queue has nothing to start), and "＋ alle" appends exactly the files of the
+listing on screen — it carries their count and is absent for a folder that only
+holds subfolders, so it can never read as "add the whole tree".
+In Vorhören the same panel holds the
+_browser's_ own audition list (the `<audio>` element is the player, so it can
+only live there); it takes priority over the folder-roll auto-advance above, and
+`→ Playout` hands the whole audition list to the box in one `queueAdd` batch.
+**Reinhören** (👂 next to the now-playing name) is the counterpart to Vorhören:
+it opens the file that is _on air_ in the browser and seeks to where the box
+currently is — the snapshot's `filePosition` plus the age of that frame, so the
+seek lands on now, not on the last meter tick. It switches Vorhören on by
+itself, and whatever was being auditioned is unshifted onto the head of the cue
+queue so it comes back when the on-air preview runs out. It is offered only for
+a locatable file in a browser-decodable format, costs the box nothing beyond a
+second read of the file (`/preview` byte ranges), and never touches playout.
+Seeking is only as accurate as the browser's own byte-offset estimate for the
+container (exact for wav/flac/CBR mp3, approximate for header-less VBR mp3).
+
+A **German help modal** sits behind the header "?" (`#help`): a short manual —
+what the page is (a remote control; closing it doesn't stop the show), folders,
+the queue's arm-then-play rule, Vorhören/Reinhören, filename-timestamp
+scheduling, and the recorder/stream/monitor and metering sections, which are
+marked `.liveonly` and hidden via `body.playout` (set from `channels: []`) so a
+playout-only box never describes controls it doesn't have. Keep it in sync when
+operator-facing behaviour changes — it is the only user documentation the
+operators see.
+
+Everything that names a file also offers a **jump to where it plays from** —
+the now-playing line, the Vorhören bar and every queue row carry a 📂 that
+switches the browser to that file's folder/subfolder and flashes its row
+(`gotoFile` + the optional focus argument of `loadFiles`). For the on-air file
+only the box knows how playback started (click, queue, or schedule), so the
+snapshot carries `filePlayingAt: {folder,name}` alongside `filePlaying`, filled
+from `FileDirs.locate()` — the reverse of `resolve()`, single-entry memoized
+because the snapshot asks per frame; it returns null for files outside the
+configured dirs and the page then shows no jump.
+Covered by `__tests__/audio/play-queue.test.ts` and
+`__tests__/meters/page-queue.test.ts` — the latter boots the meters page's own
+script against a small DOM stub (no browser stack, no new dependency) and drives
+both queues black-box; it is the place to add regression tests for page logic,
+and it re-reads `server.ts`, so a change to the page script can fail it,
 and a start/stop recording control on the meters page (the rolling FLAC backup
 runs in its own ffmpeg `Recorder` process so it can be toggled live without
 disrupting the harbor stream; recording does **not** start automatically — the

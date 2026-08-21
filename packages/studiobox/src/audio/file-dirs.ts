@@ -21,6 +21,14 @@ export interface FileEntry {
   dir?: boolean;
 }
 
+/** Where a file lives in the browsable folders: which configured dir, and the
+ *  folder-relative path inside it (`Musik/x.flac`) — the same form `playFile`,
+ *  the queue and the schedule use. */
+export interface FileLocation {
+  folder: number;
+  name: string;
+}
+
 /** Recursion guard for scheduled(): deeper trees are ignored, not an error. */
 const MAX_WALK_DEPTH = 8;
 
@@ -89,6 +97,10 @@ export class FileDirs {
   folders(): FolderEntry[] {
     return this.dirs.map((d) => ({ label: d.label, icon: d.icon || '📁' }));
   }
+
+  /** Memo for `locate()` (input path -> location), see there. */
+  private locateKey: string | null = null;
+  private locateHit: FileLocation | null = null;
 
   /** Absolute path of the folder at `index`, or null. */
   private root(index: number): string | null {
@@ -256,6 +268,27 @@ export class FileDirs {
       if (e.dir) this.walkScheduled(folder, rel, depth + 1, out);
       else if (e.playAtMs !== null) out.push({ folder, name: rel, playAtMs: e.playAtMs });
     }
+  }
+
+  /** Reverse of `resolve()`: the configured folder an absolute path sits in,
+   *  plus its folder-relative name — so the UI can offer "jump to the folder
+   *  this is playing from" no matter how playback was started (click, queue,
+   *  schedule). Single-entry memo: the snapshot asks for the same path many
+   *  times per second while one file plays. */
+  locate(abs: string): FileLocation | null {
+    if (abs === this.locateKey) return this.locateHit;
+    const target = path.resolve(abs);
+    let hit: FileLocation | null = null;
+    for (let folder = 0; folder < this.dirs.length && !hit; folder++) {
+      const root = this.root(folder);
+      if (!root) continue;
+      const rel = path.relative(root, target);
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+      hit = { folder, name: rel.split(path.sep).join('/') };
+    }
+    this.locateKey = abs;
+    this.locateHit = hit;
+    return hit;
   }
 
   /** Resolve a requested filename to an absolute path inside the folder at
