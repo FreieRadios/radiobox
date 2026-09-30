@@ -6,14 +6,16 @@
   "description": "Live multichannel auto-mixer: captures discrete channels from a USB mixer, applies per-channel DSP + gain-sharing automix + ducking, and streams one lossless FLAC output to a Liquidsoap harbor.",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && rm -rf dist/meters/public && cp -r src/meters/public dist/meters/public",
     "typecheck": "tsc --noEmit",
     "test": "jest --config ../../jest.config.ts --rootDir ../.. packages/studiobox",
     "dev": "nodemon -e ts,yaml --exec ts-node src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "doctor": "ts-node src/index.ts doctor"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
+    "socket.io-client": "^4.8.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {

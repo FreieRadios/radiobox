@@ -139,4 +139,98 @@ describe('FilePlayer', () => {
     fp.read(l, r, BLOCK);
     expect(l.every((v) => v === 0)).toBe(true);
   });
+
+  /** Pump blocks on a fake block clock until `done()`; returns all samples. */
+  async function pump(
+    fp: FilePlayer,
+    startMs: number,
+    done: (blocks: number) => boolean,
+    wait = 2
+  ): Promise<Float32Array> {
+    const out: number[] = [];
+    const l = new Float32Array(BLOCK);
+    const r = new Float32Array(BLOCK);
+    for (let b = 0; b < 4000 && !done(b); b++) {
+      fp.read(l, r, BLOCK, startMs + (b * BLOCK * 1000) / SR);
+      for (let i = 0; i < BLOCK; i++) out.push(l[i]);
+      await new Promise((res) => setTimeout(res, wait));
+    }
+    return Float32Array.from(out);
+  }
+
+  it('starts a cued file on the sample that carries its start time', async () => {
+    const file = makeToneFile(1);
+    const fp = new FilePlayer(SR, makeLog());
+    const t0 = 1_000_000;
+    const startAt = t0 + 700.5; // in the middle of a block
+    fp.cue(file, startAt);
+    expect(fp.cued).toEqual({ file, startAtMs: startAt });
+    expect(fp.playing).toBeNull();
+    // Give the decoder a moment (the pipeline cues 3 s ahead).
+    await new Promise((res) => setTimeout(res, 400));
+
+    const out = await pump(fp, t0, (b) => (b * BLOCK) / SR > 1.0);
+    const first = out.findIndex((v) => v !== 0);
+    const want = Math.round(((startAt - t0) * SR) / 1000);
+    // A sine starts at 0: its first non-zero sample is the one after the start.
+    expect(Math.abs(first - want)).toBeLessThanOrEqual(1);
+    expect(fp.cued).toBeNull();
+    expect(fp.playing).toBe(file);
+    fp.shutdown();
+  });
+
+  it('a cued file takes over from the one that is playing, on time', async () => {
+    const music = makeToneFile(3);
+    const jingle = makeToneFile(1);
+    const fp = new FilePlayer(SR, makeLog(), 50);
+    const t0 = 2_000_000;
+    fp.play(music);
+    fp.cue(jingle, t0 + 600);
+    await new Promise((res) => setTimeout(res, 400));
+    let switchedAt = -1;
+    await pump(fp, t0, (b) => {
+      if (switchedAt < 0 && fp.playing === jingle) switchedAt = b;
+      return (b * BLOCK) / SR > 0.9;
+    });
+    // The block holding t0+600 ms is block floor(0.6*48000/1024) = 28; the
+    // switch is visible from the next loop iteration.
+    expect(switchedAt).toBe(29);
+    fp.shutdown();
+  });
+
+  it('play() and stop() leave a cue alone; shutdown() drops it', async () => {
+    const file = makeToneFile(0.5);
+    const fp = new FilePlayer(SR, makeLog());
+    fp.cue(file, Date.now() + 60_000);
+    fp.play(file);
+    fp.stop();
+    expect(fp.cued).not.toBeNull();
+    fp.cue(file, Date.now() + 90_000); // a later cue replaces the earlier one
+    expect(fp.cued!.startAtMs).toBeGreaterThan(Date.now() + 80_000);
+    fp.shutdown();
+    expect(fp.cued).toBeNull();
+  });
+
+  it('loops a file without ending (audio bed) until it is faded out', async () => {
+    const file = makeToneFile(0.3);
+    const fp = new FilePlayer(SR, makeLog(), 50);
+    let ended = 0;
+    fp.on('ended', () => ended++);
+    fp.play(file, { loop: true, fadeInMs: 100 });
+    // Three times the file's length and it is still going.
+    const out = await pump(fp, 0, (b) => (b * BLOCK) / SR > 0.9, 22);
+    expect(fp.playing).toBe(file);
+    expect(ended).toBe(0);
+    const tail = out.subarray(out.length - 4 * BLOCK);
+    expect(tail.some((v) => Math.abs(v) > 0.05)).toBe(true);
+    // The fade-in really ramps: the first 20 ms are far below full level.
+    const first = out.findIndex((v) => v !== 0);
+    const early = Math.max(...Array.from(out.subarray(first, first + 960)).map(Math.abs));
+    const late = Math.max(...Array.from(tail).map(Math.abs));
+    expect(early).toBeLessThan(late * 0.4);
+    fp.fadeOut(50);
+    await pump(fp, 0, () => !fp.playing, 22);
+    expect(ended).toBe(1);
+    fp.shutdown();
+  });
 });

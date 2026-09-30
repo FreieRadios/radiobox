@@ -62,6 +62,7 @@ radiobox/
 ├── src/                     classic radiobox library (schema, schedule, recorder, autopilot)
 ├── liquidsoap/              on-air mixer container (.liq presets, mounts)
 ├── packages/studiobox/      live multichannel auto-mixer (see its own AGENTS.md)
+├── docs/analysis/           dated analyses and the checks behind them (e.g. the AURA comparison)
 └── docker-compose.yml       services (liquidsoap, icecast2, …) toggled via .env
 ```
 

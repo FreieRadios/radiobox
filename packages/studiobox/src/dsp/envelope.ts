@@ -13,7 +13,7 @@ export class EnvelopeFollower {
 
   /** Feed a (already rectified or signed) sample; tracks its magnitude. */
   process(x: number): number {
-    const m = Math.abs(x);
+    const m = x < 0 ? -x : x;
     const c = m > this.env ? this.atk : this.rel;
     this.env = c * (this.env - m) + m;
     return this.env;

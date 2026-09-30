@@ -24,6 +24,7 @@ class El {
   textContent = '';
   onclick: (() => void) | null = null;
   src?: string;
+  disabled = false;
   paused = false;
   duration = 0;
   currentTime = 0;
@@ -93,8 +94,10 @@ class El {
   addEventListener(t: string, fn: (e: unknown) => void): void {
     (this.ev[t] ??= []).push(fn);
   }
-  fire(t: string): void {
-    (this.ev[t] ?? []).forEach((fn) => fn({ target: this }));
+  /** Dispatch an event to the listeners the page added; `extra` carries what
+   *  the handler reads off the event (e.g. `key` for keydown/keyup). */
+  fire(t: string, extra: Record<string, unknown> = {}): void {
+    (this.ev[t] ?? []).forEach((fn) => fn({ target: this, ...extra }));
   }
   contains(): boolean {
     return false;
@@ -114,6 +117,11 @@ class El {
   removeAttribute(a: string): void {
     delete (this as unknown as Record<string, unknown>)[a];
   }
+  /** ARIA state the page writes (aria-pressed, aria-valuenow, …). */
+  attrs: Record<string, string> = {};
+  setAttribute(a: string, v: unknown): void {
+    this.attrs[a] = String(v);
+  }
   /** Click carries an event object: the page stops propagation on the row
    *  controls so they don't also trigger the row itself. */
   click(): void {
@@ -132,12 +140,38 @@ const FOLDERS = [
   { label: 'Musik', icon: '🎵' },
 ];
 
-/** Boot the page against the stub DOM. `listings` maps "folder/path" to rows. */
-function boot(listings: Record<string, FileRow[]>, folders = FOLDERS) {
+/** Boot the page against the stub DOM. `listings` maps "folder/path" to rows;
+ *  `search` is the page's query string (the role token, `?k=…`). */
+function boot(listings: Record<string, FileRow[]>, folders = FOLDERS, search = '') {
   const els: Record<string, El> = {};
   const byId = (id: string) => (els[id] ??= new El());
-  const sent: Array<{ type: string; value?: Record<string, unknown> }> = [];
-  let socket: { onmessage?: (e: { data: string }) => void; onclose?: () => void } = {};
+  const sent: Array<{ type: string; value?: unknown }> = [];
+  const fetched: string[] = [];
+  // The page's timers (hold-to-stop, confirm windows, reconnect) and its clock
+  // are virtual: nothing fires and no time passes until a test calls `tick`.
+  let clock = 0;
+  let timerSeq = 0;
+  let timers: Array<{ id: number; at: number; fn: () => void }> = [];
+  const setTimeoutStub = (fn: () => void, ms = 0) => {
+    timers.push({ id: ++timerSeq, at: clock + ms, fn });
+    return timerSeq;
+  };
+  const clearTimeoutStub = (id: number) => {
+    timers = timers.filter((t) => t.id !== id);
+  };
+  const tick = (ms: number) => {
+    clock += ms;
+    const due = timers.filter((t) => t.at <= clock).sort((a, b) => a.at - b.at);
+    timers = timers.filter((t) => t.at > clock);
+    due.forEach((t) => t.fn());
+  };
+  const bootedAt = Date.now();
+  const pageDate = { now: () => bootedAt + clock };
+  let socket: {
+    onopen?: () => void;
+    onmessage?: (e: { data: string }) => void;
+    onclose?: () => void;
+  } = {};
 
   const document = {
     getElementById: byId,
@@ -156,6 +190,7 @@ function boot(listings: Record<string, FileRow[]>, folders = FOLDERS) {
     }
   }
   const fetchStub = (url: string) => {
+    fetched.push(url);
     const json = () => {
       if (url.startsWith('folders')) return Promise.resolve({ folders });
       if (url.startsWith('files')) {
@@ -177,16 +212,20 @@ function boot(listings: Record<string, FileRow[]>, folders = FOLDERS) {
     'fetch',
     'setInterval',
     'setTimeout',
+    'clearTimeout',
+    'Date',
     pageScript()
   );
   run(
     document,
     {},
-    { host: 'box:4445' },
+    { host: 'box:4445', search },
     WS,
     fetchStub,
     () => 0,
-    () => 0
+    setTimeoutStub,
+    clearTimeoutStub,
+    pageDate
   );
 
   const flush = async () => {
@@ -196,9 +235,35 @@ function boot(listings: Record<string, FileRow[]>, folders = FOLDERS) {
     els,
     byId,
     sent,
+    fetched,
     flush,
+    /** Let `ms` of the page's time pass, firing the timers that fall due. */
+    tick,
+    /** Press a button and keep it down for `ms` before letting go — the
+     *  events a finger or a mouse produces, in their order. */
+    press: (id: string, ms: number) => {
+      const b = byId(id);
+      b.fire('pointerdown');
+      tick(ms);
+      b.fire('pointerup');
+      b.click();
+    },
+    /** Hold a key down on a button for `ms`. Enter clicks on keydown, Space
+     *  on keyup — as browsers do. */
+    pressKey: (id: string, key: string, ms: number) => {
+      const b = byId(id);
+      b.fire('keydown', { key });
+      if (key === 'Enter') b.click();
+      tick(ms);
+      b.fire('keyup', { key });
+      if (key === ' ') b.click();
+    },
     /** Push a server frame (meter snapshot or queue list) to the page. */
     push: (msg: unknown) => socket.onmessage?.({ data: JSON.stringify(msg) }),
+    /** The WebSocket coming up / going away (the reconnect timer only fires
+     *  on `tick`, so a drop stays dropped). */
+    open: () => socket.onopen?.(),
+    drop: () => socket.onclose?.(),
     /** Rows of the file listing, with '*' marking the pre-listen highlight. */
     fileRows: () =>
       byId('flist').children.map((li) => li.dataset.rel + (li.has('cued') ? '*' : '')),
@@ -628,5 +693,958 @@ describe('meters page — help', () => {
     await p.flush();
     p.push(frame('a.mp3', { folder: 1, name: 'a.mp3' }, 1)); // channels: [] -> playout
     expect(p.bodyClasses()).toContain('playout');
+  });
+});
+
+/** A mixer-mode frame: two mics (one muted) and a music channel. */
+const liveFrame = (over: Record<string, unknown> = {}) => ({
+  channels: [
+    {
+      label: 'Host',
+      role: 'mic',
+      outDb: -18.34,
+      gateOpen: 1,
+      compGrDb: 3.2,
+      levelerDb: 2.5,
+      automixGainDb: -4.1,
+      muted: false,
+    },
+    {
+      label: 'Gast',
+      role: 'mic',
+      outDb: -58,
+      gateOpen: 0,
+      compGrDb: 0,
+      levelerDb: 0,
+      automixGainDb: -30,
+      muted: true,
+    },
+    {
+      label: 'Player',
+      role: 'music',
+      outDb: -12,
+      gateOpen: 1,
+      compGrDb: 0,
+      levelerDb: -3.4,
+      automixGainDb: 0,
+      muted: false,
+    },
+  ],
+  micsMuted: false,
+  recording: false,
+  streaming: true,
+  monitor: null,
+  filePlaying: null,
+  filePlayingAt: null,
+  filePosition: null,
+  fileDuration: null,
+  shortTermLufs: -16.3,
+  momentaryLufs: -15.04,
+  outPeakDb: -4,
+  limiterGrDb: 1.2,
+  duckDepthDb: -9,
+  serverNowMs: Date.now(),
+  ...over,
+});
+
+describe('meters page — states in words, not only colour', () => {
+  it('labels the output toggles with their state and mirrors it in aria-pressed', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    expect(p.byId('rec').textContent).toBe('Aufnahme aus');
+    expect(p.byId('rec').attrs['aria-pressed']).toBe('false');
+    expect(p.byId('ship').textContent).toBe('Stream läuft');
+    expect(p.byId('ship').attrs['aria-pressed']).toBe('true');
+    expect(p.byId('mon').style.display).toBe('none'); // not configured on this box
+    p.byId('rec').click();
+    expect(p.sent).toEqual([{ type: 'recording', value: true }]);
+    expect(p.byId('rec').textContent).toBe('● Aufnahme läuft');
+    expect(p.byId('rec').attrs['aria-pressed']).toBe('true');
+  });
+
+  it('names each channel state and the global mic switch', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    const state = () => p.byId('rows').children.map((r) => r.querySelector('.chstate').textContent);
+    const btn = (i: number) => p.byId('rows').children[i].querySelector('.mtbtn');
+    expect(state()).toEqual(['OFFEN', 'STUMM', 'AN']);
+    expect(btn(0).textContent).toBe('Offen');
+    expect(btn(1).textContent).toBe('Stumm');
+    expect(btn(1).attrs['aria-pressed']).toBe('true');
+    expect(p.byId('mute').textContent).toBe('● Mikros offen');
+    // All mics closed by the host: an open mic is paused, a muted one stays muted.
+    p.push(liveFrame({ micsMuted: true }));
+    expect(state()).toEqual(['PAUSE', 'STUMM', 'AN']);
+    expect(p.byId('mute').textContent).toBe('Mikros zu');
+    expect(p.byId('mute').attrs['aria-pressed']).toBe('false');
+  });
+
+  it('writes levels the German way and gain reduction as a cut', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    const host = p.byId('rows').children[0];
+    expect(host.querySelector('.s-lvl .val').textContent).toBe('−18,3 dB');
+    expect(host.querySelector('.s-comp .val').textContent).toBe('−3,2 dB');
+    expect(host.querySelector('.s-lev .val').textContent).toBe('+2,5 dB');
+    expect(host.querySelector('.s-lvl .meter').attrs['aria-valuetext']).toBe('−18 dB, ok');
+    expect(p.byId('st').textContent).toBe('−16,3');
+    expect(p.byId('mom').textContent).toBe('−15,0');
+    expect(p.byId('lgr').textContent).toBe('−1,2');
+  });
+
+  it('shows a dash, not −159 LUFS, while the programme is digital silence', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ shortTermLufs: -159.2, momentaryLufs: -159.4, outPeakDb: -157.9 }));
+    expect(p.byId('st').textContent).toBe('–');
+    expect(p.byId('mom').textContent).toBe('–');
+    expect(p.byId('pk').textContent).toBe('–');
+    p.push(liveFrame({ shortTermLufs: -42.5, momentaryLufs: -40, outPeakDb: -30 }));
+    expect(p.byId('st').textContent).toBe('−42,5');
+  });
+
+  it('spells out the connection state', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.open();
+    expect(p.byId('connText').textContent).toBe('Verbunden');
+    p.drop();
+    expect(p.byId('connText').textContent).toContain('Verbindung weg');
+    expect(p.byId('conn').className).toContain('lost');
+  });
+});
+
+describe('meters page — footer transport', () => {
+  it('keeps Stop in place but disabled while nothing plays', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    expect(p.byId('stop').disabled).toBe(true);
+    p.push(frame(null, null));
+    expect(p.byId('stop').disabled).toBe(true);
+    expect(p.byId('nowplaying').innerHTML).toBe('Keine Datei läuft');
+    expect(p.byId('rem').textContent).toBe('–:––');
+    p.push(frame('a.mp3', { folder: 1, name: 'a.mp3' }, 5));
+    expect(p.byId('stop').disabled).toBe(false);
+    p.press('stop', 800);
+    expect(p.sent).toEqual([{ type: 'stopFile' }]);
+  });
+
+  it('shows the remaining time large, elapsed beside it, and the progress', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ ...frame('a.mp3', { folder: 1, name: 'a.mp3' }, 60), fileDuration: 240 });
+    expect(p.byId('remlbl').textContent).toBe('noch');
+    expect(p.byId('rem').textContent).toBe('3:00');
+    expect(p.byId('ftime').textContent).toBe('1:00 von 4:00');
+    expect(p.byId('pbar').style.width).toBe('25%');
+    // Length unknown (e.g. a stream-like source): count up instead.
+    p.push(frame('a.mp3', { folder: 1, name: 'a.mp3' }, 75));
+    expect(p.byId('remlbl').textContent).toBe('läuft seit');
+    expect(p.byId('rem').textContent).toBe('1:15');
+  });
+
+  it('cuts a long title in its middle so prefix and ending both survive', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const name = '04_Musik_Titel_Extended_Club_Mix_2026_Remaster.mp3';
+    p.push(frame(name, null));
+    const html = p.byId('nowplaying').innerHTML;
+    expect(html).toContain('<span class="nh">04_Musik_Titel_Extended_Club_Mix_202</span>');
+    expect(html).toContain('<span class="nt">6_Remaster.mp3</span>');
+  });
+});
+
+describe('meters page — ending output takes a hold, never a stray tap', () => {
+  const playing = frame('a.mp3', { folder: 1, name: 'a.mp3' }, 5);
+
+  it('a tap on Stopp does not stop; it asks', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(playing);
+    p.press('stop', 120);
+    expect(p.sent).toEqual([]);
+    expect(p.byId('stop').textContent).toBe('Stoppen? Nochmal tippen');
+    expect(p.byId('stop').has('armed')).toBe(true);
+    expect(p.byId('say').textContent).toContain('Gedrückt halten');
+    // Left alone, the question goes away again.
+    p.tick(4000);
+    expect(p.byId('stop').textContent).toBe('■ Stopp');
+    expect(p.byId('stop').has('armed')).toBe(false);
+    expect(p.sent).toEqual([]);
+  });
+
+  it('holding for 0.8 s stops, with the fill showing while it runs', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(playing);
+    const stop = p.byId('stop');
+    stop.fire('pointerdown');
+    expect(stop.has('holding')).toBe(true);
+    p.tick(799);
+    expect(p.sent).toEqual([]);
+    p.tick(1);
+    expect(p.sent).toEqual([{ type: 'stopFile' }]);
+    expect(stop.has('holding')).toBe(false);
+    // Letting go afterwards is not a second command.
+    stop.fire('pointerup');
+    stop.click();
+    expect(p.sent).toEqual([{ type: 'stopFile' }]);
+  });
+
+  it('letting go early, or sliding off the button, cancels', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(playing);
+    const stop = p.byId('stop');
+    stop.fire('pointerdown');
+    p.tick(500);
+    stop.fire('pointerleave');
+    expect(stop.has('holding')).toBe(false);
+    p.tick(1000);
+    expect(p.sent).toEqual([]);
+  });
+
+  it('a second tap confirms — but a bounce does not', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(playing);
+    p.press('stop', 80);
+    p.tick(100);
+    p.press('stop', 80); // 180 ms after the first: a bouncing finger
+    expect(p.sent).toEqual([]);
+    p.tick(400);
+    p.press('stop', 80);
+    expect(p.sent).toEqual([{ type: 'stopFile' }]);
+    expect(p.byId('stop').has('armed')).toBe(false);
+  });
+
+  it('a bare click (a screen reader activating the button) gets the same two steps', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(playing);
+    p.byId('stop').click();
+    expect(p.sent).toEqual([]);
+    p.tick(1000);
+    p.byId('stop').click();
+    expect(p.sent).toEqual([{ type: 'stopFile' }]);
+  });
+
+  it('works from the keyboard: hold Enter or Space', async () => {
+    for (const key of ['Enter', ' ']) {
+      const p = boot(LISTINGS);
+      await p.flush();
+      p.push(playing);
+      p.pressKey('stop', key, 800);
+      expect(p.sent).toEqual([{ type: 'stopFile' }]);
+    }
+  });
+
+  it('key repeat while holding Enter neither confirms early nor acts twice', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ recording: true }));
+    const rec = p.byId('rec');
+    rec.fire('keydown', { key: 'Enter' });
+    rec.click();
+    for (let i = 0; i < 40; i++) {
+      p.tick(30);
+      rec.fire('keydown', { key: 'Enter', repeat: true });
+      rec.click();
+    }
+    rec.fire('keyup', { key: 'Enter' });
+    // One stop — and above all no "start" on the repeats that followed it.
+    expect(p.sent).toEqual([{ type: 'recording', value: false }]);
+  });
+
+  it('a short Enter asks, like a short tap', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(playing);
+    p.pressKey('stop', 'Enter', 100);
+    expect(p.sent).toEqual([]);
+    expect(p.byId('stop').has('armed')).toBe(true);
+  });
+
+  it('starting a recording is one tap, ending it needs the hold', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    p.press('rec', 50);
+    expect(p.sent).toEqual([{ type: 'recording', value: true }]);
+    p.push(liveFrame({ recording: true }));
+    p.press('rec', 50);
+    expect(p.sent).toHaveLength(1);
+    expect(p.byId('rec').textContent).toBe('Aufnahme beenden? Nochmal tippen');
+    p.tick(4000); // the question lapses, the label is the state again
+    expect(p.byId('rec').textContent).toBe('● Aufnahme läuft');
+    p.press('rec', 800);
+    expect(p.sent).toEqual([
+      { type: 'recording', value: true },
+      { type: 'recording', value: false },
+    ]);
+  });
+
+  it('reads the seconds the box still writes after a stop as "endet", not as a failed stop', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ recording: true }));
+    p.press('rec', 800);
+    expect(p.byId('rec').textContent).toBe('Aufnahme endet …');
+    // The look-ahead plays out into the file: the box says "recording" a little longer.
+    p.tick(1000);
+    p.push(liveFrame({ recording: true }));
+    expect(p.byId('rec').textContent).toBe('Aufnahme endet …');
+    p.tick(2000);
+    p.push(liveFrame({ recording: false }));
+    expect(p.byId('rec').textContent).toBe('Aufnahme aus');
+    expect(p.sent).toEqual([{ type: 'recording', value: false }]);
+  });
+
+  it('shows a recording that did not stop as running again', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ recording: true }));
+    p.press('rec', 800);
+    p.tick(6000);
+    p.push(liveFrame({ recording: true }));
+    expect(p.byId('rec').textContent).toBe('● Aufnahme läuft');
+  });
+
+  it('guards the stream the same way', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    p.press('ship', 50);
+    expect(p.sent).toEqual([]);
+    p.press('ship', 800);
+    expect(p.sent).toEqual([{ type: 'streaming', value: false }]);
+  });
+
+  it('guards the *start* of the test tone, which replaces the programme', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ monitor: true, testTone: false }));
+    p.press('tone', 50);
+    expect(p.sent).toEqual([]);
+    p.press('tone', 800);
+    expect(p.sent).toEqual([{ type: 'testTone', value: true }]);
+    p.push(liveFrame({ monitor: true, testTone: true }));
+    expect(p.byId('toneChip').style.display).toBe('');
+    p.press('tone', 50); // getting the programme back is one tap
+    expect(p.sent[1]).toEqual({ type: 'testTone', value: false });
+  });
+});
+
+/** Air-delay state as the live pipeline reports it. */
+const air = (state: string, over: Record<string, unknown> = {}) => ({
+  targetMs: 10000,
+  delayMs: 10000,
+  nowMs: Date.now() + 10000,
+  state,
+  drainEndsMs: null,
+  underruns: 0,
+  resyncs: 0,
+  ...over,
+});
+
+describe('meters page — AUF SENDUNG', () => {
+  const chip = (p: ReturnType<typeof boot>) =>
+    p.byId('air').style.display === 'none'
+      ? null
+      : p.byId('airText').textContent + (p.byId('air').has('on') ? ' [rot]' : '');
+
+  it('says in words whether programme is leaving the box', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ air: air('filling'), onAir: false }));
+    expect(chip(p)).toBe('Puffer füllt');
+    p.push(liveFrame({ air: air('live'), onAir: true }));
+    expect(chip(p)).toBe('Auf Sendung [rot]');
+    // Live, but no output running: nothing reaches anybody.
+    p.push(liveFrame({ air: air('live'), onAir: false }));
+    expect(chip(p)).toBe('Nicht auf Sendung');
+    p.push(liveFrame({ air: air('draining', { drainEndsMs: Date.now() + 7000 }), onAir: true }));
+    expect(chip(p)).toBe('Auf Sendung [rot]'); // what was said is still going out
+    p.push(liveFrame({ air: air('ended'), onAir: false }));
+    expect(chip(p)).toBe('Sendung beendet');
+  });
+
+  it('shows no chip where the box cannot know (playout mode)', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(frame('a.mp3', { folder: 1, name: 'a.mp3' }, 1));
+    expect(chip(p)).toBeNull();
+  });
+
+  it('"Sendung beenden" takes a hold; while the buffer drains one tap takes it back', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ air: air('live'), onAir: true }));
+    expect(p.byId('endShow').textContent).toBe('Sendung beenden');
+    p.press('endShow', 50);
+    expect(p.sent).toEqual([]);
+    p.press('endShow', 800);
+    expect(p.sent).toEqual([{ type: 'endShow', value: true }]);
+    p.push(liveFrame({ air: air('draining', { drainEndsMs: Date.now() + 7000 }), onAir: true }));
+    expect(p.byId('endShow').textContent).toBe('Beenden abbrechen');
+    p.press('endShow', 50);
+    expect(p.sent[1]).toEqual({ type: 'endShow', value: false });
+  });
+});
+
+describe('meters page — Sendezeit', () => {
+  it('marks a timestamped file as upcoming against the on-air clock, not the wall clock', async () => {
+    // Stamped 5 s from now on the wall clock. With 10 s of air delay the
+    // Sendezeit clock is already past it: it has started.
+    const soon = Date.now() + 5000;
+    const p = boot({ '0/': [{ name: 'jingle-x.mp3', playAtMs: soon }] });
+    await p.flush();
+    expect(p.byId('flist').children[0].has('sched')).toBe(true);
+    p.push(liveFrame({ air: air('live'), onAir: true }));
+    p.byId('folderList').children[0].click(); // reload the listing
+    await p.flush();
+    expect(p.byId('flist').children[0].has('sched')).toBe(false);
+  });
+});
+
+describe('meters page — host priority', () => {
+  const prio = (p: ReturnType<typeof boot>) =>
+    p.byId('prio') as unknown as { value: string; oninput: () => void; onchange: () => void };
+
+  it('is absent unless the box has a priority mic', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    expect(p.byId('prioBox').style.display).toBe('none');
+    p.push(liveFrame({ priority: { label: 'Host', depthDb: -8, active: false } }));
+    expect(p.byId('prioBox').style.display).toBe('');
+    expect(prio(p).value).toBe('8');
+    expect(p.byId('prioVal').textContent).toBe('−8 dB');
+    expect(p.byId('prioWho').textContent).toBe('Host');
+  });
+
+  it('sends the depth as a cut and does not fight the finger with stale echoes', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ priority: { label: 'Host', depthDb: -8, active: false } }));
+    prio(p).value = '12';
+    prio(p).oninput();
+    expect(p.sent).toEqual([{ type: 'priorityDepth', value: -12 }]);
+    expect(p.byId('prioVal').textContent).toBe('−12 dB');
+    // A frame from before the change arrives: the slider stays where it was put.
+    p.push(liveFrame({ priority: { label: 'Host', depthDb: -8, active: false } }));
+    expect(prio(p).value).toBe('12');
+    // Dragging on: throttled, but letting go always sends the final value.
+    p.tick(50);
+    prio(p).value = '13';
+    prio(p).oninput();
+    prio(p).value = '14';
+    prio(p).oninput();
+    expect(p.sent).toHaveLength(1);
+    prio(p).onchange();
+    expect(p.sent[1]).toEqual({ type: 'priorityDepth', value: -14 });
+    // Once the finger is off, the box's value is the truth again.
+    p.tick(2000);
+    p.push(liveFrame({ priority: { label: 'Host', depthDb: -14, active: true } }));
+    expect(prio(p).value).toBe('14');
+    expect(p.byId('prioAct').style.display).toBe('');
+  });
+
+  it('names a mic that is being held back LEISER', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const f = liveFrame();
+    (f.channels[0] as Record<string, unknown>).priorityDb = -6.5;
+    p.push(f);
+    const host = p.byId('rows').children[0].querySelector('.chstate');
+    expect(host.textContent).toBe('LEISER');
+    expect(host.className).toContain('duck');
+    // Closed mics and a muted mic say so first.
+    p.push({ ...f, micsMuted: true });
+    expect(host.textContent).toBe('PAUSE');
+  });
+});
+
+describe('meters page — trim', () => {
+  it('shows each mic trim and steps it from a stepper, building on what was just sent', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const f = liveFrame();
+    (f.channels[0] as Record<string, unknown>).trimDb = 12;
+    p.push(f);
+    const btn = p.byId('rows').children[0].querySelector('.trimbtn');
+    expect(btn.textContent).toBe('+12,0');
+    expect(p.byId('trimEd').style.display).not.toBe(''); // (inline style: see the help test)
+    btn.click();
+    expect(p.byId('trimEd').style.display).toBe('');
+    expect(p.byId('trimWho').textContent).toBe('Host');
+    p.byId('trimUp').click();
+    p.byId('trimUp').click(); // faster than the snapshot comes back
+    p.byId('trimDn3').click();
+    expect(p.sent).toEqual([
+      { type: 'trim', value: { label: 'Host', trimDb: 13 } },
+      { type: 'trim', value: { label: 'Host', trimDb: 14 } },
+      { type: 'trim', value: { label: 'Host', trimDb: 11 } },
+    ]);
+    (f.channels[0] as Record<string, unknown>).trimDb = 11;
+    p.push(f);
+    expect(p.byId('trimVal').textContent).toBe('+11,0 dB');
+    p.byId('trimClose').click();
+    expect(p.byId('trimEd').style.display).toBe('none');
+  });
+});
+
+/** The setup assistant's state as the snapshot carries it. */
+const setup = (phase: string, over: Record<string, unknown> = {}) => ({
+  phase,
+  current: null,
+  sentence: 'Sechs fleißige Gäste testen das Studio.',
+  silence: 0,
+  mics: [],
+  results: null,
+  automixFloorDb: null,
+  ...over,
+});
+const settings = (trimDb: number) => ({
+  trimDb,
+  hpfHz: 80,
+  gateThresholdDb: -45,
+  compThresholdDb: -18,
+  deessThresholdDb: -24,
+  seedDb: 0,
+  zoneCenterDb: -20,
+});
+
+describe('meters page — Einmessen', () => {
+  const tiles = (p: ReturnType<typeof boot>) =>
+    p.byId('suSteps').children.map((li) => li.children.map((c) => c.textContent).join(' | '));
+  const shown = (p: ReturnType<typeof boot>, ...ids: string[]) =>
+    ids.filter((id) => p.byId(id).style.display !== 'none');
+  const BUTTONS = ['suStart', 'suCancel', 'suFinish', 'suApply', 'suDiscard'];
+
+  it('offers the start while idle and says whether a result is in force', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ setup: setup('idle'), setupApplied: false }));
+    expect(shown(p, ...BUTTONS)).toEqual(['suStart']);
+    expect(p.byId('suInfo').textContent).toBe('Noch nicht eingemessen');
+    expect(p.byId('suIntro').style.display).toBe(''); // what it does, until it has been done
+    p.byId('suStart').click();
+    expect(p.sent).toEqual([{ type: 'setupStart' }]);
+    p.push(liveFrame({ setup: setup('idle'), setupApplied: true }));
+    expect(p.byId('suInfo').textContent).toBe('Eingemessen ✓');
+    expect(p.byId('suIntro').style.display).toBe('none');
+  });
+
+  it('walks the steps in words: silence, then who is up, with what to read', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const mics = [
+      { label: 'Gast 1', channel: 1, progress: 0, done: false },
+      { label: 'Host', channel: 3, progress: 0, done: false },
+    ];
+    p.push(liveFrame({ setup: setup('silence', { silence: 0.4, mics }) }));
+    expect(p.byId('setupChip').style.display).toBe('');
+    expect(shown(p, ...BUTTONS)).toEqual(['suCancel']);
+    expect(tiles(p)).toEqual([
+      '1 · JETZT | Stille | Raumgeräusch · 40 %',
+      '2 · OFFEN | Gast 1 | Kanal 1 · 0 %',
+      '3 · OFFEN | Host | Kanal 3 · 0 %',
+      '4 · OFFEN | Ergebnis | vorher / nachher',
+    ]);
+    expect(p.byId('suNow').textContent).toContain('Stille');
+
+    const tile = p.byId('suSteps').children[2];
+    mics[0] = { ...mics[0], progress: 1, done: true };
+    mics[1] = { ...mics[1], progress: 0.5 };
+    p.push(liveFrame({ setup: setup('speakers', { silence: 1, current: 'Host', mics }) }));
+    expect(tiles(p)).toEqual([
+      '1 · ERLEDIGT | Stille | gemessen',
+      '2 · ERLEDIGT | Gast 1 | Kanal 1 · 100 %',
+      '3 · JETZT | Host | Kanal 3 · 50 %',
+      '4 · OFFEN | Ergebnis | vorher / nachher',
+    ]);
+    // Updated in place: the tiles of a run are not rebuilt under a finger.
+    expect(p.byId('suSteps').children[2]).toBe(tile);
+    expect(p.byId('suNow').textContent).toBe('Jetzt: Host — bitte diesen Satz vorlesen:');
+    expect(p.byId('suSent').textContent).toBe('Sechs fleißige Gäste testen das Studio.');
+    expect(shown(p, ...BUTTONS)).toEqual(['suCancel', 'suFinish']);
+    p.byId('suFinish').click();
+    p.byId('suCancel').click();
+    expect(p.sent).toEqual([{ type: 'setupFinish' }, { type: 'setupCancel' }]);
+  });
+
+  it('shows before and after per mic, the knob advice, and applies only on "Übernehmen"', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const results = [
+      {
+        label: 'Gast 1',
+        channel: 1,
+        verdict: 'gut',
+        advice: null,
+        notes: [],
+        speechDb: -24.1,
+        snrDb: 52,
+        before: settings(0),
+        after: settings(4.1),
+      },
+      {
+        label: 'Host',
+        channel: 3,
+        verdict: 'zu leise',
+        advice: 'Kanal 3 (Host): Gain um etwa +18 dB aufdrehen.',
+        notes: [],
+        speechDb: -48,
+        snrDb: 30,
+        before: settings(0),
+        after: settings(28),
+      },
+      {
+        label: 'Technik',
+        channel: 4,
+        verdict: 'kein Signal',
+        advice: 'Kanal 4 (Technik): kein Sprachsignal – Mikrofon, Kabel und Gain prüfen.',
+        notes: [],
+        speechDb: null,
+        snrDb: null,
+        before: settings(0),
+        after: null,
+      },
+    ];
+    p.push(liveFrame({ setup: setup('result', { results, automixFloorDb: -18 }) }));
+    expect(shown(p, ...BUTTONS)).toEqual(['suApply', 'suDiscard']);
+    expect(p.byId('setupChip').style.display).toBe('none');
+    expect(p.byId('suInfo').textContent).toBe(
+      'Ergebnis — noch nicht übernommen · Automix-Boden −18 dB'
+    );
+    const cards = p.byId('suRows').children;
+    const text = (i: number) =>
+      cards[i].innerHTML
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    // Only what changes gets an arrow; the high-pass stays at 80 Hz and says just that.
+    expect(text(0)).toBe(
+      'Gast 1 Kanal 1 · Sprache −24,1 dB · Abstand 52 dB gut Trim 0,0 → +4,1 dB Hochpass 80 Hz ' +
+        'Gate −45,0 dB Comp −18,0 dB De-Esser −24,0 dB Leveler-Start 0,0 dB'
+    );
+    expect(text(1)).toContain('zu leise');
+    expect(text(1)).toContain('Trim 0,0 → +28,0 dB');
+    // Nothing usable was measured: the settings stay as they are.
+    expect(text(2)).toContain('keine Sprache kein Signal Trim 0,0 dB Hochpass 80 Hz');
+    expect(text(2)).not.toContain('→');
+    // What studiobox cannot set — the analog gain — with a way to re-check it,
+    // on the mics that need it and only there.
+    expect(cards.map((c) => c.children.length)).toEqual([0, 1, 1]);
+    const advice = cards[1].children[0];
+    expect(advice.innerHTML).toContain('Kanal 3 (Host): Gain um etwa +18 dB aufdrehen.');
+    advice.children[0].click();
+    expect(p.sent).toEqual([{ type: 'setupStart', value: { only: ['Host'] } }]);
+    p.byId('suApply').click();
+    p.byId('suDiscard').click();
+    expect(p.sent.slice(1)).toEqual([{ type: 'setupApply' }, { type: 'setupDiscard' }]);
+  });
+
+  it('has no assistant on a playout-only box', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(frame(null, null));
+    expect(p.byId('setupBox').style.display).toBe('none');
+  });
+});
+
+describe('meters page — bed and queue mode', () => {
+  it('shows the bed switch only where a bed is configured, with its state in words', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    expect(p.byId('bed').style.display).toBe('none');
+    p.push(
+      liveFrame({ bed: { on: false, name: 'bett.flac', at: { folder: 1, name: 'bett.flac' } } })
+    );
+    expect(p.byId('bed').style.display).toBe('');
+    expect(p.byId('bed').textContent).toBe('Bett aus');
+    expect(p.byId('bed').attrs['aria-pressed']).toBe('false');
+    p.byId('bed').click();
+    expect(p.sent).toEqual([{ type: 'bed', value: true }]);
+    // The button follows the box, not the click.
+    expect(p.byId('bed').textContent).toBe('Bett aus');
+    p.push(
+      liveFrame({ bed: { on: true, name: 'bett.flac', at: { folder: 1, name: 'bett.flac' } } })
+    );
+    expect(p.byId('bed').textContent).toBe('Bett läuft');
+    expect(p.byId('bed').attrs['aria-pressed']).toBe('true');
+    p.byId('bed').click();
+    expect(p.sent[1]).toEqual({ type: 'bed', value: false });
+  });
+
+  it('lets a file of the bed folder be made the bed, and marks the one that is', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    await p.selectFolder(1);
+    const rows = () => p.byId('flist').children;
+    expect(rows()[0].innerHTML).not.toContain('bedbtn'); // no bed on this box (yet)
+    p.push(liveFrame({ bed: { on: false, name: 'a.mp3', at: { folder: 1, name: 'a.mp3' } } }));
+    await p.flush(); // the listing of the bed's folder is redrawn with the marks
+    expect(rows()[0].innerHTML).toContain('aria-pressed="true"');
+    expect(rows()[2].innerHTML).toContain('aria-pressed="false"');
+    rows()[2].querySelector('.bedbtn').click();
+    expect(p.sent).toEqual([{ type: 'bedSelect', value: { folder: 1, name: 'c.flac' } }]);
+    // Any other folder has no such button: a file there cannot become the bed by a slip.
+    await p.selectFolder(0);
+    expect(rows()[0].innerHTML).not.toContain('bedbtn');
+  });
+
+  it('cannot start a bed that has no file', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ bed: { on: false, name: null, at: null } }));
+    expect(p.byId('bed').disabled).toBe(true);
+  });
+
+  it('offers "einzeln | laufend" for the box queue, not for the audition list', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'queue', items: [{ id: 1, folder: 0, name: 'sendung.mp3' }] });
+    expect(p.byId('qmode').style.display).toBe('none'); // this box does not offer it
+    p.push(liveFrame({ queueMode: 'single' }));
+    expect(p.byId('qmode').style.display).toBe('');
+    expect(p.byId('qmSingle').attrs['aria-pressed']).toBe('true');
+    expect(p.byId('qmChain').attrs['aria-pressed']).toBe('false');
+    p.byId('qmChain').click();
+    expect(p.sent).toEqual([{ type: 'queueMode', value: 'chain' }]);
+    p.push(liveFrame({ queueMode: 'chain' }));
+    expect(p.byId('qmChain').attrs['aria-pressed']).toBe('true');
+    p.byId('cue').click(); // Vorhören: the browser's own list always runs through
+    await p.flush();
+    expect(p.byId('qmode').style.display).toBe('none');
+  });
+});
+
+describe('meters page — roles', () => {
+  it('is the technician page unless the connection says otherwise', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'hello', role: 'tech' });
+    expect(p.bodyClasses()).not.toContain('host');
+    expect(p.byId('chTitle').textContent).toBe('Kanäle');
+  });
+
+  it('gives a host the host layout and keeps technician commands off the wire', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'hello', role: 'host' });
+    expect(p.bodyClasses()).toContain('host');
+    expect(p.byId('chTitle').textContent).toBe('Mikrofone');
+    p.push(liveFrame({ recording: true, air: air('live'), onAir: true }));
+    p.press('rec', 800);
+    p.press('ship', 800);
+    p.press('endShow', 800);
+    expect(p.sent).toEqual([]);
+    // What a host is for still works.
+    p.byId('mute').click();
+    expect(p.sent).toEqual([{ type: 'micsMuted', value: true }]);
+  });
+
+  it('tells a host who is up while the technician measures', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'hello', role: 'host' });
+    const mics = [{ label: 'Host', channel: 3, progress: 0.2, done: false }];
+    p.push(liveFrame({ setup: setup('speakers', { silence: 1, current: 'Host', mics }) }));
+    expect(p.byId('setupLine').style.display).toBe('');
+    expect(p.byId('setupLine').textContent).toContain('jetzt: Host');
+    p.push(liveFrame({ setup: setup('idle') }));
+    expect(p.byId('setupLine').style.display).toBe('none');
+  });
+
+  it('carries the role token on every request for the file tree', async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=s3cret');
+    await p.flush();
+    expect(p.fetched[0]).toBe('folders?k=s3cret');
+    expect(p.fetched[1]).toBe('files?folder=0&path=&k=s3cret');
+    p.byId('cue').click();
+    await p.flush();
+    p.byId('flist').children[0].click();
+    expect(p.byId('cueAudio').src).toBe('preview?folder=0&name=sendung.mp3&k=s3cret');
+  });
+});
+
+describe('meters page — Hörer:innen (listener feedback)', () => {
+  const status = (over: Record<string, unknown> = {}) => ({
+    show: { slug: 'gruenfunk', name: 'Grünfunk', startMs: 0, endMs: 0 },
+    pinned: false,
+    hearts: 7,
+    comments: [
+      { id: 'c2', text: 'Wie hieß das Lied?', receivedAtMs: Date.UTC(2026, 8, 30, 16, 12) },
+      {
+        id: 'c1',
+        text: '<b>Grüße</b>\naus Gostenhof',
+        receivedAtMs: Date.UTC(2026, 8, 30, 16, 11),
+      },
+    ],
+    state: 'ok',
+    updatedMs: Date.UTC(2026, 8, 30, 16, 13),
+    ...over,
+  });
+
+  it('stays off the page on a box without eve', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    // Hidden in the markup, and nothing ever shows it (the stub has no markup).
+    expect(p.byId('lisbox').style.display).toBeUndefined();
+    expect(p.bodyClasses()).not.toMatch(/listeners/);
+  });
+
+  it('is folded until the host opens it: hearts as a number, how many are new', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'listeners', status: status() });
+    expect(p.byId('lisbox').style.display).toBe('');
+    expect(p.bodyClasses()).toMatch(/listeners/);
+    expect(p.byId('lisShow').textContent).toBe('Grünfunk');
+    expect(p.byId('lisHearts').textContent).toBe('♥ 7');
+    expect(p.byId('lisSum').textContent).toBe('2 Kommentare · 2 neu');
+    expect(p.byId('lisList').style.display).toBe('none');
+    expect(p.byId('lisTitle').attrs['aria-expanded']).toBe('false');
+  });
+
+  it('lists the comments newest first when opened, escaped, and sends nothing', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const before = p.sent.length;
+    p.push({ type: 'listeners', status: status() });
+    p.byId('lisTitle').click();
+    const rows = p.byId('lisList').children.map((li) => li.innerHTML);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('Wie hieß das Lied?');
+    expect(rows[1]).toContain('&lt;b&gt;Grüße&lt;/b&gt;');
+    expect(rows[0]).toContain('18:12'); // server time zone (Berlin)
+    expect(p.byId('lisSum').textContent).toBe('2 Kommentare');
+    expect(p.byId('lisTitle').attrs['aria-expanded']).toBe('true');
+    expect(p.sent.slice(before)).toEqual([]);
+    // Folded again, a newly released comment counts as new; the seen ones don't.
+    p.byId('lisTitle').click();
+    const next = status();
+    (next.comments as unknown[]).unshift({ id: 'c3', text: 'Danke!', receivedAtMs: 0 });
+    p.push({ type: 'listeners', status: next });
+    expect(p.byId('lisSum').textContent).toBe('3 Kommentare · 1 neu');
+  });
+
+  it('never lets an unreachable eve look like quiet listeners', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'listeners', status: status({ state: 'offline' }) });
+    expect(p.byId('lisState').style.display).toBe('');
+    expect(p.byId('lisState').textContent).toBe('eve nicht erreichbar – Stand 18:13');
+    expect(p.byId('lisState').has('warn')).toBe(true);
+    p.push({ type: 'listeners', status: status({ state: 'ok' }) });
+    expect(p.byId('lisState').style.display).toBe('none');
+  });
+
+  it('says when the plan has no show on air', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'listeners', status: status({ show: null, comments: [], hearts: 0 }) });
+    expect(p.byId('lisState').textContent).toBe('Laut Sendeplan läuft gerade keine Sendung');
+    expect(p.byId('lisHearts').textContent).toBe('');
+  });
+});
+
+describe('meters page — Sendung (the episode guide from eve)', () => {
+  const episode = {
+    id: 'ep1',
+    title: 'Gentle Machine',
+    airMs: 0,
+    status: 'entwurf',
+    opening: '<p><em>Jingle</em></p>',
+    closing: '',
+    topics: [
+      { id: 't1', title: 'Die <Macherinnen>', cue: 'Wer seid ihr?', html: '<p>Notiz</p>' },
+      { id: 't2', title: 'Die Idee', cue: '', html: '' },
+    ],
+    questions: [
+      { id: 'q1', text: 'Was ist Erfolg?', asked: false },
+      { id: 'q2', text: 'Hat es sich gelohnt?', asked: true },
+    ],
+  };
+  const status = (over: Record<string, unknown> = {}) => ({
+    show: {
+      slug: 'tu',
+      name: 'Tu was Du willst',
+      startMs: Date.UTC(2026, 9, 5, 18),
+      endMs: Date.UTC(2026, 9, 5, 19),
+    },
+    pinned: false,
+    hearts: 0,
+    comments: [],
+    episode,
+    guide: 'ok',
+    state: 'ok',
+    updatedMs: 1,
+    ...over,
+  });
+
+  it('shows the show with its slot, and the guide in its planned order', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'listeners', status: status() });
+    expect(p.byId('guidebox').style.display).toBe('');
+    expect(p.byId('gdShow').textContent).toBe('Tu was Du willst · 20:00–21:00');
+    expect(p.byId('gdBody').style.display).toBe('');
+    expect(p.byId('gdEp').textContent).toBe('Gentle Machine');
+    expect(p.byId('gdState').style.display).toBe('none');
+    const html = p.byId('gdParts').innerHTML;
+    // Opening first, then the topics in order, then the questions.
+    const order = ['Anmoderation', 'Die &lt;Macherinnen&gt;', 'Die Idee', 'Was ist Erfolg?'];
+    expect(order.map((w) => html.indexOf(w))).toEqual(
+      [...order.map((w) => html.indexOf(w))].sort((a, b) => a - b)
+    );
+    expect(html).toContain('<p><em>Jingle</em></p>'); // sanitized on the box
+    expect(html).toContain('Wer seid ihr?');
+    expect(html).toContain(
+      '<li class="asked"><span class="ok" aria-label="gestellt">✓</span> Hat es sich gelohnt?'
+    );
+    expect(html).not.toContain('Abmoderation'); // there is none
+  });
+
+  it('folds away and remembers it, sending nothing', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const before = p.sent.length;
+    p.push({ type: 'listeners', status: status() });
+    p.byId('gdTitle').click();
+    expect(p.byId('gdBody').style.display).toBe('none');
+    expect(p.byId('gdTitle').attrs['aria-expanded']).toBe('false');
+    expect(p.sent.slice(before)).toEqual([]);
+  });
+
+  it('is absent without a show on air, and says when eve has no guide', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'listeners', status: status({ show: null, episode: null, guide: 'pending' }) });
+    expect(p.byId('guidebox').style.display).toBe('none');
+    p.push({ type: 'listeners', status: status({ episode: null, guide: 'none' }) });
+    expect(p.byId('guidebox').style.display).toBe('');
+    expect(p.byId('gdState').textContent).toBe(
+      'Für diese Sendung ist in eve kein Ablauf vorbereitet'
+    );
+    expect(p.byId('gdBody').style.display).toBe('none');
+  });
+
+  it('keeps the last guide when eve stops answering, and says so', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push({ type: 'listeners', status: status() });
+    p.push({ type: 'listeners', status: status({ guide: 'unavailable' }) });
+    expect(p.byId('gdState').textContent).toBe(
+      'Stand von vorhin – eve liefert den Ablauf gerade nicht'
+    );
+    expect(p.byId('gdState').has('warn')).toBe(true);
+    expect(p.byId('gdParts').innerHTML).toContain('Was ist Erfolg?');
   });
 });

@@ -1,0 +1,43 @@
+/* Design tokens and the few pieces every view shares (docs/design-guidelines.md,
+   section 4). Dark is the default — the views are used in a dim studio; the
+   light set follows the system setting for a daylight session.
+   The technician/host page still carries its own copy of the tokens at the top
+   of its <style> in ../server.ts; keep the two in step until that page moves
+   out here as well (roadmap M2.1). */
+:root{color-scheme:dark;
+ --bg:#101214;--surface:#1a1d21;--raised:#24282e;--pressed:#33383f;--line:#33383f;--border:#3a3f47;
+ --text:#e8eaed;--muted:#a3aab3;--accent:#7cc8ff;--on-accent:#101214;
+ --ok:#5fd08a;--warn:#ffc94d;--cue:#ffb347;--on-cue:#101214;--onair:#ff5c5c;--info:#b9a6ff;--on-info:#101214;
+ --duck:#4fc3c7;--on-duck:#101214;--off:#3a3f47;
+ --chip-red:#c62828;--chip-green:#1e7d46;
+ --m-ok:#5fd08a;--m-warn:#ffc94d;--m-hot:#ff5c5c;--m-edge:transparent}
+@media (prefers-color-scheme:light){:root{color-scheme:light;
+ --bg:#f6f7f8;--surface:#ffffff;--raised:#eceef1;--pressed:#dde1e6;--line:#dde1e6;--border:#858d97;
+ --text:#15181c;--muted:#4d5560;--accent:#0a5fb4;--on-accent:#ffffff;
+ --ok:#1a7a41;--warn:#8a5a00;--cue:#9a4d00;--on-cue:#ffffff;--onair:#c62828;--info:#5b3fc4;--on-info:#ffffff;
+ --duck:#0b7285;--on-duck:#ffffff;--off:#d5d9df;
+ --m-ok:#2e9e5b;--m-warn:#b07800;--m-hot:#d93636;--m-edge:#858d97}}
+@media (prefers-contrast:more){:root{--surface:var(--bg);--raised:var(--bg);--m-edge:var(--text)}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+ font:1rem/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
+h1,h2,p{margin:0}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+/* Connection state in words — only on screen when it is not fine. A view
+   showing stale numbers must not look like a quiet studio, so the content
+   dims along with it. */
+.conn{display:none;padding:8px 16px;border-radius:8px;background:var(--surface);color:var(--muted);font-size:1rem}
+body.wait .conn,body.lost .conn{display:block}
+body.lost .conn{color:var(--onair);font-weight:600}
+body.lost .stale{opacity:.35}
+/* Level meter, −60…0 dB: fixed zone colours, a cover sliding back from the
+   right. No transitions — they would lag behind the audio. */
+.meter{position:relative;height:14px;border-radius:7px;background:var(--surface);overflow:hidden;
+ outline:1px solid var(--m-edge);outline-offset:-1px}
+.meter .fill{position:absolute;top:0;bottom:0;left:0;right:0;
+ background:linear-gradient(to right,var(--m-ok) 0 83.33%,var(--m-warn) 83.33% 95%,var(--m-hot) 95% 100%)}
+.meter .cover{position:absolute;top:0;bottom:0;right:0;width:100%;background:var(--surface)}
+/* For a screen reader only. */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}

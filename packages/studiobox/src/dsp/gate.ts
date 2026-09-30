@@ -36,8 +36,9 @@ export class Gate {
     return dbToGain(this.gainDb);
   }
 
-  /** 0 = fully closed, 1 = fully open. */
+  /** 0 = fully closed, 1 = fully open. A disabled gate is always open. */
   get openness(): number {
-    return this.p.rangeDb === 0 ? 1 : 1 - this.gainDb / this.p.rangeDb;
+    if (!this.p.enabled || this.p.rangeDb === 0) return 1;
+    return 1 - this.gainDb / this.p.rangeDb;
   }
 }

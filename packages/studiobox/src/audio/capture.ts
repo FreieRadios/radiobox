@@ -48,6 +48,10 @@ export class Capture extends EventEmitter {
           '-t',
           'raw',
           '-q',
+          // A longer buffer so a busy machine loses no samples, short periods
+          // so the audio arrives smoothly. Only passed when configured.
+          ...(c.bufferMs ? ['--buffer-time', String(Math.round(c.bufferMs * 1000))] : []),
+          ...(c.periodMs ? ['--period-time', String(Math.round(c.periodMs * 1000))] : []),
           '-', // stdout
         ],
       };

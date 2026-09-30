@@ -70,9 +70,13 @@ export class Encoder extends EventEmitter {
       const s = d.toString().trim();
       if (s) this.log.error('encoder ffmpeg:', s);
     });
+    // A dropped harbor connection kills ffmpeg; the next write then races the
+    // 'close' event and the pipe emits EPIPE on stdin. Unhandled, that 'error'
+    // would take the whole service down; 'close' -> 'exit' drives the restart.
+    proc.stdin.on('error', (err) => this.log.warn('encoder ffmpeg stdin:', err.message));
     proc.on('error', (err) => this.log.error('encoder spawn error:', err.message));
     proc.on('close', (code) => {
-      this.proc = null;
+      if (this.proc === proc) this.proc = null;
       this.emit('exit', code);
     });
   }

@@ -1,12 +1,44 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { MeterSnapshot } from '../dsp/graph';
 import { FileEntry, FolderEntry } from '../audio/file-dirs';
 import { QueueItem } from '../audio/play-queue';
+import { ListenerStatus } from '../listeners/feed';
 import { ScheduleEntry } from '../schedule';
+import { RolesConfig } from '../config/schema';
 import { Log } from '../util/log';
+import { Roles, ViewRole } from './roles';
+import { Snapshot, guestSnapshot, onAirOf, spectatorSnapshot } from './wire';
+
+/** Routes that serve a view (see `Roles.urls`, and `viewFor` for which one). */
+const VIEW_ROUTES = new Set(['/', '/index.html', '/tech', '/host', '/guest', '/spectator']);
+
+/** Routes that expose the file tree: operators only (technician, host). */
+const DATA_ROUTES = new Set(['/folders', '/files', '/scheduled', '/preview']);
+
+/** The guest and spectator views and what they share, as real files (no
+ *  build step; the technician/host page still lives in `PAGE` below until it
+ *  moves out too). Only these names are ever read — nothing from the request
+ *  reaches the filesystem. */
+const PUBLIC_FILES: Record<string, string> = {
+  '/tokens.css': 'text/css; charset=utf-8',
+  '/meter.js': 'text/javascript; charset=utf-8',
+  '/guest.html': 'text/html; charset=utf-8',
+  '/spectator.html': 'text/html; charset=utf-8',
+};
+
+/** `public/` beside this file: under ts-node that is the source folder, in a
+ *  build it is the copy in `dist/` — or, if the build didn't copy it, the
+ *  source folder of the checkout the build runs from. */
+const PUBLIC_DIR =
+  [path.join(__dirname, 'public'), path.join(__dirname, '../../src/meters/public')].find((d) =>
+    fs.existsSync(d)
+  ) ?? path.join(__dirname, 'public');
+
+const isOperator = (role: ViewRole): boolean => role === 'tech' || role === 'host';
 
 /** Content types for the "Vorhören" (browser preview) route. Every one of
  *  these plays natively in current browsers, so preview streams the file's own
@@ -49,9 +81,29 @@ export function isPreviewable(name: string): boolean {
  *   - { type: 'queueClear' }                  drop the whole pending list
  *   - { type: 'queuePlay', value: { id } }     jump to a pending item now
  *   - { type: 'queueStart' }                  start the head of the queue
+ *   - { type: 'queueMode', value: 'single' | 'chain' } "einzeln" / "durchlaufen"
+ *  Live mode only:
+ *   - { type: 'musicReturn', value: boolean } start/stop the music return output
+ *   - { type: 'endShow', value?: false }      "Sendung beenden" (false cancels)
+ *   - { type: 'testTone', value: boolean }    1 kHz alignment tone on the monitor
+ *   - { type: 'priorityDepth', value: dB }    host-priority depth
+ *   - { type: 'trim', value: { label, trimDb } } one mic's input trim
+ *   - { type: 'setupStart', value?: { only: [label] } } start "Einmessen"
+ *   - { type: 'setupFinish' | 'setupApply' | 'setupDiscard' | 'setupCancel' }
+ *  Every connection has a role (tech | host | guest | spectator), taken from
+ *  the `?k=<token>` of its WebSocket URL and announced as the first message,
+ *  { type: 'hello', role, tz }; commands outside the role's allowlist are
+ *  dropped (see `roles.ts`). With `meters.roles` disabled everybody is `tech`.
+ *  The role also decides what a connection is told: guests and spectators get
+ *  a cut-down snapshot and no play list (see `wire.ts`), and the HTTP routes
+ *  that expose the file tree answer 403 without an operator's token.
+ *  Every snapshot carries `onAir` (see `onAirOf`).
  *  The pending play list is pushed to every client as { type: 'queue', items }
  *  whenever it changes (and once per new connection), rather than riding along
- *  in the meter frames — it changes rarely and the frames are hot.
+ *  in the meter frames — it changes rarely and the frames are hot. Listener
+ *  feedback from eve (released comments and the heart count of the show on
+ *  air) travels the same way, as { type: 'listeners', status }, to operators
+ *  only; nothing on the page writes back to eve.
  *  The configured folders are served over HTTP at `/folders`, the listing of
  *  one folder (or a subdirectory inside it) at `/files?folder=N&path=REL`
  *  (subdirectory rows carry `dir:true`; file rows the parsed auto-play
@@ -72,16 +124,29 @@ export class MeterServer {
   private onScheduled: (() => ScheduleEntry[]) | null = null;
   private onResolve: ((folder: number, name: string) => string | null) | null = null;
   private onQueue: (() => QueueItem[]) | null = null;
+  private onListeners: (() => ListenerStatus) | null = null;
+  /** Role tokens and the links to hand out (see `Roles`). */
+  readonly roles: Roles;
+  /** The role each open connection was given when it connected. */
+  private roleOfWs = new WeakMap<WebSocket, ViewRole>();
 
   constructor(
     private port: number,
-    private log: Log
+    private log: Log,
+    roles: RolesConfig = { enabled: false, tokens: {} }
   ) {
+    this.roles = new Roles(roles);
     this.server = http.createServer((req, res) => {
       const url = (req.url ?? '/').split('?')[0];
-      if (url === '/' || url === '/index.html') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end(PAGE.replace('__SERVER_TZ__', SERVER_TZ));
+      const role = this.roles.roleOf(req.url);
+      if (VIEW_ROUTES.has(url)) {
+        this.serveView(url, role, res);
+      } else if (url in PUBLIC_FILES && !url.endsWith('.html')) {
+        this.servePublic(url, res);
+      } else if (DATA_ROUTES.has(url) && !isOperator(role)) {
+        // Hiding the file browser is not the protection — this is.
+        res.writeHead(403);
+        res.end();
       } else if (url === '/folders') {
         const folders = this.onFolders ? this.onFolders() : [];
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -112,17 +177,71 @@ export class MeterServer {
       }
     });
     this.wss = new WebSocketServer({ server: this.server });
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      // The role comes from the token in the connection URL (`?k=…`), never
+      // from what the page claims: commands outside its allowlist are dropped.
+      const role = this.roles.roleOf(req.url);
+      this.roleOfWs.set(ws, role);
+      ws.send(JSON.stringify({ type: 'hello', role, tz: SERVER_TZ }));
       // A fresh page knows nothing about the pending list until it changes,
-      // so hand it over on connect.
-      if (this.onQueue) ws.send(JSON.stringify({ type: 'queue', items: this.onQueue() }));
+      // so hand it over on connect (to those who get to see it).
+      if (this.onQueue && isOperator(role)) {
+        ws.send(JSON.stringify({ type: 'queue', items: this.onQueue() }));
+      }
+      if (this.onListeners && isOperator(role)) {
+        ws.send(JSON.stringify({ type: 'listeners', status: this.onListeners() }));
+      }
       ws.on('message', (raw) => {
+        let cmd: MeterCommand;
         try {
-          this.onCmd?.(JSON.parse(raw.toString()) as MeterCommand);
+          cmd = JSON.parse(raw.toString()) as MeterCommand;
         } catch {
-          /* ignore malformed control messages */
+          return; // ignore malformed control messages
         }
+        if (!cmd || typeof cmd.type !== 'string') return;
+        if (!this.roles.allows(role, cmd.type)) {
+          this.log.warn(`dropped "${cmd.type}" from a ${role} connection`);
+          return;
+        }
+        this.onCmd?.(cmd);
       });
+    });
+  }
+
+  /** Which view a route shows. The token decides, never the route alone:
+   *  the operators' page only goes to a technician or host connection, a
+   *  guest token gets the guest view whatever it asks for, and everything
+   *  else is the spectator view. With roles disabled every connection is a
+   *  technician: `/` is then the page (as on a playout box) and `/guest` and
+   *  `/spectator` show those views. */
+  private viewFor(url: string, role: ViewRole): 'page' | '/guest.html' | '/spectator.html' {
+    if (url === '/spectator' || role === 'spectator') return '/spectator.html';
+    if (url === '/guest' || role === 'guest') return '/guest.html';
+    return 'page';
+  }
+
+  private serveView(url: string, role: ViewRole, res: http.ServerResponse): void {
+    const view = this.viewFor(url, role);
+    if (view !== 'page') {
+      this.servePublic(view, res);
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(PAGE.replace('__SERVER_TZ__', SERVER_TZ));
+  }
+
+  /** One of the `PUBLIC_FILES`, read per request: they are a few kB, asked
+   *  for once per page load, and an edit shows up without a restart. */
+  private servePublic(name: string, res: http.ServerResponse): void {
+    fs.readFile(path.join(PUBLIC_DIR, name), (err, body) => {
+      if (err) {
+        this.log.warn(`view file missing: ${name} (${err.message})`);
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': PUBLIC_FILES[name], 'cache-control': 'no-store' });
+      res.end(body);
     });
   }
 
@@ -151,11 +270,26 @@ export class MeterServer {
     this.onQueue = fn;
   }
 
-  /** Push the pending play list to every connected page. */
+  /** Push the pending play list to every connected operator page. */
   broadcastQueue(items: QueueItem[]): void {
     const msg = JSON.stringify({ type: 'queue', items });
     for (const client of this.wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(msg);
+      if (client.readyState !== WebSocket.OPEN) continue;
+      if (isOperator(this.roleOfWs.get(client) ?? 'spectator')) client.send(msg);
+    }
+  }
+
+  /** Register the provider for listener feedback (sent on connect). */
+  onListListeners(fn: () => ListenerStatus): void {
+    this.onListeners = fn;
+  }
+
+  /** Push listener feedback to every connected operator page. */
+  broadcastListeners(status: ListenerStatus): void {
+    const msg = JSON.stringify({ type: 'listeners', status });
+    for (const client of this.wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      if (isOperator(this.roleOfWs.get(client) ?? 'spectator')) client.send(msg);
     }
   }
 
@@ -234,13 +368,36 @@ export class MeterServer {
   }
 
   start(): void {
-    this.server.listen(this.port, () => this.log.info(`meters on http://localhost:${this.port}`));
+    this.server.listen(this.port, () => {
+      this.log.info(`meters on http://localhost:${this.port}`);
+      if (!this.roles.enabled) return;
+      // Role links for the tablets. Anything opened without a token is
+      // read-only, so these lines are the keys to the session.
+      const urls = this.roles.urls(`http://${lanAddress()}:${this.port}`);
+      this.log.info(`role links (a connection without a token is read-only):`);
+      this.log.info(`  Technik:   ${urls.tech}`);
+      this.log.info(`  Host:      ${urls.host}`);
+      this.log.info(`  Gäste:     ${urls.guest}`);
+      this.log.info(`  Zuschauer: ${urls.spectator}`);
+    });
   }
 
+  /** Push a meter snapshot to every connection, each in the cut its role
+   *  gets (serialized once per cut, and only for cuts somebody listens to). */
   broadcast(snapshot: MeterSnapshot): void {
-    const msg = JSON.stringify(snapshot);
+    const s: Snapshot = snapshot;
+    const onAir = onAirOf(s);
+    const cuts: { full?: string; guest?: string; spectator?: string } = {};
     for (const client of this.wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(msg);
+      if (client.readyState !== WebSocket.OPEN) continue;
+      const role = this.roleOfWs.get(client) ?? 'spectator';
+      if (role === 'guest') {
+        client.send((cuts.guest ??= JSON.stringify(guestSnapshot(s, onAir))));
+      } else if (role === 'spectator') {
+        client.send((cuts.spectator ??= JSON.stringify(spectatorSnapshot(s, onAir))));
+      } else {
+        client.send((cuts.full ??= JSON.stringify({ ...s, onAir })));
+      }
     }
   }
 
@@ -250,309 +407,672 @@ export class MeterServer {
   }
 }
 
+/** The address the tablets reach this machine at: the first non-internal
+ *  IPv4 address, `localhost` when there is none. */
+function lanAddress(): string {
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list ?? []) {
+      if (a.family === 'IPv4' && !a.internal) return a.address;
+    }
+  }
+  return 'localhost';
+}
+
 /** The server's IANA timezone. Filename timestamps are parsed in this zone
  *  (schedule.ts builds local Dates), so the page renders all schedule times
  *  and the footer clock with it — a browser in another zone must not disagree
  *  with the clock that actually fires auto-play. */
 const SERVER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-const PAGE = `<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>studiobox meters</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%238df'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%238df' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cf' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
+const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>studiobox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101214'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%237cc8ff'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
 <style>
- body{background:#111;color:#ddd;font:13px monospace;margin:0;height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
- h1{font-size:16px;color:#8df;font-weight:bold;letter-spacing:.3px}
- .content{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:14px 18px;overflow:hidden}
- .metering{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;max-width:760px}
- table{border-collapse:collapse;width:100%;max-width:760px;table-layout:fixed;flex:0 0 auto}
- td,th{padding:8px 8px;text-align:right;border-bottom:1px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- th:first-child,td:first-child{text-align:left}
- col.c-ch{width:20%}col.c-role{width:11%}col.c-out{width:22%}col.c-gate{width:10%}col.c-comp{width:15%}col.c-mix{width:10%}col.c-mute{width:12%}
- td.mute{text-align:center;overflow:visible}
- .mtbtn{margin:0;padding:3px 0;width:58px;font:12px monospace;background:#2a2a2a;color:#9c9;border:1px solid #4a4a4a;border-radius:4px}
- .mtbtn:hover{border-color:#7cf}
- .mtbtn.on{background:#3a2f1c;color:#e6c878;border-color:#8a6d2f}
- .bar{display:inline-block;height:10px;background:#3a7;vertical-align:middle}
- .gr{background:#c64}.duck{background:#c4a}
- .master{margin:12px 0;font-size:14px;flex:0 0 auto}
- .master .lbl{color:#7cf;margin:0 5px 0 14px}
- .master .lbl:first-child{margin-left:0}
- .master .v{display:inline-block;width:6.5ch;text-align:right;color:#ddd}
- button{margin:0;padding:8px 12px;font:13px monospace;background:#223;color:#cde;border:1px solid #456;border-radius:5px;cursor:pointer;transition:background .12s,border-color .12s}
- button:hover{border-color:#7cf}
- button.mic-live{background:#c33;color:#fff;border-color:#e66;font-weight:bold}
- button.muted{background:#333;color:#9ab;border-color:#555}
- button.rec{background:#622;color:#fdd;border-color:#a44}
- button.rec.on{background:#c33;color:#fff;border-color:#c33}
- button.ship{background:#264;color:#dfd;border-color:#4a6}
- button.ship.on{background:#2a7;color:#fff;border-color:#2a7}
- button.mon{background:#234;color:#cdf;border-color:#46a}
- button.mon.on{background:#37a;color:#fff;border-color:#37a}
- /* Right-hand column: the browser (file list) above, the pending play list
-    below — they belong together and share the space next to the metering. */
- .col2{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;max-width:760px}
- .files{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-top:10px}
- #flist{list-style:none;margin:0;padding:0;flex:1 1 auto;overflow-y:auto;border-top:1px solid #222}
- .files li{padding:9px 8px;border-bottom:1px solid #222;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
- .files li:hover{background:#1a1a1a}
- .files li.playing{background:#2a1830;color:#fbe}
- .files .none{color:#666}
- .files li .fname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .files li .when{flex:0 0 auto;color:#667;white-space:nowrap}
- .files li.dir{color:#8df}
- .files li.dir .when{color:#556}
- .fbar{flex:0 0 auto;display:flex;align-items:center;gap:8px}
- .fbar #crumbs{flex:1 1 auto;min-width:0}
- /* "＋ alle" appends exactly the files listed below it — never the tree — so
-    it carries the count and is hidden when there is nothing to add. */
- .fbar #addall{flex:0 0 auto;width:auto;margin:0;padding:3px 9px;font:12px monospace;
-  background:transparent;color:#7a8a7a;border:1px solid #3a4a3a;border-radius:4px;cursor:pointer}
- .fbar #addall:hover{color:#cfc;border-color:#4a6a4a;background:#1d261d}
- #crumbs{flex:0 0 auto;padding:7px 8px;color:#8df;white-space:nowrap;overflow-x:auto}
- #crumbs .seg{cursor:pointer}
- #crumbs .seg:hover{text-decoration:underline}
- #crumbs .seg.cur{color:#ddd;cursor:default;text-decoration:none}
- #crumbs .sep{color:#555;margin:0 5px}
- .files li.sched .when{color:#ffd24a}
- .files li.sched{background:#201c0e}
- .files li.sched.playing{background:#2a1830}
- .files li.next .when{font-weight:bold}
- .files li.next{border-left:3px solid #ffd24a;padding-left:5px}
- /* The row currently being pre-listened to (Vorhören). Amber like the rest of
-    the cue chrome. It has to win over .playing/.sched/.next and their
-    combinations, hence last in the file and with the class doubled to outweigh
-    the two-class .sched.playing rule above. */
- .files li.cued.cued{background:#4a3a16;color:#ffe2ab;border-left:3px solid #e6a52e;padding-left:5px}
- .files li.cued .when{color:#ffd24a}
- #next{color:#ffd24a;overflow-wrap:anywhere}
- #next .dim{color:#997}
- /* Pending play list. Same panel for both modes: on air it mirrors the box's
-    server-side queue, in Vorhören it is the browser's own audition list. */
- .queue{flex:0 1 auto;min-height:0;display:flex;flex-direction:column;max-height:38vh;
-  margin-top:10px;border-top:1px solid #333}
- .qhead{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:8px 4px}
- .qhead .qt{flex:1 1 auto;min-width:0;color:#7cf;cursor:pointer;user-select:none;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .qhead .qt:hover{color:#adf}
- .qhead button{flex:0 0 auto;width:auto;padding:4px 9px;font-size:12px}
- #qlist{list-style:none;margin:0;padding:0;flex:1 1 auto;overflow-y:auto}
- #qlist li{display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid #222}
- #qlist li:hover{background:#1a1a1a}
- #qlist .qn{flex:0 0 auto;width:2.5ch;text-align:right;color:#667}
- #qlist .fname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
- #qlist .fname:hover{color:#fff}
- #qlist .fld{color:#667}
- #qlist .qb{flex:0 0 auto;display:flex;gap:4px}
- #qlist .qb button{width:28px;padding:3px 0;font-size:12px;text-align:center}
- #qlist .none{color:#666;padding:9px 8px;display:block}
- /* Row actions stay quiet: the ⏰/🎧/▶ hint is what the eye should catch, the
-    ＋ is only an affordance. Fixed width so rows line up and the button never
-    resizes with its glyph. */
- .files li .addbtn{flex:0 0 auto;width:26px;margin:0;padding:2px 0;font:13px monospace;text-align:center;
-  background:transparent;color:#6a7f6a;border:1px solid transparent;border-radius:4px;cursor:pointer}
- .files li:hover .addbtn{color:#9c9}
- .files li .addbtn:hover{color:#cfc;border-color:#4a6a4a;background:#1d261d}
- body.cueing .queue{border-top-color:#6a5320}
- body.cueing .qhead .qt{color:#e6c878}
- .nowplaying{color:#fbe;font-size:15px}
- .nowplaying b{color:#7cf}
- .bar-panel{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 18px;
-  background:linear-gradient(#1f1f1f,#171717);box-shadow:0 0 10px rgba(0,0,0,.55)}
- .topbar{border-bottom:1px solid #333;flex-wrap:wrap}
- .footer{border-top:1px solid #333;flex-direction:column;align-items:stretch;gap:8px}
- .footer .ctl{display:flex;align-items:center;gap:10px}
- .topbar h1{margin:0}
- .topbar .dot{color:#3c8;margin-right:6px}
- /* The rec/ship/⋮ cluster: an auto left margin keeps it hard right in every
-    layout (a flex spacer vanished when hidden on small screens, letting ⋮
-    drift left); it wraps as a unit and stays right-aligned when it does. */
- .topbar .topright{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px}
- .bar-panel button{width:172px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ /* Design tokens (docs/design-guidelines.md, section 4; docs/design/). Dark is
+    the default — the page is used in a dim studio; the light set follows the
+    system setting for a daylight session. Every colour below comes from here. */
+ :root{color-scheme:dark;
+  --bg:#101214;--surface:#1a1d21;--raised:#24282e;--pressed:#33383f;--line:#33383f;--border:#3a3f47;
+  --text:#e8eaed;--muted:#a3aab3;--accent:#7cc8ff;--on-accent:#101214;
+  --ok:#5fd08a;--warn:#ffc94d;--cue:#ffb347;--on-cue:#101214;--onair:#ff5c5c;--info:#b9a6ff;--duck:#4fc3c7;--off:#3a3f47;
+  --chip-red:#c62828;--chip-green:#1e7d46;--stop-bg:var(--raised);--stop-edge:#ff5c5c;
+  --m-ok:#5fd08a;--m-warn:#ffc94d;--m-hot:#ff5c5c;--m-edge:transparent;
+  --inv-bg:#e8eaed;--inv-fg:#101214}
+ @media (prefers-color-scheme:light){:root{color-scheme:light;
+  --bg:#f6f7f8;--surface:#ffffff;--raised:#eceef1;--pressed:#dde1e6;--line:#dde1e6;--border:#858d97;
+  --text:#15181c;--muted:#4d5560;--accent:#0a5fb4;--on-accent:#ffffff;
+  --ok:#1a7a41;--warn:#8a5a00;--cue:#9a4d00;--on-cue:#ffffff;--onair:#c62828;--info:#5b3fc4;--duck:#0b7285;--off:#d5d9df;
+  --stop-bg:#c62828;--stop-edge:#8e1c1c;
+  --m-ok:#2e9e5b;--m-warn:#b07800;--m-hot:#d93636;--m-edge:#858d97;
+  --inv-bg:#15181c;--inv-fg:#ffffff}}
+ *{box-sizing:border-box}
+ body{margin:0;height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column;
+  background:var(--bg);color:var(--text);
+  font:1rem/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
+ h1,h2,h3{margin:0;font-size:1rem;font-weight:600}
+ /* Buttons: 44 px targets, 8 px radius, separation by surface tone (no
+    shadows). "On" states are filled and say so in words (aria-pressed). */
+ button{margin:0;min-height:44px;padding:0 16px;font:inherit;font-size:.9375rem;font-weight:600;
+  background:var(--raised);color:var(--text);border:1px solid var(--border);border-radius:8px;cursor:pointer}
+ button:hover,button:active{background:var(--pressed)}
+ button:disabled{background:transparent;color:var(--muted);border:1px dashed var(--border);cursor:default}
+ :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+ button.icon{flex:0 0 auto;width:44px;padding:0;font-size:1.0625rem;font-weight:700}
+ .panel{display:flex;flex-direction:column;gap:12px;min-width:0;padding:16px;background:var(--surface);border-radius:12px}
+ /* ---- header: title, output toggles, connection, clock, tools ------------ */
+ .topbar{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-height:60px;
+  padding:8px max(24px,env(safe-area-inset-right)) 8px max(24px,env(safe-area-inset-left));background:var(--surface)}
+ /* Clickable title -> welcome screen. */
+ .logo{min-height:44px;padding:0 4px;border:0;background:transparent;color:var(--muted);font-size:1rem}
+ .logo:hover,.logo:active{background:transparent;color:var(--text)}
+ /* Not a box of its own: a hidden toggle must not leave a gap in the bar. */
+ .toggles{display:contents}
+ /* The connection/clock/tools cluster: an auto left margin keeps it hard
+    right in every layout; it wraps as a unit and stays right-aligned when it
+    does. */
+ .hright{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 20px}
+ .tools,.status{display:flex;align-items:center;gap:12px}
+ /* Recording / streaming: a status chip that is also the switch. Running is
+    outlined in its colour, with the state in capitals — red outlined means
+    "recording", green "stream up" (filled red is reserved for on air). */
+ .tog.on{background:transparent;border-width:2px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+ .tog.on:hover{background:var(--raised)}
+ .rec.on{color:var(--onair);border-color:var(--onair)}
+ .ship.on{color:var(--ok);border-color:var(--ok)}
+ .mon.on{background:var(--chip-green);color:#fff;border:2px solid var(--ok)}
+ .conn{display:inline-flex;align-items:center;gap:8px;font-size:.875rem;color:var(--muted);white-space:nowrap}
+ .conn .dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--warn)}
+ .conn.ok .dot{background:var(--ok)}
+ .conn.lost{color:var(--onair);font-weight:600}
+ .conn.lost .dot{background:var(--onair)}
+ .clockbox{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+ #clock{font-size:1.75rem;font-weight:700;white-space:nowrap}
+ .tz{font-size:.8125rem;color:var(--muted);white-space:nowrap}
+ .tz.warn{color:var(--warn);font-weight:600}
+ /* "Vorhören" (browser pre-listen) toggle. When on it must be unmistakable:
+    filled amber button, amber rule under the header, amber-framed file list. */
+ button.cue{background:transparent;color:var(--cue);border-color:var(--cue)}
+ button.cue:hover{background:var(--raised)}
+ button.cue.on{background:var(--cue);color:var(--on-cue);font-weight:700}
+ body.cueing .topbar{box-shadow:inset 0 -3px 0 var(--cue)}
  /* Top-right ⋮ menu: transport toggles that don't need to sit in the bar. */
  .menuwrap{position:relative}
- #menuBtn{width:44px;padding:8px 0;font-size:17px;font-weight:bold}
- .menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:230px;display:flex;flex-direction:column;gap:6px;
-  background:#1c1c1c;border:1px solid #444;border-radius:6px;padding:8px;box-shadow:0 5px 18px rgba(0,0,0,.65)}
- .menu button{width:100%;flex:none;text-align:left}
- /* Folder picker: a flat one-click list (no nested <select>), divided from the
-    action buttons below and highlighting the current folder. */
- .menu .folderlist{display:flex;flex-direction:column;gap:6px}
- .menu .folderlist:not(:empty){border-bottom:1px solid #333;padding-bottom:8px}
- .menu .fbtn.on{background:#2a3550;color:#cfe4ff;border-color:#4a6aa0}
- /* Clickable logo -> welcome screen. */
- .topbar h1{cursor:pointer;user-select:none}
- .topbar h1:hover{color:#adf}
- .topbar h1:hover .dot{color:#5fd}
- /* "Vorhören" (browser pre-listen) toggle. When on it must be unmistakable:
-    amber button, amber rule under the top bar, amber-framed file list. */
- button.cue{background:#3a2f1c;color:#e6c878;border-color:#8a6d2f}
- button.cue.on{background:#e6a52e;color:#201603;border-color:#ffd24a;font-weight:bold}
- body.cueing .topbar{border-bottom:2px solid #e6a52e}
- body.cueing .files{outline:1px solid #6a5320;outline-offset:6px;border-radius:4px}
- /* Preview player: only present while pre-listening. */
- .cuebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
- /* "Jump to where this is playing from" buttons (now-playing line, cue bar,
-    queue rows). Declared after .bar-panel button so the footer's fixed button
-    width doesn't apply to them. */
- button.jump{flex:0 0 auto;width:30px;margin:0 0 0 8px;padding:2px 0;font:13px monospace;text-align:center;
-  background:transparent;color:#6d8496;border:1px solid #33475a;border-radius:4px;cursor:pointer;
-  vertical-align:middle}
- button.jump:hover{color:#cfe;border-color:#7cf;background:#1b2733}
- /* "Reinhören" belongs to the pre-listen family, so it wears its amber. */
- button.jump.tune{color:#a98a4a;border-color:#4d3f1e}
- button.jump.tune:hover{color:#ffd24a;border-color:#8a6d2f;background:#2a2211}
+ .menu{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:260px;display:flex;flex-direction:column;gap:8px;
+  padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+ .menu button{width:100%;text-align:left}
+ /* Status chips in the header: state in words, not switches. Filled red is
+    reserved for "on air" — programme is leaving the box. */
+ .chip{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:2px 12px;border-radius:8px;
+  border:2px solid var(--border);color:var(--muted);font-size:.9375rem;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;white-space:nowrap}
+ .chip .dot{flex:0 0 auto;width:10px;height:10px;border-radius:50%;border:2px solid currentColor}
+ .chip.on{background:var(--chip-red);border-color:var(--chip-red);color:#fff}
+ .chip.on .dot{background:#fff}
+ .chip.warn{border-color:var(--warn);color:var(--warn)}
+ .chip.info{border-color:var(--accent);color:var(--accent)}
+ /* Press-and-hold for everything that ends output: the fill runs for the hold
+    time and the button acts when it is full; letting go earlier cancels. A
+    short tap arms a confirm instead ("nochmal tippen"), ringed in red. */
+ .hold{position:relative;overflow:hidden;isolation:isolate;touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+ .hold::before{content:"";position:absolute;z-index:-1;left:0;top:0;bottom:0;width:0;background:currentColor;opacity:.3}
+ .hold.holding::before{width:100%;transition:width .8s linear}
+ .hold.armed{outline:3px solid var(--onair);outline-offset:2px}
+ #tone.on{border:2px solid var(--warn);color:var(--warn)}
+ /* Announcements for a screen reader only (one polite live region). */
+ .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ /* One line for everybody who is not the technician while the setup assistant
+    runs: who is up and what to read. */
+ .banner{flex:0 0 auto;margin:16px max(24px,env(safe-area-inset-right)) 0 max(24px,env(safe-area-inset-left));
+  padding:12px 16px;border-radius:12px;background:var(--surface);box-shadow:inset 0 0 0 2px var(--accent);font-size:1.125rem}
+ /* ---- main: metering left (mixer mode only), playout right --------------- */
+ .content{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:16px;overflow-y:auto;
+  padding:16px max(24px,env(safe-area-inset-right)) 16px max(24px,env(safe-area-inset-left))}
+ /* The metering column only exists once a snapshot with channels has arrived
+    (body.live) — a playout-only box never flashes an empty meter panel. */
+ .metering{display:none;flex:0 0 auto;flex-direction:column;gap:16px;min-width:0}
+ body.live .metering{display:flex}
+ /* Right-hand column: the browser (file list) above, the pending play list
+    below — they belong together and share the space next to the metering.
+    Stacked under the metering it keeps a usable height of its own and the
+    page scrolls; alone (playout-only) it simply fills the screen. */
+ .col2{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:16px;min-width:0}
+ body.live .col2{flex:0 0 auto;height:min(640px,85vh);height:min(640px,85dvh)}
+ /* Channel meters: one grid row per channel, a bar per processing stage. */
+ .chscroll{overflow-x:auto}
+ .chgrid{display:grid;grid-template-columns:minmax(88px,1.6fr) 56px minmax(64px,2fr) repeat(4,minmax(52px,1fr)) 68px;
+  gap:8px;align-items:center;min-width:540px}
+ .chhead{align-items:end;padding-bottom:8px;border-bottom:1px solid var(--line);font-size:.8125rem;color:var(--muted)}
+ .chrow{min-height:48px;border-bottom:1px solid var(--raised)}
+ .chname{display:flex;flex-direction:column;min-width:0}
+ /* Channel colour (config "color", e.g. the mic's cable) as a tape stripe left
+    of the name — beside the label, never instead of it. Outlined so a black
+    cable still shows on the dark theme. */
+ .chname.cc{position:relative;padding-left:14px}
+ .chname.cc::before{content:'';position:absolute;left:0;top:2px;bottom:2px;width:6px;border-radius:3px;
+  background:var(--chc);box-shadow:0 0 0 1px var(--muted)}
+ .chname b{font-size:.9375rem;font-weight:600;line-height:1.15;overflow:hidden;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+ /* Channel state as a word (OFFEN / PAUSE / STUMM / AN), coloured on top. */
+ .chstate{font-size:.75rem;font-weight:700;letter-spacing:.05em;color:var(--muted)}
+ .chstate.open{color:var(--ok)}
+ .chstate.pause{color:var(--info)}
+ .chstate.duck{color:var(--duck)}
+ /* Input trim: the value is the button that opens its stepper below the grid. */
+ .trimbtn{min-height:44px;width:100%;padding:0;font-size:.875rem;background:transparent;border-color:transparent}
+ .trimbtn:hover,.trimbtn.on{border-color:var(--border)}
+ .trimrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+ .trimrow .who{flex:1 1 120px;min-width:0}
+ .trimrow output{min-width:7ch;text-align:center;font-size:1.125rem;font-weight:700}
+ .trimrow button{min-width:56px;padding:0 8px}
+ .stage{display:flex;flex-direction:column;gap:4px;min-width:0}
+ .stage .val{font-size:.8125rem;color:var(--muted);white-space:nowrap;overflow:hidden}
+ /* Level meter, −60…0 dB: the zones (ok below −10, attention to −3, too loud
+    above) are a fixed gradient; a cover slides back from the right and a tick
+    holds the peak. No transitions — they would lag behind the audio. */
+ .meter{position:relative;height:10px;border-radius:3px;background:var(--bg);overflow:hidden;
+  outline:1px solid var(--m-edge);outline-offset:-1px}
+ .meter .fill{position:absolute;top:0;bottom:0;left:0;right:0;
+  background:linear-gradient(to right,var(--m-ok) 0 83.33%,var(--m-warn) 83.33% 95%,var(--m-hot) 95% 100%)}
+ .meter .cover{position:absolute;top:0;bottom:0;right:0;width:100%;background:var(--bg)}
+ .meter .peak{position:absolute;top:0;bottom:0;left:-4px;width:2px;background:var(--text)}
+ /* Gate openness and gain reduction are amounts, not levels: one plain colour. */
+ .meter.plain .fill{background:var(--accent)}
+ .s-gate .meter.plain .fill{background:var(--m-ok)}
+ /* Leveler gain goes both ways: the bar grows out of the centre. */
+ .meter.bi .fill{right:auto;left:50%;width:0;background:var(--accent)}
+ .meter.bi::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--muted)}
+ /* Sticky: when a narrow screen scrolls the grid sideways, the mute button
+    stays in reach at the right edge. */
+ .mtbtn{position:sticky;right:0;z-index:1;padding:0;font-size:.875rem}
+ .mtbtn.on{background:var(--inv-bg);color:var(--inv-fg);border-color:var(--inv-bg)}
+ /* Programme loudness: the short-term value large, the rest as tiles. */
+ .lufs{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:4px 12px}
+ .lufs .big{font-size:3rem;font-weight:700;line-height:1}
+ .lufs .unit{font-size:1.125rem;color:var(--muted)}
+ .lufs .sub{font-size:.875rem;color:var(--muted)}
+ .meter.lg{height:12px}
+ .scale{position:relative;height:1.7em;font-size:.8125rem;color:var(--muted)}
+ .scale span{position:absolute;top:0;padding:6px 0 0 4px;border-left:1px solid var(--muted);line-height:1}
+ .scale span:last-child{right:0;padding:6px 4px 0 0;border-left:0;border-right:1px solid var(--muted)}
+ .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+ .stat{padding:8px 12px;border-radius:8px;background:var(--raised);min-width:0}
+ .stat .sl{font-size:.8125rem;color:var(--muted)}
+ .stat .sv{font-size:1.125rem;font-weight:700;white-space:nowrap}
+ .stat .act{font-size:.8125rem;color:var(--warn)}
+ .hintline{margin:0;font-size:.8125rem;color:var(--muted)}
+ .hintline .act{color:var(--warn);font-weight:600}
+ /* Host priority: how far the other mics lean back, as a plain slider. */
+ .prio{display:flex;align-items:center;gap:12px}
+ .prio input{flex:1 1 auto;min-width:0;height:44px;margin:0;accent-color:var(--accent)}
+ .prio output{flex:0 0 auto;min-width:5ch;text-align:right;font-size:1.125rem;font-weight:700}
+ /* Setup assistant ("Einmessen"): the steps as tiles, each with its state as
+    a word; the result as one before -> after row per mic. */
+ .suhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+ .steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px}
+ .steps li{display:flex;flex-direction:column;gap:2px;min-width:0;padding:8px 12px;border-radius:8px;background:var(--raised)}
+ .steps .sn{font-size:.8125rem;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+ .steps b{font-size:.9375rem;overflow-wrap:anywhere}
+ .steps .sd{font-size:.8125rem;color:var(--muted)}
+ .steps li.done .sn{color:var(--ok)}
+ .steps li.now{box-shadow:inset 0 0 0 2px var(--accent)}
+ .steps li.now .sn{color:var(--accent)}
+ .sunow{font-size:1.125rem;font-weight:600}
+ .susent{margin:0;padding:12px 16px;border-radius:8px;background:var(--raised);font-size:1.25rem;line-height:1.4}
+ .subtns{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px}
+ button.go{border:2px solid var(--ok);font-weight:700}
+ /* While nothing is being measured the panel is one line and sits below the
+    meters; a run or a result brings it up under the channels. */
+ #setupBox.idle{order:1;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between}
+ #setupBox.idle .hintline{flex:1 1 100%}
+ /* Result: one card per mic — verdict in words, what was measured, then each
+    setting as "vorher → nachher" (no table to scroll sideways on a tablet). */
+ .sures{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+ .sures li{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:8px;background:var(--raised)}
+ .srh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+ .srh b{font-size:.9375rem}
+ .sures .was{font-size:.8125rem;color:var(--muted)}
+ .verd{margin-left:auto;font-size:.8125rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+ .verd.ok{color:var(--ok)}
+ .verd.warn{color:var(--warn)}
+ .verd.bad{color:var(--onair)}
+ .sset{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;font-size:.875rem}
+ .sset div{display:flex;gap:6px;white-space:nowrap}
+ .sset dt{color:var(--muted)}
+ .sset dd{margin:0}
+ .sures .adv{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:6px;border-top:1px solid var(--line)}
+ .sures .adv span{flex:1 1 220px;min-width:0}
+ .sures .adv button{background:var(--pressed)}
+ /* File browser: folder tabs, breadcrumb, one raised row per entry. */
+ .files{flex:1 1 0;min-height:200px;gap:8px;overflow:hidden}
+ body.cueing .files{box-shadow:inset 0 0 0 2px var(--cue)}
+ /* What a click on a file does right now, in words. */
+ .fbar .hint{flex:0 1 auto;font-size:.8125rem;color:var(--muted)}
+ body.cueing .fbar .hint{color:var(--cue);font-weight:600}
+ /* Folder picker: a flat one-click row of tabs (no nested <select>),
+    highlighting the current folder; absent when there is only one. */
+ .folderlist{flex:0 0 auto;display:flex;gap:8px;overflow-x:auto;padding:3px}
+ .folderlist:empty{display:none}
+ .fbtn{flex:0 0 auto;border-color:transparent;white-space:nowrap}
+ .fbtn.on,.fbtn.on:hover{background:var(--accent);color:var(--on-accent)}
+ .fbar{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:0 12px}
+ #crumbs{flex:1 1 120px;min-width:0;color:var(--accent);font-size:.9375rem;white-space:nowrap;overflow-x:auto}
+ #crumbs .seg{display:inline-block;padding:10px 0;cursor:pointer}
+ #crumbs .seg:hover{text-decoration:underline}
+ #crumbs .seg.cur{color:var(--text);font-weight:600;cursor:default;text-decoration:none}
+ #crumbs .sep{color:var(--muted);margin:0 6px}
+ /* "＋ alle" appends exactly the files listed below it — never the tree — so
+    it carries the count and is hidden when there is nothing to add. */
+ #addall{flex:0 0 auto;padding:0 12px;font-size:.875rem;background:var(--pressed);border-color:transparent}
+ #flist,#qlist,#mlist{list-style:none;margin:0;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+ #flist,#qlist{flex:1 1 auto;min-height:0;padding:0}
+ .files li{flex:0 0 auto;display:flex;align-items:center;gap:8px;min-height:48px;padding:0 2px 0 12px;
+  border-radius:8px;background:var(--raised);cursor:pointer}
+ .files li:hover{background:color-mix(in srgb,var(--raised),var(--pressed))}
+ .files li:focus-visible{outline-offset:-3px}
+ .files li.none{background:transparent;color:var(--muted);cursor:default}
+ .files li .fname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9375rem}
+ .files li .when{flex:0 0 auto;margin-right:8px;font-size:.875rem;color:var(--muted);white-space:nowrap}
+ .files li.dir .fname{color:var(--accent);font-weight:600}
+ /* Scheduled (timestamped) files: their start time in the schedule colour;
+    the next one to fire also gets a bar on its left edge. */
+ .files li.sched .when{color:var(--warn)}
+ .files li.next{box-shadow:inset 4px 0 0 var(--warn)}
+ .files li.next .when{font-weight:700}
+ /* The file on air: framed in the "playing" colour and named as such. */
+ .files li.playing{box-shadow:inset 0 0 0 2px var(--info)}
+ .files li.playing .fname{font-weight:600}
+ .files li.playing .when{color:var(--info);font-weight:700}
+ .files li.playing .when::after{content:" läuft"}
+ /* The row currently being pre-listened to (Vorhören). Amber like the rest of
+    the cue chrome. It has to win over .playing/.sched/.next and their
+    combinations, hence last and with the class doubled. */
+ .files li.cued.cued{box-shadow:inset 0 0 0 2px var(--cue)}
+ .files li.cued.cued .when{color:var(--cue);font-weight:700}
+ .files li.cued.cued .when::after{content:" Vorhören"}
  /* Row the jump landed on: flashes until the next listing refresh. */
- .files li.focus{outline:2px solid #7cf;outline-offset:-2px}
- .cuebar .cname{color:#e6c878;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 160px}
- .cuebar audio{height:34px;max-width:100%;flex:1 1 240px}
+ .files li.focus{outline:3px solid var(--accent);outline-offset:-3px}
+ /* In the bed's folder: which file is the bed (the chosen one is filled). */
+ .files li .bedbtn[aria-pressed="true"]{background:var(--chip-green);border-color:var(--ok)}
+ /* Row action ＋ (enqueue): a quiet secondary button, fixed width so rows line
+    up and the button never resizes with its glyph. */
+ .files li .addbtn,.files li .bedbtn{flex:0 0 auto;width:44px;padding:0;font-size:1.125rem;background:var(--pressed);border-color:transparent}
+ .files li .addbtn:hover,.files li .bedbtn:hover{border-color:var(--border)}
+ /* Pending play list. Same panel for both modes: on air it mirrors the box's
+    server-side queue, in Vorhören it is the browser's own audition list. */
+ .queue{flex:0 1 auto;min-height:0;max-height:34vh;gap:8px}
+ body.cueing .queue{box-shadow:inset 0 0 0 2px var(--cue)}
+ .qhead{flex:0 0 auto;display:flex;align-items:center;gap:8px}
+ .qhead h2{flex:1 1 auto;min-width:0;display:flex}
+ .qhead .qt{flex:1 1 auto;min-width:0;padding:0;border:0;background:transparent;font-size:1rem;text-align:left;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .qhead .qt:hover{background:transparent;color:var(--accent)}
+ body.cueing .qhead .qt{color:var(--cue)}
+ .qhead button{flex:0 0 auto}
+ /* "einzeln | laufend": does the list stop after each title or run through. */
+ .segc{flex:0 0 auto;display:flex;gap:3px;padding:3px;border-radius:8px;background:var(--bg)}
+ .segc button{min-height:38px;padding:0 12px;border:0;background:transparent;font-size:.875rem}
+ .segc button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+ /* Start is the one button that puts audio out: outlined in the "go" colour
+    (amber while it only starts a pre-listen). */
+ #qplay{border:2px solid var(--ok);font-weight:700}
+ body.cueing #qplay{border-color:var(--cue)}
+ #qlist li{flex:0 0 auto;display:flex;align-items:center;gap:8px;min-height:44px;padding:0 0 0 12px;
+  border-radius:8px;background:var(--raised)}
+ #qlist .qn{flex:0 0 auto;min-width:2ch;text-align:right;font-size:.8125rem;color:var(--muted)}
+ #qlist .fname{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:.9375rem;line-height:44px;cursor:pointer}
+ #qlist .fname:hover{color:var(--accent)}
+ #qlist .fld,#mlist .fld{color:var(--muted)}
+ #qlist .qb{flex:0 0 auto;display:flex}
+ #qlist .qb button{width:40px;padding:0;border-color:transparent;background:transparent}
+ #qlist .qb button:hover{background:var(--pressed)}
+ /* ---- footer: pre-listen player, then the always-there transport --------- */
+ .footer{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;background:var(--surface);
+  padding:12px max(24px,env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left))}
+ /* Transport: what is playing and its remaining time sit right beside the
+    mic switch and Stop, so the operator reads the countdown and acts in one
+    glance. It is always there (idle: "Keine Datei läuft") — a bar that came
+    and went with playback would move everything above it on every start. */
+ .prog{height:8px;border-radius:4px;background:var(--bg);overflow:hidden;outline:1px solid var(--m-edge);outline-offset:-1px}
+ .prog div{width:0;height:100%;background:var(--info)}
+ .footer .ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px}
+ .now{flex:1 1 320px;min-width:0}
+ .nowplaying{display:flex;align-items:center;gap:8px;min-height:44px;min-width:0;font-size:1.25rem;font-weight:600}
+ .nowplaying .ic{flex:0 0 auto;color:var(--info)}
+ .now.idle .nowplaying{color:var(--muted);font-weight:400}
+ /* Long names lose their middle, not their end: the numbering prefix and the
+    file ending both stay readable. */
+ .nowplaying .nm{display:flex;flex:0 1 auto;min-width:0;overflow:hidden}
+ .nowplaying .nh{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:pre}
+ .nowplaying .nt{flex:0 0 auto;white-space:pre}
+ #next{font-size:.875rem;color:var(--warn);overflow-wrap:anywhere}
+ #next .dim{color:var(--muted)}
+ /* The remaining time is what the operator acts on: the biggest type here. */
+ .nowtime{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end}
+ .nowtime .lbl{margin-right:8px;font-size:1.125rem;color:var(--muted)}
+ .nowtime .rem{font-size:2.75rem;font-weight:700;line-height:1}
+ .now.idle+.nowtime .rem{color:var(--muted)}
+ .nowtime .elapsed{min-height:1.2em;font-size:.875rem;line-height:1.2;color:var(--muted)}
+ .footer .btns{flex:0 0 auto;display:flex;gap:12px;margin-left:auto}
+ .footer .btns button{min-height:56px;min-width:150px;padding:0 20px;font-size:1.0625rem;font-weight:700}
+ /* "Jump to where this is playing from" buttons (now-playing line, cue bar). */
+ button.jump{flex:0 0 auto;width:44px;padding:0;background:transparent}
+ button.jump:hover{background:var(--raised)}
+ /* "Reinhören" belongs to the pre-listen family, so it wears its amber. */
+ button.jump.tune{border-color:var(--cue)}
+ /* Stop never moves or disappears (it is the emergency control); with nothing
+    playing it is merely disabled. */
+ #stop{background:var(--stop-bg);border:2px solid var(--stop-edge)}
+ #stop:disabled{background:transparent;border:1px dashed var(--border)}
+ @media (prefers-color-scheme:light){#stop:enabled{color:#fff}}
+ /* Global mic switch: state in words and colour — open is filled green. */
+ #mute.mic-live{background:var(--chip-green);color:#fff;border:2px solid var(--ok)}
+ #mute.muted{background:var(--off);border-color:var(--off)}
+ /* Audio bed: running is filled green and says so. */
+ #bed.on{background:var(--chip-green);color:#fff;border:2px solid var(--ok)}
+ /* Preview player: only present while pre-listening. */
+ .cuebar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+ .cuebar .cname{flex:1 1 160px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cue);font-weight:600}
+ .cuebar audio{flex:1 1 140px;min-width:0;max-width:100%;height:44px}
+ #cueStop{background:transparent;color:var(--cue);border-color:var(--cue)}
+ #cueStop:hover{background:var(--raised)}
+ /* ---- modals: scheduled files, help, welcome ----------------------------- */
+ .modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px}
+ .mbox{display:flex;flex-direction:column;width:100%;max-width:640px;max-height:85vh;overflow:hidden;
+  background:var(--surface);border:1px solid var(--border);border-radius:12px}
+ .mhead{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 12px 12px 16px;
+  border-bottom:1px solid var(--line)}
+ #mlist{padding:12px}
+ #mlist li{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:44px;padding:4px 12px;
+  border-radius:8px;background:var(--raised)}
+ #mlist li.none{background:transparent;color:var(--muted)}
+ #mlist .fname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ #mlist .when{flex:0 0 auto;color:var(--warn);font-weight:600;white-space:nowrap}
  /* Welcome screen: the configured sources as big clickable tiles. */
- .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:14px;overflow-y:auto}
- .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
-  padding:18px 10px;background:#20242c;border:1px solid #3a4150;border-radius:8px;cursor:pointer;
-  color:#cde;text-align:center;transition:background .12s,border-color .12s,transform .08s}
- .tile:hover{background:#27303c;border-color:#7cf;transform:translateY(-1px)}
- .tile.on{border-color:#8df;background:#26313f}
- .tile .ic{font-size:30px;line-height:1}
+ .mbox .sub{padding:12px 16px 0;color:var(--muted)}
+ .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:16px;overflow-y:auto}
+ .tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:104px;
+  padding:16px 10px;border-color:transparent;text-align:center}
+ .tile.on{box-shadow:inset 0 0 0 2px var(--accent)}
+ .tile .ic{font-size:1.875rem;line-height:1}
  .tile .nm{overflow-wrap:anywhere}
- .mbox .sub{padding:0 14px 4px;color:#8a93a0}
  /* Help modal: a short German manual, so a new operator can work the page
     without being shown around. Sections that only exist in mixer mode are
     hidden on a playout-only box (body.playout, set from the snapshot). */
- #helpBtn{width:44px;padding:8px 0;font-size:17px;font-weight:bold}
- .help{padding:2px 16px 16px;overflow-y:auto;line-height:1.5;color:#cbd2d9}
- .help h4{margin:15px 0 5px;color:#8df;font-size:14px}
- .help h4:first-child{margin-top:8px}
- .help p{margin:5px 0}
- .help ul{margin:5px 0;padding-left:17px}
- .help li{margin:3px 0}
- .help b{color:#eef}
- .help .k{color:#e6c878;white-space:nowrap}
- .help .note{color:#8a93a0}
+ .help{padding:4px 20px 20px;overflow-y:auto;line-height:1.5}
+ .help h4{margin:16px 0 4px;color:var(--accent);font-size:1rem}
+ .help p{margin:4px 0}
+ .help ul{margin:4px 0;padding-left:20px}
+ .help li{margin:4px 0}
+ .help .k{padding:1px 6px;border-radius:4px;background:var(--raised);font-weight:600;white-space:nowrap}
+ .help .note{color:var(--muted)}
  body.playout .liveonly{display:none}
- /* Scheduled-files modal (opened from the ⋮ menu). */
- .modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px}
- .mbox{background:#191919;border:1px solid #444;border-radius:8px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 6px 24px rgba(0,0,0,.7)}
- .mhead{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #333;color:#ffd24a}
- .mhead button{width:auto;padding:4px 10px}
- #mlist{list-style:none;margin:0;padding:0;overflow-y:auto}
- #mlist li{padding:9px 14px;border-bottom:1px solid #222;display:flex;justify-content:space-between;gap:12px}
- #mlist li:last-child{border-bottom:none}
- #mlist .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- #mlist .fname .fld{color:#667}
- #mlist .when{color:#ffd24a;white-space:nowrap}
- #mlist .none{color:#666}
- #clock{color:#8df;white-space:nowrap}
- #clock .tz{color:#667;margin-left:7px}
- #ftime{margin-right:auto;text-align:left}
- #ftime .rem{font-size:22px;font-weight:bold;color:#ffd24a;vertical-align:middle}
- /* Landscape (e.g. iPad rotated): two columns — metering left, files right. */
- @media (orientation:landscape) and (min-width:700px){
-  .content{flex-direction:row;gap:22px}
-  .metering{flex:1 1 0;min-width:0;max-width:none}
-  .col2{flex:1 1 0;min-width:0;max-width:none}
-  .files{margin-top:0}
+ body:not(.listeners) .lisonly{display:none}
+ /* Hörer:innen: released listener comments and a heart count from eve. Quiet
+    by design — the host decides when to look: folded by default, no motion,
+    no sound, the hearts a number and never a feed. */
+ .lis{flex:0 0 auto;gap:8px}
+ .lishead{display:flex;align-items:center;gap:12px;min-height:44px}
+ .lishead h2{flex:1 1 auto;min-width:0;display:flex}
+ .lishead .qt{flex:0 1 auto;min-width:0;padding:0;border:0;background:transparent;font-size:1rem;text-align:left}
+ .lishead .qt:hover{background:transparent;color:var(--accent)}
+ .lishead .qt::before{content:"▸ ";color:var(--muted)}
+ .lishead .qt[aria-expanded="true"]::before{content:"▾ "}
+ .lisshow{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.875rem}
+ .lishearts{flex:0 0 auto;font-weight:700;white-space:nowrap}
+ .lissum{flex:0 0 auto;color:var(--muted);font-size:.875rem;white-space:nowrap}
+ .lisstate.warn{color:var(--warn);font-weight:600}
+ .lislist{margin:0;padding:0;list-style:none;max-height:30vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+ .lislist li{display:flex;gap:12px;padding:8px 12px;border-radius:8px;background:var(--raised)}
+ .lislist li.none{background:transparent;color:var(--muted);padding:4px 0}
+ .lislist .lt{flex:0 0 auto;color:var(--muted);font-size:.875rem;line-height:1.5}
+ /* Sendung: the episode on air and its conversation guide from eve, for the
+    host. Read-only. The topics' cues in order are the planned path and stay in
+    view; the scripts and the notes fold out. */
+ .guide{flex:0 0 auto;gap:8px}
+ .gdbody{display:flex;flex-direction:column;gap:12px;max-height:50vh;overflow-y:auto}
+ .gdep{margin:0;font-weight:600}
+ .gdparts{display:flex;flex-direction:column;gap:12px}
+ .gdparts h3{margin:0;color:var(--muted);font-size:.875rem;font-weight:600}
+ .gdparts summary{display:flex;flex-direction:column;justify-content:center;min-height:44px;cursor:pointer}
+ .gdtopics{margin:0;padding-left:24px;display:flex;flex-direction:column;gap:8px}
+ .gdtopics .tt{font-weight:600}
+ .gdtopics .tc{display:block;color:var(--muted)}
+ .gdq{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+ .gdq li{padding:8px 12px;border-radius:8px;background:var(--raised)}
+ .gdq li.asked{background:transparent;color:var(--muted)}
+ .gdq .ok{color:var(--ok);font-weight:700}
+ .gdmd{line-height:1.5}
+ .gdmd p{margin:4px 0}
+ .gdmd h4{margin:12px 0 4px;font-size:1rem}
+ .gdmd blockquote{margin:4px 0;padding-left:12px;border-left:3px solid var(--info)}
+ .gdmd ul,.gdmd ol{margin:4px 0;padding-left:20px}
+ .lislist .ltx{min-width:0;white-space:pre-line;overflow-wrap:anywhere}
+ /* Host layout (role from the connection's token): playout and the mics as
+    compact bars; everything that tunes or routes belongs to the technician.
+    The server drops a host's technician commands anyway — this only keeps
+    controls that would do nothing off the screen. */
+ body.host .techonly,body.host .td{display:none!important}
+ body.host .chgrid{grid-template-columns:minmax(88px,1fr) minmax(0,3fr);min-width:0}
+ body.host .chrow .meter{height:16px;border-radius:4px}
+ body.host #rec{pointer-events:none}
+ /* Wide screens (tablet landscape, laptop): two columns — metering left,
+    files right, each scrolling on its own so the page itself never moves. */
+ @media (min-width:1000px) and (min-height:560px){
+  .content{flex-direction:row;overflow:hidden}
+  .metering{flex:1.15 1 0;overflow-y:auto}
+  body.live .col2{flex:1 1 0;height:auto}
  }
- /* Small portrait (phones): tighter chrome, full-width controls, and let the
-    meter table scroll sideways instead of crushing its columns. */
+ /* Small portrait (phones): tighter chrome, full-width transport, and let the
+    meter grid scroll sideways instead of crushing its columns. */
  @media (max-width:520px){
-  .content{padding:8px 10px}
-  .bar-panel{padding:8px 10px;gap:8px}
-  .bar-panel button{flex:1 1 auto;width:auto;min-width:0}
-  #menuBtn,#helpBtn{flex:0 0 auto;width:44px}
-  .menu button{flex:none;width:100%}
-  .metering{overflow-x:auto}
-  table{min-width:540px}
-  td,th{padding:6px 5px}
-  .master .lbl{margin:0 4px 0 8px}
-  .footer .ctl{flex-wrap:wrap}
-  #ftime{flex:1 1 100%}
-  /* The footer's full-width button rule must not stretch the icon buttons. */
-  .bar-panel button.jump{flex:0 0 auto;width:30px}
+  .topbar{padding:8px 12px;gap:8px}
+  .logo{padding:0}
+  .hright,.tools,.status{gap:8px}
+  .tog{padding:0 10px;font-size:.8125rem}
+  .tog.on{letter-spacing:0;text-transform:none}
+  .content{padding:12px;gap:12px}
+  .metering,.col2{gap:12px}
+  .panel{padding:12px}
+  .footer{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
+  /* Title on its own line, then the countdown beside the transport buttons. */
+  .now{flex:1 1 100%}
+  .nowtime{align-items:flex-start}
+  .nowtime .rem{font-size:2.25rem}
+  .footer .btns{flex:1 1 0;justify-content:flex-end}
+  .footer .btns button{flex:0 1 150px;min-width:0;min-height:48px;padding:0 12px}
+  .chip{min-height:28px;padding:2px 8px;gap:6px;font-size:.8125rem;letter-spacing:0}
+  .banner{margin:12px 12px 0;font-size:1rem}
+  /* Mixer mode has more than one button: a row of their own, shared evenly. */
+  body.live .footer .btns{flex-basis:100%}
+  body.live .footer .btns button{flex:1 1 0}
+  .fbar .hint{order:3;flex-basis:100%;padding-bottom:4px}
+  #clock{font-size:1.125rem}
+  .tz{display:none}
+  /* The words stay for a screen reader; sighted, the dot (and the amber
+     chrome of Vorhören) carry it — a lost connection still spells it out. */
+  .conn.ok .ct,#cue .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  #cue{width:44px;padding:0}
+  .nowplaying{font-size:1.0625rem}
+  /* One line, start time first: on a phone the footer must stay short. */
+  #next{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #cueStop{padding:0 12px}
   /* Leave the file browser more of a small screen, and keep the queue row
      controls thumb-sized without eating the filename. */
-  .queue{max-height:32vh}
-  .qhead{padding:6px 2px}
-  .qhead button{padding:4px 7px}
-  #qlist li{gap:6px;padding:8px 4px}
-  #qlist .qb{gap:3px}
-  #qlist .qb button{width:26px;padding:6px 0}
-  .fbar #addall{padding:3px 7px}
-  /* Finger-sized tap target for the row ＋ (no hover to help on touch). */
-  .files li .addbtn{width:34px;padding:6px 0}
+  .queue{max-height:30vh}
+  #qlist .qb button{width:36px}
+  .qhead button{padding:0 12px}
+ }
+ /* More contrast asked for: drop the surface tints, draw borders instead. */
+ @media (prefers-contrast:more){
+  :root{--surface:var(--bg);--raised:var(--bg);--m-edge:var(--text)}
+  .panel,.mbox,.menu{border:2px solid var(--text)}
+  .topbar{border-bottom:2px solid var(--text)}
+  .footer{border-top:2px solid var(--text)}
+  button,.fbtn,#addall,.tile,.files li .addbtn,.files li .bedbtn{border:2px solid var(--text)}
+  .banner{box-shadow:none;border:2px solid var(--text)}
+  .files li,#qlist li,#mlist li,.stat{border:1px solid var(--text)}
  }
 </style></head><body>
-<div class="topbar bar-panel">
- <h1 id="logo" title="Quellen / sources"><span class="dot">●</span>studiobox</h1>
- <div class="topright">
-  <button id="cue" class="cue" title="Vorhören: Dateien im Browser abhören, ohne die Ausspielung zu stören">🎧 Vorhören</button>
-  <button id="rec" class="rec" style="display:none">● Start recording</button>
-  <button id="ship" class="ship" style="display:none">● Start streaming</button>
-  <button id="helpBtn" title="Hilfe / Kurzanleitung">?</button>
+<header class="topbar">
+ <h1><button id="logo" class="logo" title="Quellen anzeigen">studiobox</button></h1>
+ <span id="air" class="chip" role="status" style="display:none"><span class="dot"></span><span id="airText"></span></span>
+ <span id="setupChip" class="chip info" style="display:none">Einmessen läuft</span>
+ <span id="toneChip" class="chip warn" style="display:none">Testton</span>
+ <div class="toggles">
+  <button id="rec" class="tog rec hold" style="display:none">Aufnahme aus</button>
+  <button id="ship" class="tog ship hold techonly" style="display:none">Stream aus</button>
+ </div>
+ <div class="hright">
+ <div class="status">
+  <span id="conn" class="conn" role="status"><span class="dot"></span><span class="ct" id="connText">Verbinde …</span></span>
+  <div class="clockbox"><span id="clock"></span><span id="tz" class="tz"></span></div>
+ </div>
+ <div class="tools">
+  <button id="cue" class="cue" aria-pressed="false" title="Vorhören: Dateien im Browser abhören, ohne die Ausspielung zu stören"><span aria-hidden="true">🎧</span> <span class="lbl" id="cueLbl">Vorhören</span></button>
+  <button id="helpBtn" class="icon" title="Hilfe / Kurzanleitung" aria-label="Hilfe">?</button>
   <div class="menuwrap">
-   <button id="menuBtn" title="more">⋮</button>
+   <button id="menuBtn" class="icon" title="Mehr" aria-label="Mehr" aria-haspopup="true">⋮</button>
    <div id="menu" class="menu" style="display:none">
-    <div id="folderList" class="folderlist"></div>
-    <button id="mon" class="mon" style="display:none">● Start local playout</button>
-    <button id="schedBtn">⏰ Scheduled files</button>
+    <button id="mon" class="mon hold techonly" style="display:none">Lokale Ausgabe aus</button>
+    <button id="ret" class="mon techonly" style="display:none">Musik-Rückweg aus</button>
+    <button id="tone" class="hold techonly" style="display:none">Testton aus</button>
+    <button id="endShow" class="hold techonly" style="display:none">Sendung beenden</button>
+    <button id="schedBtn">⏰ Geplante Sendungen</button>
    </div>
   </div>
  </div>
-</div>
-<div class="content">
+ </div>
+</header>
+<div id="setupLine" class="banner" role="status" style="display:none"></div>
+<div id="say" class="sr" role="status"></div>
+<main class="content">
 <div class="metering" id="metering">
-<table id="t"><colgroup><col class="c-ch"><col class="c-role"><col class="c-out"><col class="c-gate"><col class="c-comp"><col class="c-mix"><col class="c-mute"></colgroup><thead><tr>
- <th>channel</th><th>role</th><th>out dB</th><th>gate</th><th>comp GR</th><th>automix</th><th>mute</th>
-</tr></thead><tbody></tbody></table>
-<div class="master">
- <span class="lbl">M</span><span class="v" id="mom">–</span>
- <span class="lbl">S</span><span class="v" id="st">–</span>
- <span class="lbl">Pk</span><span class="v" id="pk">–</span>
- <span class="lbl">Lim</span><span class="v" id="lgr">–</span>
- <span class="lbl">Duck</span><span class="v" id="duck">–</span>
-</div>
+ <section class="panel" aria-labelledby="chTitle">
+  <h2 id="chTitle">Kanäle</h2>
+  <div class="chscroll">
+   <div class="chgrid chhead"><span>Kanal</span><span class="td">Trim</span><span>Pegel</span><span class="td">Gate</span><span class="td">Comp</span><span class="td">Automix</span><span class="td">Leveler</span><span class="td"></span></div>
+   <div id="rows"></div>
+  </div>
+  <div id="trimEd" class="trimrow techonly" style="display:none">
+   <span class="who">Trim <b id="trimWho"></b></span>
+   <button id="trimDn3" aria-label="Trim 3 dB leiser">−3</button>
+   <button id="trimDn" aria-label="Trim 1 dB leiser">−1</button>
+   <output id="trimVal"></output>
+   <button id="trimUp" aria-label="Trim 1 dB lauter">+1</button>
+   <button id="trimUp3" aria-label="Trim 3 dB lauter">+3</button>
+   <button id="trimClose" class="icon" aria-label="Trim schließen">✕</button>
+  </div>
+ </section>
+ <section class="panel techonly" id="setupBox" style="display:none" aria-labelledby="suTitle">
+  <div class="suhead"><h2 id="suTitle">Einmessen</h2><span class="hintline" id="suInfo"></span></div>
+  <ol class="steps" id="suSteps" style="display:none"></ol>
+  <div id="suNow" class="sunow" style="display:none"></div>
+  <blockquote id="suSent" class="susent" style="display:none"></blockquote>
+  <ul class="sures" id="suRows" style="display:none"></ul>
+  <div class="subtns">
+   <button id="suCancel" style="display:none">Abbrechen</button>
+   <button id="suFinish" style="display:none">Fertig – auswerten</button>
+   <button id="suDiscard" style="display:none">Verwerfen</button>
+   <button id="suApply" class="go" style="display:none">Übernehmen</button>
+   <button id="suStart" class="go">Einmessen starten</button>
+  </div>
+  <p class="hintline" id="suIntro" style="display:none">Misst alle Mikrofone in etwa einer Minute: erst 5 Sekunden Stille, dann liest
+  jede Person kurz einen Satz vor. Am Programm ändert sich nichts, bis du „Übernehmen“ drückst.</p>
+ </section>
+ <section class="panel techonly" aria-labelledby="pgTitle">
+  <div class="lufs">
+   <div><h2 id="pgTitle">Programm</h2><div class="sub">Momentan <span id="mom">–</span> LUFS</div></div>
+   <div><span class="big" id="st">–</span> <span class="unit">LUFS kurz</span></div>
+  </div>
+  <div>
+   <div class="meter lg" id="pkm" role="meter" aria-label="Programm Spitzenpegel" aria-valuemin="-60" aria-valuemax="0"><div class="fill"></div><div class="cover"></div><div class="peak"></div></div>
+   <div class="scale" aria-hidden="true"><span style="left:0">−60</span><span style="left:33.33%">−40</span><span style="left:66.67%">−20</span><span style="left:83.33%">−10</span><span>0 dB</span></div>
+  </div>
+  <div class="stats">
+   <div class="stat"><div class="sl">Spitze</div><div class="sv"><span id="pk">–</span> dB</div></div>
+   <div class="stat"><div class="sl">Limiter</div><div class="sv"><span id="lgr">–</span> dB</div></div>
+   <div class="stat"><div class="sl">Duck (Musik)</div><div class="sv"><span id="duck">–</span> dB <span class="act" id="duckOn" style="display:none">aktiv</span></div></div>
+  </div>
+ </section>
+ <section class="panel techonly" id="prioBox" style="display:none">
+  <h2><label for="prio">Moderations-Vorrang</label></h2>
+  <div class="prio"><input id="prio" type="range" min="0" max="24" step="1" value="8"><output id="prioVal" for="prio"></output></div>
+  <p class="hintline">So viel leiser werden die anderen Mikrofone, solange <b id="prioWho">die Moderation</b> spricht.
+  <span class="act" id="prioAct" style="display:none">wirkt gerade</span></p>
+ </section>
 </div>
 <div class="col2">
-<div class="files" id="files" style="display:none">
- <div class="fbar"><div id="crumbs"></div><button id="addall" title="alle Dateien dieser Liste anhängen">＋ alle</button></div>
- <ul id="flist"></ul>
+ <section class="panel guide" id="guidebox" style="display:none" aria-labelledby="gdTitle">
+  <div class="lishead">
+   <h2><button class="qt" id="gdTitle" aria-expanded="true" aria-controls="gdBody" title="ein-/ausklappen">Sendung</button></h2>
+   <span class="lisshow" id="gdShow"></span>
+  </div>
+  <p class="hintline lisstate" id="gdState" style="display:none"></p>
+  <div class="gdbody" id="gdBody" style="display:none">
+   <p class="gdep" id="gdEp"></p>
+   <div class="gdparts" id="gdParts"></div>
+  </div>
+ </section>
+ <section class="panel lis" id="lisbox" style="display:none" aria-labelledby="lisTitle">
+  <div class="lishead">
+   <h2><button class="qt" id="lisTitle" aria-expanded="false" aria-controls="lisList" title="ein-/ausklappen">Hörer:innen</button></h2>
+   <span class="lisshow" id="lisShow"></span>
+   <span class="lissum" id="lisSum"></span>
+   <span class="lishearts" id="lisHearts"></span>
+  </div>
+  <p class="hintline lisstate" id="lisState" style="display:none"></p>
+  <ul class="lislist" id="lisList" style="display:none"></ul>
+ </section>
+ <section class="panel files" id="files" style="display:none" aria-label="Dateien">
+  <nav id="folderList" class="folderlist" aria-label="Ordner"></nav>
+  <div class="fbar"><div id="crumbs"></div><span class="hint" id="fhint">Klick spielt sofort aus</span><button id="addall" title="alle Dateien dieser Liste anhängen">＋ alle</button></div>
+  <ul id="flist"></ul>
+ </section>
+ <section class="panel queue" id="queuebox" style="display:none">
+  <div class="qhead">
+   <h2><button class="qt" id="qtitle" title="ein-/ausklappen" aria-expanded="true">Warteschlange</button></h2>
+   <div class="segc" id="qmode" role="group" aria-label="Ablauf der Liste" style="display:none"><button id="qmSingle" aria-pressed="false" title="Nach jedem Titel anhalten – der nächste startet erst mit ▶ Start">einzeln</button><button id="qmChain" aria-pressed="false" title="Titel für Titel durchlaufen">laufend</button></div>
+   <button id="qsend" class="cue" title="diese Liste an die Ausspielung übergeben" style="display:none">→ Playout</button>
+   <button id="qplay" title="nächsten Titel jetzt starten">▶ Start</button>
+   <button id="qclear" class="icon" title="Liste leeren" aria-label="Liste leeren">✕</button>
+  </div>
+  <ul id="qlist"></ul>
+ </section>
 </div>
-<div class="queue" id="queuebox" style="display:none">
- <div class="qhead">
-  <span class="qt" id="qtitle" title="ein-/ausklappen">▶ Warteschlange</span>
-  <button id="qplay" title="nächsten Titel jetzt starten">▶ Start</button>
-  <button id="qsend" title="diese Liste an die Ausspielung übergeben" style="display:none">→ Playout</button>
-  <button id="qclear" title="Liste leeren">✕</button>
- </div>
- <ul id="qlist"></ul>
-</div>
-</div>
-</div>
-<div class="footer bar-panel">
+</main>
+<footer class="footer">
  <div class="cuebar" id="cuebar" style="display:none">
   <span class="cname" id="cname"></span>
-  <button class="jump" id="cuejump" title="Ordner dieses Titels öffnen" style="display:none">📂</button>
+  <button class="jump" id="cuejump" title="Ordner dieses Titels öffnen" aria-label="Ordner dieses Titels öffnen" style="display:none">📂</button>
   <audio id="cueAudio" controls preload="none"></audio>
   <button id="cueStop">■ Vorhören stoppen</button>
  </div>
- <div class="nowplaying" id="nowplaying" style="display:none"></div>
- <div class="nowplaying" id="next" style="display:none"></div>
+ <div class="prog"><div id="pbar"></div></div>
  <div class="ctl">
-  <span id="clock"></span>
-  <span id="ftime"></span>
-  <button id="stop">■ Stop file</button>
-  <button id="mute">Mute mics</button>
+  <section class="now idle" id="nowbox" aria-label="Jetzt läuft">
+   <div class="nowplaying" id="nowplaying">Keine Datei läuft</div>
+   <div id="next" style="display:none"></div>
+  </section>
+  <div class="nowtime"><div><span class="lbl" id="remlbl"></span><span class="rem" id="rem">–:––</span></div><span class="elapsed" id="ftime"></span></div>
+  <div class="btns">
+   <button id="mute" style="display:none">Mikros zu</button>
+   <button id="bed" style="display:none" aria-pressed="false">Bett aus</button>
+   <button id="stop" class="hold" title="Wiedergabe beenden: gedrückt halten — die Warteschlange bleibt erhalten" disabled>■ Stopp</button>
+  </div>
  </div>
-</div>
+</footer>
 <div id="modal" class="modal" style="display:none">
- <div class="mbox">
-  <div class="mhead"><b>⏰ Scheduled files</b><button id="mclose">✕</button></div>
+ <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="mhead"><h3 id="mTitle">⏰ Geplante Sendungen</h3><button id="mclose" class="icon" aria-label="Schließen">✕</button></div>
   <ul id="mlist"></ul>
  </div>
 </div>
 <div id="help" class="modal" style="display:none">
- <div class="mbox">
-  <div class="mhead"><b>❓ studiobox — Kurzanleitung</b><button id="hclose">✕</button></div>
+ <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="hTitle">
+  <div class="mhead"><h3 id="hTitle">studiobox — Kurzanleitung</h3><button id="hclose" class="icon" aria-label="Schließen">✕</button></div>
   <div class="help">
    <h4>Was ist studiobox?</h4>
    <p>studiobox ist der Ausspielrechner des Senders. <b>Diese Seite ist nur die
@@ -566,12 +1086,16 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 
    <h4>Dateien und Ordner</h4>
    <ul>
-    <li>Ordner wechseln: <span class="k">⋮</span> oben rechts, oder auf das
-    studiobox-Logo klicken (Kachelübersicht der Quellen).</li>
+    <li>Ordner wechseln: über die Ordner-Leiste über der Dateiliste, oder oben
+    links auf <span class="k">studiobox</span> klicken (Kachelübersicht der
+    Quellen).</li>
     <li>Zeilen mit <span class="k">📁</span> sind Unterordner — Klick öffnet
     sie, die Pfadzeile darüber führt wieder zurück.</li>
     <li><b>Klick auf eine Datei startet sie sofort</b> — im Normalbetrieb also
     on air. Läuft schon etwas, wird es ersetzt.</li>
+    <li>Unten stehen der laufende Titel und groß die Restzeit
+    (<span class="k">noch 2:34</span>); in der Liste ist er umrahmt und mit
+    „läuft“ markiert.</li>
    </ul>
 
    <h4>Warteschlange</h4>
@@ -582,22 +1106,60 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
     <li><b>Anhängen startet nie von selbst.</b> Die Liste beginnt erst mit
     <span class="k">▶ Start</span> — oder automatisch, sobald der gerade
     laufende Titel zu Ende ist.</li>
+    <li class="liveonly"><span class="k">einzeln</span> /
+    <span class="k">laufend</span>: bei „einzeln“ hält die Liste nach jedem
+    Titel an und wartet auf <span class="k">▶ Start</span> (ein Gespräch mit
+    Musikpausen), bei „laufend“ spielt sie Titel für Titel durch.</li>
     <li><span class="k">↑ ↓</span> sortieren, <span class="k">✕</span> entfernt,
     <span class="k">📂</span> springt zum Ordner des Titels.</li>
     <li>Klick auf den Namen spielt ihn sofort — die Titel darüber fallen dabei
     aus der Liste.</li>
-    <li><span class="k">■ Stop file</span> beendet die Wiedergabe, ohne
-    weiterzuschalten; die Liste bleibt erhalten.</li>
+    <li><span class="k">■ Stopp</span> (unten rechts) beendet die Wiedergabe,
+    ohne weiterzuschalten; die Liste bleibt erhalten. Damit ein verirrter
+    Finger nichts abschneidet: <b>gedrückt halten</b>, bis die Taste gefüllt
+    ist (knapp eine Sekunde) — oder zweimal tippen, wenn sie nachfragt.</li>
     <li class="note">Die Liste lebt nur im Arbeitsspeicher: nach einem Neustart
     des Geräts ist sie leer. Für garantierte Sendungen die Zeitsteuerung
     benutzen (siehe unten).</li>
    </ul>
 
+   <div class="lisonly">
+    <h4>Sendung</h4>
+    <p>Oben rechts steht, welche Sendung laut Sendeplan gerade läuft. Ist die
+    Ausgabe in eve vorbereitet, steht darunter ihr Ablauf:</p>
+    <ul>
+     <li><b>Anmoderation</b> und <b>Abmoderation</b> zum Ablesen – zum
+     Aufklappen antippen.</li>
+     <li><b>Themen</b> in der geplanten Reihenfolge, jeweils mit einer Zeile zum
+     Überleiten; die Notizen klappen auf.</li>
+     <li><b>Pflichtfragen</b> – die Fragen, die auf jeden Fall gestellt werden.
+     Ein <span class="k">✓</span> heißt: in eve als gestellt markiert.</li>
+     <li>Geändert wird der Ablauf in eve, nicht hier; Änderungen erscheinen
+     nach einigen Sekunden von selbst.</li>
+    </ul>
+    <h4>Hörer:innen</h4>
+    <p>Hörer:innen können der laufenden Sendung auf der Website einen Kommentar
+    oder ein Herz schicken. Hier erscheinen nur <b>freigegebene</b> Kommentare
+    — freigegeben wird in eve, von jemandem, der nicht am Mikrofon sitzt.
+    Die Herzen sind nur eine Zahl.</p>
+    <ul>
+     <li>Der Kasten ist zugeklappt, bis du ihn öffnest; <span class="k">neu</span>
+     zählt, was seit dem letzten Aufklappen dazukam. Nichts blinkt, nichts
+     klingelt.</li>
+     <li>Welche Sendung gerade läuft, weiß studiobox aus dem Sendeplan und der
+     Uhr. Mit jeder Sendung beginnt der Kasten leer.</li>
+     <li>Von hier aus lässt sich nichts freigeben, löschen oder beantworten.</li>
+     <li class="note">„eve nicht erreichbar“: gezeigt wird der letzte Stand;
+     neue Kommentare kommen an, sobald die Verbindung wieder steht.</li>
+    </ul>
+   </div>
+
    <h4>Vorhören und Reinhören</h4>
    <ul>
     <li><span class="k">🎧 Vorhören</span> einschalten: ein Klick auf eine Datei
     spielt sie dann <b>nur im Browser</b> ab. Die Ausspielung bleibt völlig
-    unberührt. Die Seite bekommt dazu einen gelben Rahmen.</li>
+    unberührt. Kopfzeile und Dateiliste bekommen dazu einen orangefarbenen
+    Rahmen, der Knopf zeigt „Vorhören an“.</li>
     <li>Ist die Vorhören-Liste leer, läuft der Ordner einfach weiter — Titel für
     Titel. Mit <span class="k">＋</span> gebaute Listen haben Vorrang.</li>
     <li><span class="k">→ Playout</span> übergibt die vorgehörte Liste an die
@@ -616,41 +1178,119 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
     (<span class="k">JJJJMMTT-HHMMSS</span>, z. B.
     <span class="k">magazin-20260722-130000.flac</span>) starten automatisch zu
     dieser Zeit und haben Vorrang vor allem, was gerade läuft.</li>
-    <li>Solche Dateien sind gelb markiert; der nächste Start steht in der
-    Fußzeile, alle kommenden unter
-    <span class="k">⋮ → Scheduled files</span>.</li>
+    <li>Solche Dateien tragen <span class="k">⏰</span> und ihre Startzeit; der
+    nächste Start steht unten unter dem laufenden Titel, alle kommenden unter
+    <span class="k">⋮ → Geplante Sendungen</span>.</li>
     <li>Danach läuft die Warteschlange normal weiter.</li>
     <li class="note">Alle Zeiten sind die Uhrzeit des Geräts — sie steht mit
-    Zeitzone unten links.</li>
+    Zeitzone oben rechts.</li>
    </ul>
 
    <div class="liveonly">
-    <h4>Aufnahme, Stream, Ausspielung</h4>
+    <h4>Auf Sendung und Sendezeit</h4>
     <ul>
-     <li><span class="k">● Start recording</span> schreibt eine lokale
-     Sicherheitsaufnahme (FLAC). Sie läuft <b>nicht</b> automatisch.</li>
-     <li><span class="k">● Start streaming</span> schickt das fertige Programm
-     an den Server (Icecast/Harbor).</li>
-     <li><span class="k">⋮ → Start local playout</span> gibt das Programm
-     zusätzlich auf der angeschlossenen Soundkarte aus.</li>
+     <li>studiobox sendet <b>einige Sekunden zeitversetzt</b>: was im Studio
+     gesagt wird, geht erst nach dieser Verzögerung hinaus. Die große Uhr oben
+     ist deshalb die <b>Sendezeit</b> — die Uhrzeit, zu der das jetzt Gesagte
+     auf Sendung ist. Darunter stehen klein die Studio-Uhr und die
+     Verzögerung.</li>
+     <li>Zeitstempel in Dateinamen meinen die Sendezeit: ein Jingle mit
+     <span class="k">130000</span> ist um 13:00:00 auf Sendung.</li>
+     <li><span class="k">● AUF SENDUNG</span> (rot gefüllt) heißt: das Programm
+     verlässt das Gerät. Ob der Regler am Sendepult offen ist, sieht studiobox
+     nicht. <span class="k">PUFFER FÜLLT</span> steht nach dem Start, bis die
+     Verzögerung aufgebaut ist; <span class="k">NICHT AUF SENDUNG</span>, wenn
+     kein Ausgang läuft.</li>
+     <li class="techonly"><span class="k">⋮ → Sendung beenden</span> (gedrückt
+     halten) schließt die Mikros, lässt alles schon Gesagte noch hinauslaufen
+     und beendet danach die Aufnahme. Ein einfaches Stoppen würde die letzten
+     Sekunden abschneiden. Solange der Puffer ausläuft, nimmt dieselbe Taste
+     das Beenden zurück.</li>
+    </ul>
+
+    <h4>Aufnahme, Stream, Ausspielung</h4>
+    <p class="note">Diese Schalter zeigen den <b>Zustand</b> an. Starten ist ein
+    Klick; <b>Beenden heißt gedrückt halten</b> (oder zweimal tippen, wenn die
+    Taste nachfragt).</p>
+    <ul>
+     <li><span class="k">Aufnahme aus</span> / <span class="k">● AUFNAHME
+     LÄUFT</span> (oben links): die lokale Sicherheitsaufnahme (FLAC). Sie läuft
+     <b>nicht</b> automatisch.</li>
+     <li class="techonly"><span class="k">Stream aus</span> / <span class="k">STREAM LÄUFT</span>:
+     schickt das fertige Programm an den Server (Icecast/Harbor).</li>
+     <li class="techonly"><span class="k">⋮ → Lokale Ausgabe</span> gibt das Programm
+     auf der angeschlossenen Soundkarte aus, <span class="k">⋮ →
+     Musik-Rückweg</span> schickt die Musik (ohne Mikros) zurück ins Studio,
+     damit man sie im Kopfhörer hört.</li>
+     <li class="techonly"><span class="k">⋮ → Testton</span> (gedrückt halten)
+     legt 1 kHz bei −18 dBFS auf die lokale Ausgabe, um den Eingang am Pult
+     einzupegeln. Er <b>ersetzt dort das Programm</b>; oben steht so lange
+     <span class="k">TESTTON</span>.</li>
+     <li><span class="k">Bett aus</span> / <span class="k">Bett läuft</span>
+     (unten): ein Musikbett, das in Schleife läuft und unter Sprache leiser
+     wird — auch als Notnagel, wenn nichts anderes bereit ist. Im Bett-Ordner
+     wählt <span class="k">🛏</span> an einer Datei, welche es ist.</li>
     </ul>
 
     <h4>Pegel</h4>
     <ul>
-     <li>Pro Kanal: Aussteuerung, <b>gate</b> (offen/zu),
-     <b>comp GR</b> (Kompressor-Absenkung), <b>automix</b> (automatische
-     Mikrofonmischung) und <span class="k">mute</span>.</li>
-     <li>Unten: <b>M</b>/<b>S</b> Lautheit (LUFS), <b>Pk</b> Spitzenpegel,
-     <b>Lim</b> Limiter, <b>Duck</b> Absenkung der Musik unter Sprache.</li>
-     <li><span class="k">● Mics open</span> / <span class="k">▶ Music only</span>
-     schaltet alle Mikrofone stumm bzw. wieder auf.</li>
+     <li>Pro Kanal: <b>Pegel</b> (grün bis −10 dB, gelb bis −3 dB, darüber rot;
+     der Strich hält den Spitzenwert)<span class="techonly">, <b>Gate</b>
+     (offen/zu), <b>Comp</b> (Kompressor-Absenkung), <b>Automix</b>
+     (automatische Mikrofonmischung), <b>Leveler</b> (Lautstärke-Ausgleich) und
+     rechts die Taste <span class="k">Offen</span> /
+     <span class="k">Stumm</span></span>.</li>
+     <li>Unter dem Namen steht der Zustand als Wort: <span class="k">OFFEN</span>,
+     <span class="k">LEISER</span> (die Moderation spricht, dieses Mikro tritt
+     zurück), <span class="k">PAUSE</span> (alle Mikros zu),
+     <span class="k">STUMM</span> (von der Technik abgeschaltet).</li>
+     <li class="techonly"><b>Trim</b>: ein Klick auf den Wert öffnet die
+     Schritt-Tasten (±1, ±3 dB) für die Eingangsverstärkung dieses Mikros.</li>
+     <li class="techonly"><b>Moderations-Vorrang</b>: so viel leiser werden die
+     anderen Mikros, solange die Moderation spricht — sanft, nie stumm.</li>
+     <li><b>Programm</b>: Lautheit kurz und momentan (LUFS), <b>Spitze</b>,
+     <b>Limiter</b> und <b>Duck</b> — die Absenkung der Musik unter Sprache.</li>
+     <li><span class="k">● Mikros offen</span> / <span class="k">Mikros zu</span>
+     (unten rechts) schaltet alle Mikrofone stumm bzw. wieder auf; bei
+     „Mikros zu“ läuft nur Musik, die Kanäle zeigen PAUSE.</li>
+    </ul>
+
+    <div class="techonly">
+     <h4>Einmessen</h4>
+     <ul>
+      <li><span class="k">Einmessen starten</span> misst alle Mikrofone in etwa
+      einer Minute: erst 5 Sekunden <b>Stille</b>, dann liest jede Person den
+      angezeigten Satz vor. Die Reihenfolge ist egal — wer spricht, wird
+      erkannt; alle anderen Ansichten zeigen, wer dran ist.</li>
+      <li>Das Ergebnis zeigt pro Mikro ein Urteil (<span class="k">GUT</span>,
+      <span class="k">ZU LEISE</span>, <span class="k">ÜBERSTEUERT</span> …) und
+      jede Einstellung als <b>vorher → nachher</b>. Erst
+      <span class="k">Übernehmen</span> stellt die Kanäle ein;
+      <span class="k">Verwerfen</span> lässt alles, wie es war.</li>
+      <li>Was studiobox nicht selbst stellen kann — den Gain-Regler am
+      Mischpult — steht als Anweisung dabei („Kanal 3: Gain um etwa +18 dB
+      aufdrehen“). Danach <span class="k">Nur diesen Kanal neu messen</span>.</li>
+      <li class="note">Das Ergebnis übersteht einen Neustart des Geräts; in der
+      Konfigurationsdatei ändert es nichts.</li>
+     </ul>
+    </div>
+
+    <h4>Ansichten</h4>
+    <ul>
+     <li>Es gibt vier Ansichten: <b>Technik</b> (alles), <b>Moderation</b>
+     (Ausspielung, Warteschlange, Mikros, Bett), <b>Gast</b> (nur Anzeige: eigenes
+     Mikro, Abstand, Restzeit) und <b>Zuschauer</b> (On Air, Titel, Uhr).</li>
+     <li class="note">Sind die Rollen eingeschaltet, entscheidet der Link, mit
+     dem die Seite geöffnet wurde: ohne den Schlüssel im Link gibt es nur die
+     Zuschauer-Ansicht, und das Gerät nimmt von dort auch keine Befehle an.</li>
     </ul>
    </div>
 
    <h4>Wenn etwas nicht stimmt</h4>
    <ul>
-    <li>Zeigt die Seite nichts mehr an, verbindet sie sich von selbst neu —
-    einfach kurz warten oder neu laden. Die Sendung läuft dabei weiter.</li>
+    <li>Steht oben <span class="k">Verbindung weg</span>, verbindet sich die
+    Seite von selbst neu — einfach kurz warten oder neu laden. Die Sendung
+    läuft dabei weiter.</li>
     <li>Netzwerkordner können langsam sein: eine Liste kann einen Moment
     brauchen, das stört die Ausspielung aber nicht.</li>
    </ul>
@@ -658,44 +1298,153 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  </div>
 </div>
 <div id="welcome" class="modal" style="display:none">
- <div class="mbox">
-  <div class="mhead"><b>👋 studiobox — Quellen</b><button id="wclose">✕</button></div>
+ <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="wTitle">
+  <div class="mhead"><h3 id="wTitle">studiobox — Quellen</h3><button id="wclose" class="icon" aria-label="Schließen">✕</button></div>
   <div class="sub">Ordner wählen:</div>
   <div id="tiles" class="tiles"></div>
  </div>
 </div>
 <script>
- const fmt=(v,d=1)=>(v===null||v===undefined||!isFinite(v))?'–':v.toFixed(d);
+ // Numbers the German way: decimal comma and a real minus sign. A value that
+ // rounds to zero loses its sign ("−0,0" reads like a glitch).
+ const fmt=(v,d=1)=>{if(v===null||v===undefined||!isFinite(v))return '–';
+  let t=v.toFixed(d);if(Number(t)===0)t=t.replace('-','');
+  return t.replace('-','−').replace('.',',');};
+ // Gain reduction (compressor, limiter, duck) always reads as a cut, whichever
+ // sign the DSP block reports it with.
+ const fmtGr=v=>fmt(typeof v==='number'?-Math.abs(v):v);
+ // Digital silence has no loudness and no peak worth a number: below the
+ // BS.1770 absolute gate (−70 LUFS) and below −120 dB the readout is a dash.
+ const fmtLufs=v=>typeof v==='number'&&v<-70?'–':fmt(v);
+ const fmtPeak=v=>typeof v==='number'&&v<-120?'–':fmt(v);
+ const grPct=v=>isFinite(v)?Math.max(0,Math.min(1,Math.abs(v)/20))*100:0;
  const mmss=v=>{if(v===null||v===undefined||!isFinite(v))return '–';const s=Math.max(0,Math.round(v));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
- const bar=(v,max,cls)=>{const w=Math.max(0,Math.min(1,v/max))*60;return '<span class="bar '+(cls||'')+'" style="width:'+w+'px"></span>'};
  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+ const setPressed=(b,on)=>b.setAttribute('aria-pressed',on?'true':'false');
+ const $=id=>document.getElementById(id);
+ const show=(el,on)=>{el.style.display=on?'':'none';};
+ // A value with its sign spelled out ("+4,1" / "−3,0"), for trims and gains.
+ const sgn=(v,d)=>(v>=0.05?'+':'')+fmt(v,d);
+ // One polite live region for the few things worth announcing.
+ const say=t=>{$('say').textContent=t;};
+ // With role tokens on, the HTTP routes want the same ?k= the page was opened
+ // with (the WebSocket carries it too).
+ const K=new URLSearchParams(location.search||'').get('k');
+ const withK=u=>K?u+(u.indexOf('?')<0?'?':'&')+'k='+encodeURIComponent(K):u;
+ // The role comes from the connection's token; the server enforces it, the
+ // page only decides what to put on screen. A technician who opens /host gets
+ // the host's layout, to see what the host sees.
+ let role='tech';
+ const tech=()=>role==='tech';
+ function setRole(r){role=r==='tech'&&location.pathname==='/host'?'host':r;
+  document.body.classList.toggle('host',!tech());
+  $('chTitle').textContent=tech()?'Kanäle':'Mikrofone';}
+ // Level meters span −60…0 dB. The zone colours are a fixed gradient in the
+ // bar; per frame only the cover (and the peak tick) move.
+ const pct=db=>isFinite(db)?Math.max(0,Math.min(100,(db+60)/60*100)):0;
+ const HOLD_MS=1500;
+ function setLevel(m,db,now){
+  m.cover.style.width=(100-pct(db))+'%';
+  // Peak-hold tick: the highest level of the last 1.5 s.
+  if(!(db<m.pk)||now-m.pkAt>HOLD_MS){m.pk=db;m.pkAt=now;}
+  m.peak.style.left=m.pk>-60?'calc('+pct(m.pk)+'% - 2px)':'-4px';
+  // For a screen reader: whole dB and the zone in a word, written only when
+  // it changes (and never aria-live — 20 updates a second would flood it).
+  const v=Math.round(Math.max(-60,Math.min(0,isFinite(db)?db:-60)));
+  if(v!==m.now){m.now=v;m.el.setAttribute('aria-valuenow',v);
+   m.el.setAttribute('aria-valuetext',fmt(v,0)+' dB, '+(v>-3?'zu laut':v>-10?'Achtung':'ok'));}
+ }
+ const levelMeter=(el,cover,peak)=>({el:el,cover:cover,peak:peak,pk:-Infinity,pkAt:0,now:null});
+ // One meter cell of a channel row: a bar plus its value in words/numbers.
+ const stage=(k,level)=>'<div class="stage s-'+k+(level?'':' td')+'"><div class="meter'+(level?'"'+
+  ' role="meter" aria-valuemin="-60" aria-valuemax="0"':' plain"')+'><div class="fill"></div><div class="cover"></div>'+
+  (level?'<div class="peak"></div>':'')+'</div><span class="val"></span></div>';
  // Build the meter rows once (rebuilding only when the channel set changes) and
- // update cell contents in place each frame. Rebuilding the whole tbody every
- // frame would destroy the per-row mute buttons mid-click, breaking the toggle.
+ // update cell contents in place each frame. Rebuilding the rows every frame
+ // would destroy the per-row mute buttons mid-click, breaking the toggle.
+ const rowsEl=document.getElementById('rows');
  let rowEls=null;
  function ensureRows(channels){
-  const tb=document.querySelector('#t tbody');
   if(rowEls&&rowEls.length===channels.length&&rowEls.every((r,i)=>r.label===channels[i].label))return;
-  tb.innerHTML='';
-  rowEls=channels.map(c=>{const tr=document.createElement('tr');
-   tr.innerHTML='<td>'+esc(c.label)+'</td><td>'+esc(c.role)+'</td>'+
-    '<td class="cout"></td><td class="cgate"></td><td class="ccomp"></td><td class="cmix"></td>'+
-    '<td class="mute"><button class="mtbtn" data-label="'+esc(c.label)+'">mute</button></td>';
-   tb.appendChild(tr);
-   return {label:c.label,out:tr.querySelector('.cout'),gate:tr.querySelector('.cgate'),
-    comp:tr.querySelector('.ccomp'),mix:tr.querySelector('.cmix'),mbtn:tr.querySelector('.mtbtn')};});
+  rowsEl.innerHTML='';
+  rowEls=channels.map(c=>{const row=document.createElement('div');const mic=c.role==='mic';
+   row.className='chgrid chrow';
+   // gate / comp GR / automix are mic-only concepts — music rows leave them blank.
+   row.innerHTML='<div class="chname'+(c.color?' cc" style="--chc:'+esc(c.color):'')+'"><b title="'+esc(c.label)+'">'+esc(c.label)+'</b><span class="chstate"></span></div>'+
+    (mic?'<button class="trimbtn td" title="Trim (Eingangsverstärkung) ändern"></button>':'<span class="td"></span>')+
+    stage('lvl',true)+(mic?stage('gate')+stage('comp')+stage('mix'):'<span class="td"></span><span class="td"></span><span class="td"></span>')+
+    '<div class="stage s-lev td"><div class="meter bi"><div class="fill"></div></div><span class="val"></span></div>'+
+    '<button class="mtbtn td" data-label="'+esc(c.label)+'"></button>';
+   rowsEl.appendChild(row);
+   const q=s=>row.querySelector(s);
+   const lvl=levelMeter(q('.s-lvl .meter'),q('.s-lvl .cover'),q('.s-lvl .peak'));
+   lvl.el.setAttribute('aria-label','Pegel '+c.label);
+   const trim=mic?q('.trimbtn'):null;
+   if(trim)trim.onclick=()=>openTrim(trimLabel===c.label?null:c.label);
+   return {label:c.label,mic:mic,st:'',state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,
+    gate:q('.s-gate .cover'),gateVal:q('.s-gate .val'),comp:q('.s-comp .cover'),compVal:q('.s-comp .val'),
+    mix:q('.s-mix .cover'),mixVal:q('.s-mix .val'),lev:q('.s-lev .fill'),levVal:q('.s-lev .val'),mbtn:q('.mtbtn')};});
  }
- function updateRows(channels){
+ function updateRows(channels,now){
   ensureRows(channels);
-  channels.forEach((c,i)=>{const r=rowEls[i];const mic=c.role==='mic';
-   r.out.innerHTML=fmt(c.outDb)+' '+bar(c.outDb+60,60);
-   // gate / comp GR / automix are mic-only concepts — blank them for music rows.
-   r.gate.innerHTML=mic?bar(c.gateOpen,1):'';
-   r.comp.innerHTML=mic?fmt(c.compGrDb)+' '+bar(c.compGrDb,20,'gr'):'';
-   r.mix.textContent=mic?fmt(c.automixGainDb):'';
-   r.mbtn.className='mtbtn'+(c.muted?' on':'');
-   r.mbtn.textContent=c.muted?'unmute':'mute';});
+  channels.forEach((c,i)=>{const r=rowEls[i];
+   setLevel(r.lvl,c.outDb,now);
+   r.lvlVal.textContent=fmt(c.outDb)+' dB';
+   if(r.mic){
+    r.gate.style.width=(100-Math.max(0,Math.min(1,c.gateOpen))*100)+'%';
+    r.gateVal.textContent=c.gateOpen>=0.5?'offen':'zu';
+    r.comp.style.width=(100-grPct(c.compGrDb))+'%';
+    r.compVal.textContent=fmtGr(c.compGrDb)+' dB';
+    r.mix.style.width=(100-grPct(c.automixGainDb))+'%';
+    r.mixVal.textContent=fmt(c.automixGainDb)+' dB';
+    const t=typeof c.trimDb==='number'?c.trimDb:0;
+    if(t!==r.trimDb){r.trimDb=t;r.trim.textContent=sgn(t);
+     r.trim.setAttribute('aria-label','Trim '+c.label+': '+sgn(t)+' dB, ändern');
+     if(trimLabel===c.label)showTrim();}
+   }
+   // Leveler gain goes both ways (±20 dB across the bar), out of the centre.
+   const lv=isFinite(c.levelerDb)?Math.max(-20,Math.min(20,c.levelerDb)):0;
+   r.lev.style.left=(lv<0?50+lv*2.5:50)+'%';
+   r.lev.style.width=Math.abs(lv)*2.5+'%';
+   r.levVal.textContent=(c.levelerDb>=0.05?'+':'')+fmt(c.levelerDb)+' dB';
+   // The channel's state as a word, not only a colour. PAUSE = this mic is
+   // fine but all mics are closed (music only); LEISER = host priority is
+   // holding it back right now. Written only on change so the mute button is
+   // not re-rendered under a finger.
+   const st=c.muted?'STUMM':r.mic?(muted?'PAUSE':c.priorityDb<-1?'LEISER':'OFFEN'):'AN';
+   if(st!==r.st){r.st=st;
+    r.state.textContent=st;
+    r.state.className='chstate'+(st==='STUMM'?'':st==='PAUSE'?' pause':st==='LEISER'?' duck':' open');
+    r.mbtn.className='mtbtn td'+(c.muted?' on':'');
+    r.mbtn.textContent=c.muted?'Stumm':r.mic?'Offen':'An';
+    setPressed(r.mbtn,c.muted);}
+  });
  }
+ // Hand trim: the value in a mic's row opens one stepper under the grid. Steps
+ // of 1 and 3 dB rather than a slider — on air a slipped finger must not be
+ // able to jump a gain by 20 dB.
+ let trimLabel=null,trimSent=null,trimAt=0;
+ const trimRow=()=>rowEls?rowEls.find(r=>r.label===trimLabel):null;
+ function showTrim(){const r=trimRow();
+  show($('trimEd'),!!r);
+  if(rowEls)rowEls.forEach(x=>{if(x.trim)x.trim.classList.toggle('on',x===r);});
+  if(!r)return;
+  $('trimWho').textContent=r.label;$('trimVal').textContent=sgn(r.trimDb)+' dB';}
+ function openTrim(label){trimLabel=label;trimSent=null;showTrim();}
+ function trimBy(d){const r=trimRow();if(!r||!tech())return;
+  // Taps faster than the snapshot comes back build on what was just sent.
+  const base=trimSent!==null&&Date.now()-trimAt<1500?trimSent:r.trimDb;
+  trimSent=Math.max(-20,Math.min(40,Math.round((base+d)*10)/10));trimAt=Date.now();
+  send({type:'trim',value:{label:r.label,trimDb:trimSent}});}
+ [['trimDn3',-3],['trimDn',-1],['trimUp',1],['trimUp3',3]].forEach(a=>{$(a[0]).onclick=()=>trimBy(a[1]);});
+ $('trimClose').onclick=()=>openTrim(null);
+ // Programme peak meter and the master readouts.
+ const pkmEl=document.getElementById('pkm');
+ const pkm=levelMeter(pkmEl,pkmEl.querySelector('.cover'),pkmEl.querySelector('.peak'));
+ const duckOn=document.getElementById('duckOn');
+ // prefers-reduced-motion: the meters tick at 5 fps instead of every frame.
+ const calm=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+ let meterAt=0;
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
  // Where the playing file lives ({folder,name}), so the page can jump back to
  // it — the server reports it because only the box knows how playback started.
@@ -703,70 +1452,158 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  // Its playback position (seconds) and when that frame arrived, so Reinhören
  // can seek to where the box is *now*, not where it was one frame ago.
  let playPos=null, playPosAt=0;
+ // Toggles say their *state* in words ("Mikros offen" / "Mikros zu",
+ // "Aufnahme läuft" / "Aufnahme aus") plus aria-pressed — never a label that
+ // flips between an action and a state. The tooltip names what a click does.
  const mbtn=document.getElementById('mute');
  function setBtn(){
-  if(muted){mbtn.textContent='▶ Music only';mbtn.className='muted';mbtn.title='Mics muted — click to open mics';}
-  else{mbtn.textContent='● Mics open';mbtn.className='mic-live';mbtn.title='Mics are live — click for music only';}
+  if(muted){mbtn.textContent='Mikros zu';mbtn.className='muted';mbtn.title='Alle Mikrofone sind zu (nur Musik) — Klick öffnet sie';}
+  else{mbtn.textContent='● Mikros offen';mbtn.className='mic-live';mbtn.title='Mikrofone sind offen — Klick schließt alle (nur Musik)';}
+  setPressed(mbtn,!muted);
  }
  mbtn.onclick=()=>{muted=!muted;setBtn();if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'micsMuted',value:muted}));};
  function send(cmd){if(ws&&ws.readyState===1)ws.send(JSON.stringify(cmd));}
+ function setTog(b,cls,on,onText,offText,what,held){if(on===null||on===undefined){b.style.display='none';return;}b.style.display='';
+  b.textContent=on?onText:offText;b.className=cls+(on?' on':'');
+  b.title=what+(on?(held?' läuft — zum Beenden gedrückt halten':' läuft — Klick beendet'):' ist aus — Klick startet');setPressed(b,on);}
+ // Press-and-hold for everything that ends output (Stopp, recording, stream,
+ // local output, end of show): a stray tap must not cut the programme. The
+ // button fills for PRESS_MS and acts when the fill is complete; letting go
+ // earlier cancels. It works the same from the keyboard (hold Enter or Space).
+ // A short tap does not act either, it arms a confirm: the label asks, and a
+ // second tap — not a bounce, so at least CONFIRM_MIN_MS later — acts. That
+ // second path is what a screen reader's activate gesture (a bare click, no
+ // press to hold) and anybody who cannot hold a press get to use.
+ // needsHold() says whether the button is in its guarded state right now;
+ // outside it (starting something) a single tap acts. render() repaints the
+ // normal label.
+ const PRESS_MS=800,CONFIRM_MIN_MS=400,CONFIRM_MS=4000;
+ function holdBtn(b,needsHold,act,render,ask){
+  let timer=0,disarm=0,armedAt=0,done=false,keyDown=false;
+  const unarm=()=>{if(!armedAt)return;armedAt=0;clearTimeout(disarm);b.classList.remove('armed');render();};
+  const release=()=>{if(timer){clearTimeout(timer);timer=0;}b.classList.remove('holding');};
+  const fire=()=>{unarm();if(needsHold())act();};
+  const press=()=>{done=false;
+   if(timer||b.disabled||!needsHold())return;
+   b.classList.add('holding');
+   timer=setTimeout(()=>{timer=0;b.classList.remove('holding');done=true;fire();},PRESS_MS);};
+  const tap=()=>{
+   if(!needsHold()){act();return;}    // starting is a single tap
+   const now=Date.now();
+   if(armedAt&&now-armedAt<=CONFIRM_MS){if(now-armedAt>=CONFIRM_MIN_MS)fire();return;}
+   armedAt=now;b.classList.add('armed');b.textContent=ask+' Nochmal tippen';
+   say(ask+' Gedrückt halten oder nochmal tippen.');
+   clearTimeout(disarm);disarm=setTimeout(unarm,CONFIRM_MS);};
+  b.addEventListener('pointerdown',press);
+  ['pointerup','pointerleave','pointercancel','blur'].forEach(t=>b.addEventListener(t,release));
+  b.addEventListener('keydown',e=>{if(e.repeat||(e.key!=='Enter'&&e.key!==' '))return;keyDown=true;press();});
+  // Enter clicks on keydown (and again on every key repeat), Space on keyup:
+  // clicks while the key is down are swallowed, and a short Enter is turned
+  // into the tap it was meant as here.
+  b.addEventListener('keyup',e=>{if(!keyDown)return;keyDown=false;
+   const early=!!timer;release();
+   if(e.key==='Enter'){if(done)done=false;else if(early)tap();}});
+  b.addEventListener('contextmenu',e=>{if(e.preventDefault)e.preventDefault();});
+  b.onclick=()=>{
+   if(done){done=false;return;}       // the hold has acted; this click is its release
+   if(timer||keyDown)return;          // a hold is under way
+   tap();};
+  return unarm;
+ }
  const rbtn=document.getElementById('rec');
- function setRec(){if(recording===null){rbtn.style.display='none';return;}rbtn.style.display='';rbtn.textContent=recording?'■ Stop recording':'● Start recording';rbtn.className='rec'+(recording?' on':'');}
- rbtn.onclick=()=>{if(recording===null)return;recording=!recording;setRec();send({type:'recording',value:recording});};
+ // After a stop the box keeps writing for the look-ahead (about 3 s), so what
+ // was said up to the button press is in the file — and keeps reporting
+ // "recording" that long. Here that reads "endet …", not as a stop that failed.
+ let recEndAt=0;
+ const recEnding=()=>recording===false&&Date.now()-recEndAt<5000;
+ function setRec(){setTog(rbtn,'tog rec hold',recording,'● Aufnahme läuft',recEnding()?'Aufnahme endet …':'Aufnahme aus','Die lokale Aufnahme (FLAC)',true);}
+ holdBtn(rbtn,()=>tech()&&recording===true,()=>{if(recording===null||!tech())return;
+  recording=!recording;recEndAt=recording?0:Date.now();setRec();send({type:'recording',value:recording});},setRec,'Aufnahme beenden?');
  const sbtn=document.getElementById('ship');
- function setShip(){if(streaming===null){sbtn.style.display='none';return;}sbtn.style.display='';sbtn.textContent=streaming?'■ Stop streaming':'● Start streaming';sbtn.className='ship'+(streaming?' on':'');}
- sbtn.onclick=()=>{if(streaming===null)return;streaming=!streaming;setShip();send({type:'streaming',value:streaming});};
+ function setShip(){setTog(sbtn,'tog ship hold techonly',streaming,'Stream läuft','Stream aus','Der Stream zum Server',true);}
+ holdBtn(sbtn,()=>streaming===true,()=>{if(streaming===null||!tech())return;
+  streaming=!streaming;setShip();send({type:'streaming',value:streaming});},setShip,'Stream beenden?');
  const mbtn2=document.getElementById('mon');
- function setMon(){if(monitor===null){mbtn2.style.display='none';return;}mbtn2.style.display='';mbtn2.textContent=monitor?'■ Stop local playout':'● Start local playout';mbtn2.className='mon'+(monitor?' on':'');}
- mbtn2.onclick=()=>{if(monitor===null)return;monitor=!monitor;setMon();send({type:'monitor',value:monitor});};
+ function setMon(){setTog(mbtn2,'mon hold techonly',monitor,'Lokale Ausgabe läuft','Lokale Ausgabe aus','Die Ausgabe auf der Soundkarte',true);}
+ holdBtn(mbtn2,()=>monitor===true,()=>{if(monitor===null||!tech())return;
+  monitor=!monitor;setMon();send({type:'monitor',value:monitor});},setMon,'Ausgabe beenden?');
+ // Music return to the room (the mixer's USB playback): no programme hangs on
+ // it, so it is a plain switch.
+ const retBtn=$('ret');let musicReturn=null;
+ function setRet(){setTog(retBtn,'mon techonly',musicReturn,'Musik-Rückweg läuft','Musik-Rückweg aus','Der Musik-Rückweg ins Studio');}
+ retBtn.onclick=()=>{if(musicReturn===null||!tech())return;musicReturn=!musicReturn;setRet();send({type:'musicReturn',value:musicReturn});};
+ // Alignment tone: it replaces the programme on the local output, so here it
+ // is *starting* that is guarded; a chip in the header says it is on.
+ const toneBtn=$('tone');let testTone=null;
+ function setTone(){show(toneBtn,testTone!==null);show($('toneChip'),!!testTone);
+  toneBtn.textContent=testTone?'Testton läuft (1 kHz, −18 dBFS)':'Testton aus';
+  toneBtn.className='hold techonly'+(testTone?' on':'');setPressed(toneBtn,!!testTone);
+  toneBtn.title=testTone?'Testton läuft statt des Programms auf der lokalen Ausgabe — Klick beendet'
+   :'1 kHz bei −18 dBFS auf die lokale Ausgabe, zum Einpegeln des Pults. Ersetzt dort das Programm — gedrückt halten';}
+ holdBtn(toneBtn,()=>testTone===false,()=>{if(testTone===null||!tech())return;
+  testTone=!testTone;setTone();send({type:'testTone',value:testTone});},setTone,'Testton statt Programm?');
  const filesBox=document.getElementById('files'),flist=document.getElementById('flist'),folderList=document.getElementById('folderList');
  const crumbs=document.getElementById('crumbs');
  let folder=0,subPath='',folderLabels=[],folders=[];
  const tiles=document.getElementById('tiles'),welcome=document.getElementById('welcome');
  const stopBtn=document.getElementById('stop');
- // The Stop-file button only makes sense while a file is playing.
- function setStop(){stopBtn.style.display=playing?'':'none';}
- stopBtn.onclick=()=>send({type:'stopFile'});
- // Per-row mute toggles: the tbody is rebuilt every frame, so delegate the
- // click to the persistent tbody and read the channel label from the button.
- document.querySelector('#t tbody').addEventListener('click',e=>{
+ // Stop only makes sense while a file is playing — but it keeps its place
+ // (disabled) so the emergency control is always where the thumb expects it.
+ function setStop(){stopBtn.disabled=!playing;stopBtn.textContent='■ Stopp';stopUnarm();}
+ const stopUnarm=holdBtn(stopBtn,()=>!!playing,()=>send({type:'stopFile'}),()=>{stopBtn.textContent='■ Stopp';},'Stoppen?');
+ // Per-row mute toggles: delegate the click to the persistent rows container
+ // and read the channel label from the button.
+ rowsEl.addEventListener('click',e=>{
   const b=e.target.closest('.mtbtn');if(!b)return;
   send({type:'channelMuted',value:{label:b.dataset.label,muted:!b.classList.contains('on')}});
  });
- // Reflect the active folder in the flat picker (highlight the current row).
- function markFolderActive(){[...folderList.children].forEach(b=>{b.classList.toggle('on',Number(b.dataset.i)===folder);});}
+ // Reflect the active folder in the tab row (highlight the current one).
+ function markFolderActive(){[...folderList.children].forEach(b=>{const on=Number(b.dataset.i)===folder;
+  b.classList.toggle('on',on);setPressed(b,on);});}
  function selectFolder(i){folder=i;subPath='';menu.style.display='none';markFolderActive();
   [...tiles.children].forEach(t=>t.classList.toggle('on',Number(t.dataset.i)===folder));loadFiles();}
- const npbox=document.getElementById('nowplaying');
+ const npbox=document.getElementById('nowplaying'),nowbox=document.getElementById('nowbox');
+ // A long name is cut in its middle: head (ellipsized by CSS) + fixed tail.
+ const midName=n=>{n=String(n);const cut=n.length>28?n.length-14:n.length;
+  return '<span class="nh">'+esc(n.slice(0,cut))+'</span>'+(cut<n.length?'<span class="nt">'+esc(n.slice(cut))+'</span>':'');};
  function markPlaying(){[...flist.children].forEach(li=>{if(li.classList.contains('dir'))return;
   li.classList.toggle('playing',li.dataset.name===playing);});
   // The box moved on to another file: what is being listened in to is not the
   // on-air file any more, so stop calling it that.
   if(cueLive&&(!playingAt||playingAt.folder!==cueFolder||playingAt.name!==cueRel)){
    cueLive=false;cueLabel();}
-  if(playing){npbox.style.display='';
+  nowbox.classList.toggle('idle',!playing);
+  if(playing){
    // Reinhören needs a location to fetch from and a format the browser plays.
    const canTune=!!playingAt&&cuePlayable(playing);
-   npbox.innerHTML='♪ now playing: <b>'+esc(playing)+'</b>'+
-    (playingAt?'<button class="jump" title="Ordner des laufenden Titels öffnen">📂</button>':'')+
-    (canTune?'<button class="jump tune" title="Reinhören: die laufende Ausspielung an der aktuellen Stelle im Browser mithören">👂</button>':'');
+   npbox.innerHTML='<span class="ic" aria-hidden="true">▶</span><span class="nm" title="'+esc(playing)+'">'+midName(playing)+'</span>'+
+    (playingAt?'<button class="jump" title="Ordner des laufenden Titels öffnen" aria-label="Ordner des laufenden Titels öffnen">📂</button>':'')+
+    (canTune?'<button class="jump tune" title="Reinhören: die laufende Ausspielung an der aktuellen Stelle im Browser mithören" aria-label="Reinhören">👂</button>':'');
    if(playingAt)npbox.querySelector('.jump').onclick=()=>gotoFile(playingAt.folder,playingAt.name);
    if(canTune)npbox.querySelector('.tune').onclick=tuneIn;}
-  else{npbox.style.display='none';}
+  else{npbox.innerHTML='Keine Datei läuft';}
   setStop();}
- function updateFileTime(pos,dur){const el=document.getElementById('ftime');if(!el)return;
-  if(dur!==null&&dur!==undefined&&isFinite(dur)){el.innerHTML='<span class="rem">'+mmss(dur-(pos||0))+' left</span>';}
-  else if(pos!==null&&pos!==undefined&&isFinite(pos)){el.innerHTML='<span class="rem">'+mmss(pos)+'</span>';}
-  else el.innerHTML='';}
- function loadFolders(){fetch('folders').then(r=>r.json()).then(d=>{
+ // Footer transport: remaining time large, elapsed small, and a progress bar;
+ // a file of unknown length shows how long it has been running instead.
+ const remEl=document.getElementById('rem'),remLbl=document.getElementById('remlbl'),
+  ftimeEl=document.getElementById('ftime'),pbar=document.getElementById('pbar');
+ function updateFileTime(pos,dur){
+  const hasPos=pos!==null&&pos!==undefined&&isFinite(pos);
+  if(dur!==null&&dur!==undefined&&isFinite(dur)){const p=hasPos?pos:0;
+   remLbl.textContent='noch';remEl.textContent=mmss(dur-p);
+   ftimeEl.textContent=mmss(p)+' von '+mmss(dur);
+   pbar.style.width=(dur>0?Math.max(0,Math.min(100,p/dur*100)):0)+'%';}
+  else{remLbl.textContent=hasPos?'läuft seit':'';remEl.textContent=hasPos?mmss(pos):'–:––';
+   ftimeEl.textContent='';pbar.style.width='0%';}}
+ function loadFolders(){fetch(withK('folders')).then(r=>r.json()).then(d=>{
   // Entries are {label,icon}; tolerate bare strings from an older server.
   const fl=(d.folders||[]).map(f=>typeof f==='string'?{label:f,icon:'📁'}:f);
   folders=fl;
   folderLabels=fl.map(f=>f.label);
   folderList.innerHTML='';
-  // One button per configured dir, straight in the ⋮ menu — no nested select.
-  // With a single folder there's nothing to pick, so the list stays empty
-  // (and its divider collapses via :not(:empty)).
+  // One tab per configured dir, right above the listing — no nested select.
+  // With a single folder there's nothing to pick, so the row stays empty
+  // (and collapses via :empty).
   if(fl.length>1)fl.forEach((f,i)=>{const b=document.createElement('button');
    b.className='fbtn';b.dataset.i=i;b.textContent=(f.icon||'📁')+' '+f.label;
    b.onclick=()=>selectFolder(i);folderList.appendChild(b);});
@@ -778,11 +1615,11 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   renderTiles();
   loadFiles();
  }).catch(()=>{loadFiles();});}
- // Welcome screen: the same sources as the ⋮ menu, as big one-click tiles.
+ // Welcome screen: the same sources as the tab row, as big one-click tiles.
  function renderTiles(){
   tiles.innerHTML='';
   if(!folders.length){tiles.innerHTML='<div class="sub">keine Ordner konfiguriert</div>';return;}
-  folders.forEach((f,i)=>{const t=document.createElement('div');
+  folders.forEach((f,i)=>{const t=document.createElement('button');
    t.className='tile'+(i===folder?' on':'');t.dataset.i=i;
    t.innerHTML='<span class="ic">'+esc(f.icon||'📁')+'</span><span class="nm">'+esc(f.label)+'</span>';
    t.onclick=()=>{welcome.style.display='none';selectFolder(i);};
@@ -792,6 +1629,12 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  // the *server's* clock, which is what actually triggers auto-play.
  let clockSkew=0;
  const srvNow=()=>Date.now()+clockSkew;
+ // With an air delay the programme runs a few seconds behind the room. What
+ // is said now airs at "Sendezeit" = server clock + measured delay, and that
+ // is the clock filename timestamps mean: a file stamped 13:00:00 airs at
+ // 13:00:00. Without a delay (playout mode) the two are the same clock.
+ let air=null,airDelayMs=0;
+ const airNow=()=>srvNow()+airDelayMs;
  // All schedule times render in the *server's* timezone: filename timestamps
  // are parsed there, so a browser sitting in another zone must still show the
  // wallclock the operator wrote into the filename.
@@ -800,11 +1643,21 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   catch(e){return new Intl.DateTimeFormat('de-DE',o);}};
  const dayFmt=mkFmt({day:'2-digit',month:'2-digit'});
  const timeFmt=mkFmt({hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
- const fmtWhen=ms=>{const sameDay=dayFmt.format(ms)===dayFmt.format(srvNow());
+ const fmtWhen=ms=>{const sameDay=dayFmt.format(ms)===dayFmt.format(airNow());
   return (sameDay?'':dayFmt.format(ms)+' ')+timeFmt.format(ms);};
- // Live server clock in the footer — the clock auto-play actually fires on.
- const clockEl=document.getElementById('clock');
- const tickClock=()=>{clockEl.innerHTML='⏱ '+timeFmt.format(srvNow())+' <span class="tz">'+esc(serverTz)+'</span>';};
+ // Live clock in the header — the clock auto-play actually fires on. With an
+ // air delay that is Sendezeit, labelled as such, with the studio's own clock
+ // and the delay small beneath it; a delay off its target by more than a
+ // second is called out.
+ const clockEl=document.getElementById('clock'),tzEl=document.getElementById('tz');
+ const tickClock=()=>{clockEl.textContent=timeFmt.format(airNow());
+  if(!air){tzEl.className='tz';tzEl.textContent=serverTz;return;}
+  const d=air.delayMs===null?air.targetMs:air.delayMs;
+  const off=air.delayMs!==null&&Math.abs(air.delayMs-air.targetMs)>1000;
+  tzEl.className='tz'+(off?' warn':'');
+  tzEl.textContent=air.state==='draining'&&air.drainEndsMs
+   ?'Sendezeit · Puffer läuft aus, noch '+mmss((air.drainEndsMs-srvNow())/1000)
+   :'Sendezeit · Studio '+timeFmt.format(srvNow())+(off?' · Verzögerung '+fmt(d/1000)+' s':' · +'+fmt(d/1000)+' s');};
  tickClock();setInterval(tickClock,1000);
  // Re-apply schedule marks to the existing rows (which timestamps are still in
  // the future changes as time passes, without any new fetch).
@@ -812,7 +1665,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   const rows=[...flist.children].filter(li=>li.dataset.name);
   let next=null;
   rows.forEach(li=>{const at=Number(li.dataset.playat);
-   const up=isFinite(at)&&at>0&&at>srvNow();
+   const up=isFinite(at)&&at>0&&at>airNow();
    li.classList.toggle('sched',up);
    li.classList.remove('next');
    if(up&&(next===null||at<Number(next.dataset.playat)))next=li;});
@@ -822,7 +1675,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  // every non-current segment clickable to jump back up.
  function renderCrumbs(){
   const segs=subPath?subPath.split('/'):[];
-  let html='<span class="seg'+(segs.length?'':' cur')+'" data-i="-1">'+esc(folderLabels[folder]||'files')+'</span>';
+  let html='<span class="seg'+(segs.length?'':' cur')+'" data-i="-1">'+esc(folderLabels[folder]||'Dateien')+'</span>';
   segs.forEach((s,i)=>{html+='<span class="sep">/</span><span class="seg'+(i===segs.length-1?' cur':'')+'" data-i="'+i+'">'+esc(s)+'</span>';});
   crumbs.innerHTML=html;
  }
@@ -830,17 +1683,21 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   const i=Number(s.dataset.i);
   subPath=i<0?'':subPath.split('/').slice(0,i+1).join('/');
   loadFiles();};
+ // Rows are clickable list items; make them reachable by keyboard too. Enter
+ // on the row itself acts — not on the ＋ button inside it.
+ const rowAct=(li,fn)=>{li.onclick=fn;li.tabIndex=0;
+  li.onkeydown=e=>{if(e.key==='Enter'&&e.target===li)fn();};};
  // The optional focus argument (a bare filename) marks the row a jump landed
  // on, so the file you came looking for is visible instead of somewhere down a
  // long listing.
- function loadFiles(focus){fetch('files?folder='+folder+'&path='+encodeURIComponent(subPath)).then(r=>r.json()).then(d=>{
+ function loadFiles(focus){fetch(withK('files?folder='+folder+'&path='+encodeURIComponent(subPath))).then(r=>r.json()).then(d=>{
   const fs=d.files||[];
   if(typeof d.now==='number')clockSkew=d.now-Date.now();
   filesBox.style.display='';
   renderCrumbs();
   addall.style.display='none';
   flist.innerHTML='';
-  if(!fs.length){flist.innerHTML='<li class="none">no audio files in this folder</li>';cueSync([]);return;}
+  if(!fs.length){flist.innerHTML='<li class="none">Keine Audiodateien in diesem Ordner</li>';cueSync([]);return;}
   // Files this browser could pre-listen to, in listing order — the queue
   // Vorhören auto-advances through.
   const cueable=[];
@@ -852,7 +1709,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
     // Subdirectory row: descend instead of playing.
     li.className='dir';
     li.innerHTML='<span class="fname">📁 '+esc(name)+'</span><span class="when">›</span>';
-    li.onclick=()=>{subPath=subPath?subPath+'/'+name:name;loadFiles();};
+    rowAct(li,()=>{subPath=subPath?subPath+'/'+name:name;loadFiles();});
     flist.appendChild(li);return;
    }
    const at=typeof f==='object'&&f&&isFinite(f.playAtMs)?f.playAtMs:null;
@@ -865,13 +1722,19 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
    // A ＋ per row appends to the pending list of whichever mode is active;
    // in Vorhören a file the browser can't decode gets no ＋ at all.
    const canAdd=!cueing||idx>=0;
-   li.innerHTML='<span class="fname">'+esc(name)+'</span><span class="when">'+when+'</span>'+
-    (canAdd?'<button class="addbtn" title="an die Warteschlange anhängen">＋</button>':'');
+   // In the folder the bed comes from, every file can be made the bed.
+   const bedRow=!cueing&&!!bed&&!!bed.at&&bed.at.folder===folder;
+   const isBed=bedRow&&bed.at.name===rel;
+   li.innerHTML='<span class="fname" title="'+esc(name)+'">'+esc(name)+'</span><span class="when">'+when+'</span>'+
+    (bedRow?'<button class="bedbtn" aria-pressed="'+isBed+'" title="'+(isBed?'ist das Bett':'als Bett wählen')+
+     '" aria-label="'+(isBed?'ist das Bett':'als Bett wählen')+'">🛏</button>':'')+
+    (canAdd?'<button class="addbtn" title="an die Warteschlange anhängen" aria-label="an die Warteschlange anhängen">＋</button>':'');
+   if(bedRow)li.querySelector('.bedbtn').onclick=e=>{e.stopPropagation();send({type:'bedSelect',value:{folder:folder,name:rel}});};
    if(canAdd)li.querySelector('.addbtn').onclick=e=>{e.stopPropagation();enqueue(folder,rel);};
    // In Vorhören mode a click pre-listens in the browser and leaves the
    // on-air playout completely untouched; otherwise it starts real playout.
-   li.onclick=()=>{if(cueing)cueStart(folder,subPath,cueable,idx,name);
-    else send({type:'playFile',value:{folder:folder,name:rel}});};
+   rowAct(li,()=>{if(cueing)cueStart(folder,subPath,cueable,idx,name);
+    else send({type:'playFile',value:{folder:folder,name:rel}});});
    flist.appendChild(li);});
   // "＋ alle" appends what is listed here — subdirectory rows are not files,
   // so a folder holding only subfolders (or, in Vorhören, only formats the
@@ -908,25 +1771,205 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
    const parts=String(n.name).split('/');
    const base=parts.pop();
    const dir=parts.length?'<span class="dim">'+esc(parts.join(' / '))+' /</span> ':'';
-   nextBox.innerHTML='⏰ next auto-play: '+dir+'<b>'+esc(base)+'</b> @ '+fmtWhen(n.playAtMs);}
+   nextBox.innerHTML='⏰ Nächster Start <b>'+fmtWhen(n.playAtMs)+'</b> · '+dir+esc(base);}
   else nextBox.style.display='none';
  }
+ // "Auf Sendung", as far as the box can know it: the server derives it as
+ // "programme is leaving the box" (onAir) — the desk's fader is out of its
+ // sight. The chip says the state in words; only on air is it filled red.
+ const airEl=$('air');let airKey='',hadAir=false;
+ function setAir(s){
+  air=s.air||null;
+  airDelayMs=air?air.nowMs-s.serverNowMs:0;
+  // The clock's label depends on it: repaint at once, not at the next second.
+  if(!!air!==hadAir){hadAir=!!air;tickClock();}
+  let text='',on=false;
+  if(air){const st=air.state;
+   if(st==='filling')text='Puffer füllt';
+   else if(st==='ended')text='Sendung beendet';
+   else if(!s.onAir)text='Nicht auf Sendung';
+   // Still on air while "Sendung beenden" plays the buffer out — the
+   // countdown for that is under the clock.
+   else{on=true;text='Auf Sendung';}}
+  if(text+on===airKey)return;
+  airKey=text+on;show(airEl,!!text);airEl.className='chip'+(on?' on':'');$('airText').textContent=text;
+ }
+ // "Sendung beenden": closes the mics, lets the buffer play out, then stops
+ // the recording — the clean way to end a show (a plain stop cuts the last
+ // seconds). While it drains, the same button takes it back.
+ const endBtn=$('endShow');let endKey=null;
+ const ending=()=>!!air&&air.state==='draining';
+ function setEnd(){show(endBtn,!!air);if(!air)return;
+  endBtn.disabled=air.state==='ended';
+  endBtn.textContent=ending()?'Beenden abbrechen':air.state==='ended'?'Sendung beendet':'Sendung beenden';
+  endBtn.title=ending()?'Der Puffer läuft aus — Klick bricht das Beenden ab (die Mikros bleiben zu)'
+   :air.state==='ended'?'Mikros öffnen geht wieder auf Sendung'
+   :'Schließt die Mikros, lässt den Puffer auslaufen und beendet dann die Aufnahme; die Warteschlange steht danach auf „einzeln“ — gedrückt halten';}
+ holdBtn(endBtn,()=>!!air&&!ending(),()=>{if(tech())send({type:'endShow',value:!ending()});},setEnd,'Sendung beenden?');
+ // Audio bed (a looping second deck, ducked like the music): one switch that
+ // says its state. The box fades it; the button follows the snapshot.
+ const bedBtn=$('bed');let bed=null,bedKey='';
+ function setBed(){show(bedBtn,!!bed);if(!bed)return;
+  bedBtn.textContent=bed.on?'Bett läuft':'Bett aus';bedBtn.className=bed.on?'on':'';setPressed(bedBtn,bed.on);
+  bedBtn.disabled=!bed.on&&!bed.name;
+  bedBtn.title=!bed.name?'Kein Bett gefunden — im Bett-Ordner liegt keine Audiodatei'
+   :'Bett: '+bed.name+(bed.on?' — Klick blendet es aus':' — Klick blendet es ein');}
+ bedBtn.onclick=()=>{if(bed)send({type:'bed',value:!bed.on});};
+ // Host priority: the slider is the depth as a positive number of dB.
+ const prio=$('prio'),prioVal=$('prioVal');let prioAt=0,prioSentAt=0;
+ const prioText=v=>Number(v)>0?'−'+v+' dB':'aus';
+ function sendPrio(){prioSentAt=Date.now();send({type:'priorityDepth',value:-Number(prio.value)});}
+ // Dragging sends at most every 150 ms; letting go always sends the final value.
+ prio.oninput=()=>{prioAt=Date.now();prioVal.textContent=prioText(prio.value);if(prioAt-prioSentAt>=150)sendPrio();};
+ prio.onchange=()=>{prioAt=Date.now();sendPrio();};
+ function setPrio(p){show($('prioBox'),!!p);if(!p)return;
+  $('prioWho').textContent=p.label;show($('prioAct'),!!p.active);
+  // Not while a finger is on it: the echo of an older value would pull the
+  // thumb back.
+  if(Date.now()-prioAt<1500)return;
+  const v=String(Math.round(-p.depthDb));
+  if(prio.value!==v)prio.value=v;
+  const t=prioText(v);if(prioVal.textContent!==t)prioVal.textContent=t;}
+ // ---- Einmessen (setup assistant) ----------------------------------------
+ // The box listens and measures; the page only shows where it is. The buttons
+ // are fixed elements switched by phase, and the step tiles are built once per
+ // run and updated in place — rebuilding them per frame would pull a button
+ // away from under a finger.
+ const su={box:$('setupBox'),info:$('suInfo'),intro:$('suIntro'),steps:$('suSteps'),now:$('suNow'),sent:$('suSent'),
+  rows:$('suRows'),start:$('suStart'),cancel:$('suCancel'),finish:$('suFinish'),
+  apply:$('suApply'),discard:$('suDiscard'),chip:$('setupChip'),line:$('setupLine')};
+ let suKey=null,suTileKey='',suTiles=[];
+ const put=(el,t)=>{if(el.textContent!==t)el.textContent=t;};
+ const pctTxt=p=>Math.round(Math.max(0,Math.min(1,p))*100)+' %';
+ function suTile(name){const li=document.createElement('li'),sn=document.createElement('span'),
+  b=document.createElement('b'),sd=document.createElement('span');
+  sn.className='sn';sd.className='sd';b.textContent=name;
+  li.appendChild(sn);li.appendChild(b);li.appendChild(sd);su.steps.appendChild(li);
+  return {li:li,sn:sn,sd:sd,state:''};}
+ // A tile's state is a word (ERLEDIGT / JETZT / OFFEN), not only its frame.
+ function suSet(i,state,detail){const t=suTiles[i];if(!t)return;
+  if(t.state!==state){t.state=state;t.li.className=state;
+   t.sn.textContent=(i+1)+' · '+(state==='done'?'ERLEDIGT':state==='now'?'JETZT':'OFFEN');}
+  put(t.sd,detail);}
+ const VERD={'gut':'ok','zu leise':'warn','rauscht':'warn','übersteuert':'bad','kein Signal':'bad'};
+ // One setting as "vorher → nachher". Only a change gets the arrow: a value
+ // the assistant leaves alone (or a mic without a usable measurement) just
+ // shows what it is.
+ function suCell(name,a,b,unit,f,d){
+  const was=f(a,d),now=b===null||b===undefined?was:f(b,d);
+  return '<div><dt>'+name+'</dt><dd>'+(was===now?was+' '+unit:'<span class="was">'+was+' →</span> <b>'+now+' '+unit+'</b>')+'</dd></div>';}
+ // One card per mic. What studiobox cannot set itself — the analog gain — is
+ // a concrete instruction, with the way to check it again right beside it.
+ function suResult(st){
+  su.rows.innerHTML='';
+  st.results.forEach(r=>{const a=r.after||{},b=r.before,notes=r.notes||[];
+   const li=document.createElement('li');
+   li.innerHTML='<div class="srh"><b>'+esc(r.label)+'</b><span class="was">Kanal '+r.channel+' · '+
+    (r.speechDb===null?'keine Sprache':'Sprache '+fmt(r.speechDb)+' dB'+(r.snrDb===null?'':' · Abstand '+fmt(r.snrDb,0)+' dB'))+'</span>'+
+    '<span class="verd '+(VERD[r.verdict]||'warn')+'">'+esc(r.verdict)+'</span></div>'+
+    '<dl class="sset">'+suCell('Trim',b.trimDb,a.trimDb,'dB',sgn)+suCell('Hochpass',b.hpfHz,a.hpfHz,'Hz',fmt,0)+
+    suCell('Gate',b.gateThresholdDb,a.gateThresholdDb,'dB',fmt)+suCell('Comp',b.compThresholdDb,a.compThresholdDb,'dB',fmt)+
+    suCell('De-Esser',b.deessThresholdDb,a.deessThresholdDb,'dB',fmt)+suCell('Leveler-Start',b.seedDb,a.seedDb,'dB',sgn)+'</dl>';
+   if(r.advice||notes.length){
+    const adv=document.createElement('div'),btn=document.createElement('button');
+    adv.className='adv';
+    adv.innerHTML='<span>'+(r.advice?'<b>'+esc(r.advice)+'</b> ':'')+esc(notes.join(' '))+'</span>';
+    btn.textContent='Nur diesen Kanal neu messen';
+    btn.onclick=()=>send({type:'setupStart',value:{only:[r.label]}});
+    adv.appendChild(btn);li.appendChild(adv);}
+   su.rows.appendChild(li);});
+ }
+ function setSetup(s){
+  const st=s.setup;
+  // No assistant on this box (playout mode): no panel, no chip.
+  if(!st){if(suKey!==''){suKey='';show(su.box,false);show(su.chip,false);show(su.line,false);}return;}
+  const sil=st.phase==='silence',running=sil||st.phase==='speakers',result=st.phase==='result'&&!!st.results;
+  const key=st.phase+'|'+st.mics.map(m=>m.label).join('|')+'|'+
+   (result?st.results.map(r=>r.label+':'+r.verdict+':'+(r.after?r.after.trimDb:'')).join('|'):'');
+  if(key!==suKey){suKey=key;
+   show(su.box,true);show(su.chip,running);
+   su.box.classList.toggle('idle',!running&&!result);
+   show(su.start,!running&&!result);
+   show(su.steps,running);show(su.now,running);show(su.cancel,running);show(su.finish,st.phase==='speakers');
+   show(su.rows,result);show(su.apply,result);show(su.discard,result);
+   if(result)suResult(st);
+  }
+  // The tiles belong to a run, not to a phase: they stay put from the silence
+  // through the last speaker.
+  const tk=running?st.mics.map(m=>m.label).join('|'):'';
+  if(tk!==suTileKey||(running&&!suTiles.length)){suTileKey=tk;
+   su.steps.innerHTML='';
+   suTiles=running?['Stille'].concat(st.mics.map(m=>m.label),['Ergebnis']).map(suTile):[];}
+  put(su.info,running?'läuft …':result
+   ?'Ergebnis — noch nicht übernommen'+(st.automixFloorDb===null?'':' · Automix-Boden '+fmt(st.automixFloorDb,0)+' dB')
+   :s.setupApplied?'Eingemessen ✓':'Noch nicht eingemessen');
+  // What it does is only worth a paragraph until it has been done once.
+  show(su.intro,!running&&!result&&!s.setupApplied);
+  show(su.sent,running&&!sil&&!!st.current);
+  // Everybody but the technician gets one line: who is up, what to read.
+  show(su.line,running&&!tech());
+  if(!running)return;
+  suSet(0,sil?'now':'done',sil?'Raumgeräusch · '+pctTxt(st.silence):'gemessen');
+  st.mics.forEach((m,i)=>suSet(i+1,m.done?'done':!sil&&m.label===st.current?'now':'open','Kanal '+m.channel+' · '+pctTxt(m.progress)));
+  suSet(st.mics.length+1,'open','vorher / nachher');
+  // The order does not matter — whoever talks is recognised; "Jetzt" is just
+  // who is asked next.
+  const now=sil?'Jetzt: Stille — bitte 5 Sekunden nicht sprechen.'
+   :st.current?'Jetzt: '+st.current+' — bitte diesen Satz vorlesen:':'Auswertung …';
+  put(su.now,now);put(su.sent,st.sentence||'');
+  if(!tech())put(su.line,sil?'Einmessen: bitte kurz still sein.'
+   :st.current?'Einmessen — jetzt: '+st.current+'. Bitte vorlesen: „'+(st.sentence||'')+'“':'Einmessen: Auswertung …');
+ }
+ su.start.onclick=()=>send({type:'setupStart'});
+ su.cancel.onclick=()=>send({type:'setupCancel'});
+ su.finish.onclick=()=>send({type:'setupFinish'});
+ su.apply.onclick=()=>send({type:'setupApply'});
+ su.discard.onclick=()=>send({type:'setupDiscard'});
+ // Connection state in words: a dead page must not look like a quiet studio.
+ const conn=document.getElementById('conn'),connText=document.getElementById('connText');
+ function setConn(state){conn.className='conn '+state;
+  connText.textContent=state==='ok'?'Verbunden':state==='lost'?'Verbindung weg – verbinde neu …':'Verbinde …';}
  function connect(){
-  ws=new WebSocket('ws://'+location.host);
+  ws=new WebSocket('ws://'+location.host+'/'+(location.search||''));
+  ws.onopen=()=>setConn('ok');
   ws.onmessage=e=>{const s=JSON.parse(e.data);
    // The pending play list is pushed separately (on change / on connect).
    if(s.type==='queue'){qItems=s.items||[];renderQueue();return;}
+   // Listener feedback from eve, pushed on change (operators only).
+   if(s.type==='listeners'){setListeners(s.status||null);return;}
+   // First message of a connection: the role its token stands for.
+   if(s.type==='hello'){setRole(s.role);return;}
    if(typeof s.serverNowMs==='number')clockSkew=s.serverNowMs-Date.now();
    // Playout-only mode: no channels -> hide the whole metering/mute surface.
    const playoutOnly=!s.channels||!s.channels.length;
    // The help text only describes controls this box actually has.
    document.body.classList.toggle('playout',playoutOnly);
-   document.getElementById('metering').style.display=playoutOnly?'none':'';
+   document.body.classList.toggle('live',!playoutOnly);
    mbtn.style.display=playoutOnly?'none':'';
    if(typeof s.micsMuted==='boolean'&&s.micsMuted!==muted){muted=s.micsMuted;setBtn();}
-   if(s.recording!==recording){recording=s.recording;setRec();}
+   if(s.recording!==recording){
+    // Still "recording" right after our own stop: the tail is being written.
+    if(!(s.recording===true&&recEnding())){recording=s.recording;recEndAt=0;setRec();}}
+   else if(recEndAt&&!recording){recEndAt=0;setRec();}
    if(s.streaming!==streaming){streaming=s.streaming;setShip();}
    if(s.monitor!==monitor){monitor=s.monitor;setMon();}
+   setAir(s);
+   const ek=air?air.state:'';
+   if(ek!==endKey){endKey=ek;setEnd();}
+   const mr=typeof s.musicReturn==='boolean'?s.musicReturn:null;
+   if(mr!==musicReturn){musicReturn=mr;setRet();}
+   // The tone only exists where there is a local output to put it on.
+   const tt=typeof s.testTone==='boolean'&&typeof s.monitor==='boolean'?s.testTone:null;
+   if(tt!==testTone){testTone=tt;setTone();}
+   const qm=s.queueMode||null;
+   if(qm!==queueMode){queueMode=qm;renderQueue();}
+   const bk=s.bed?(s.bed.on?'1':'0')+(s.bed.name||''):'';
+   if(bk!==bedKey){bedKey=bk;
+    // Which file is the bed is marked in its folder's listing.
+    const moved=(s.bed&&s.bed.at?s.bed.at.folder+':'+s.bed.at.name:'')!==(bed&&bed.at?bed.at.folder+':'+bed.at.name:'');
+    bed=s.bed||null;setBed();if(moved)loadFiles();}
+   setSetup(s);
+   setPrio(playoutOnly?null:s.priority||null);
    // Two files in different folders can share a basename, so the location is
    // part of what makes the now-playing line stale, not just the name.
    const atKey=s.filePlayingAt?s.filePlayingAt.folder+':'+s.filePlayingAt.name:'';
@@ -936,16 +1979,19 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
    playPos=typeof s.filePosition==='number'&&isFinite(s.filePosition)?s.filePosition:null;
    playPosAt=Date.now();
    updateFileTime(s.filePosition,s.fileDuration);
-   if(!playoutOnly){
-    updateRows(s.channels);
-    document.getElementById('mom').textContent=fmt(s.momentaryLufs);
-    document.getElementById('st').textContent=fmt(s.shortTermLufs);
-    document.getElementById('pk').textContent=fmt(s.outPeakDb);
-    document.getElementById('lgr').textContent=fmt(s.limiterGrDb);
-    document.getElementById('duck').textContent=fmt(s.duckDepthDb);
+   if(!playoutOnly&&(!calm||playPosAt-meterAt>=200)){
+    meterAt=playPosAt;
+    updateRows(s.channels,playPosAt);
+    document.getElementById('mom').textContent=fmtLufs(s.momentaryLufs);
+    document.getElementById('st').textContent=fmtLufs(s.shortTermLufs);
+    document.getElementById('pk').textContent=fmtPeak(s.outPeakDb);
+    document.getElementById('lgr').textContent=fmtGr(s.limiterGrDb);
+    document.getElementById('duck').textContent=fmtGr(s.duckDepthDb);
+    duckOn.style.display=Math.abs(s.duckDepthDb)>0.5?'':'none';
+    setLevel(pkm,s.outPeakDb,playPosAt);
    }
   };
-  ws.onclose=()=>setTimeout(connect,1000);
+  ws.onclose=()=>{setConn('lost');setTimeout(connect,1000);};
  }
  // ⋮ menu (top-right): local-playout toggle + scheduled-files modal; more to come.
  const menu=document.getElementById('menu'),menuBtn=document.getElementById('menuBtn');
@@ -954,17 +2000,17 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  // Scheduled-files modal: every future timestamped file across all folders.
  const modal=document.getElementById('modal'),mlist=document.getElementById('mlist');
  function openSched(){modal.style.display='';
-  mlist.innerHTML='<li class="none">loading…</li>';
-  fetch('scheduled').then(r=>r.json()).then(d=>{
+  mlist.innerHTML='<li class="none">lädt …</li>';
+  fetch(withK('scheduled')).then(r=>r.json()).then(d=>{
    if(typeof d.now==='number')clockSkew=d.now-Date.now();
-   const up=(d.scheduled||[]).filter(e=>e.playAtMs>srvNow()).sort((a,b)=>a.playAtMs-b.playAtMs);
-   if(!up.length){mlist.innerHTML='<li class="none">nothing scheduled</li>';return;}
+   const up=(d.scheduled||[]).filter(e=>e.playAtMs>airNow()).sort((a,b)=>a.playAtMs-b.playAtMs);
+   if(!up.length){mlist.innerHTML='<li class="none">Nichts geplant</li>';return;}
    mlist.innerHTML='';
    up.forEach(e=>{const li=document.createElement('li');
     const fl=folderLabels.length>1?'<span class="fld">'+esc(folderLabels[e.folder]||'')+' / </span>':'';
     li.innerHTML='<span class="fname">'+fl+esc(e.name)+'</span><span class="when">'+fmtWhen(e.playAtMs)+'</span>';
     mlist.appendChild(li);});
-  }).catch(()=>{mlist.innerHTML='<li class="none">could not load the schedule</li>';});}
+  }).catch(()=>{mlist.innerHTML='<li class="none">Der Plan konnte nicht geladen werden</li>';});}
  // Help modal (header "?"): a short German manual for new operators.
  const help=document.getElementById('help');
  document.getElementById('helpBtn').onclick=e=>{e.stopPropagation();menu.style.display='none';help.style.display='';};
@@ -973,13 +2019,93 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  document.getElementById('schedBtn').onclick=()=>{menu.style.display='none';openSched();};
  document.getElementById('mclose').onclick=()=>{modal.style.display='none';};
  modal.onclick=e=>{if(e.target===modal)modal.style.display='none';};
- // Welcome screen from the logo: pick a source as a tile.
+ // Welcome screen from the title: pick a source as a tile.
  document.getElementById('logo').onclick=()=>{renderTiles();welcome.style.display='';};
  document.getElementById('wclose').onclick=()=>{welcome.style.display='none';};
  welcome.onclick=e=>{if(e.target===welcome)welcome.style.display='none';};
  document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;
   welcome.style.display='none';modal.style.display='none';menu.style.display='none';
   help.style.display='none';});
+ // ---- Hörer:innen / listener feedback from eve ------------------------------
+ // Released comments and the heart count of the show on air. The host decides
+ // when to look: the panel is folded unless opened (remembered per browser),
+ // and folded it only says how many are new since it was last open. Nothing
+ // moves, nothing sounds, and nothing here writes back to eve.
+ const lis={box:$('lisbox'),title:$('lisTitle'),show:$('lisShow'),sum:$('lisSum'),
+  hearts:$('lisHearts'),state:$('lisState'),list:$('lisList')};
+ const store=(()=>{try{return window.localStorage||null;}catch(e){return null;}})();
+ const sget=k=>{try{return store?store.getItem(k):null;}catch(e){return null;}};
+ const sset=(k,v)=>{try{if(store)store.setItem(k,v);}catch(e){}};
+ const hmFmt=mkFmt({hour:'2-digit',minute:'2-digit',hour12:false});
+ let lisStatus=null,lisOpen=sget('sb.lisOpen')==='1';
+ let lisSeen=new Set((()=>{try{return JSON.parse(sget('sb.lisSeen')||'[]');}catch(e){return [];}})());
+ function setListeners(st){lisStatus=st;
+  document.body.classList.toggle('listeners',!!st);renderListeners();renderGuide();}
+ function renderListeners(){const st=lisStatus;
+  show(lis.box,!!st);if(!st)return;
+  const cs=st.comments||[],sh=st.show;
+  put(lis.show,sh?sh.name:'');
+  lis.hearts.textContent=sh?'♥ '+(st.hearts||0):'';
+  lis.hearts.setAttribute('aria-label',(st.hearts||0)+' Herzen');
+  // An empty list must never look like quiet listeners when eve is away.
+  const old=st.updatedMs?' – Stand '+hmFmt.format(st.updatedMs):'';
+  const words=st.state==='denied'?'Anmeldung bei eve abgelehnt – bitte die Technik fragen'
+   :st.state==='offline'?'eve nicht erreichbar'+old
+   :st.state==='connecting'?'Verbinde mit eve …'
+   :!sh?'Laut Sendeplan läuft gerade keine Sendung':'';
+  put(lis.state,words);show(lis.state,!!words);
+  lis.state.classList.toggle('warn',st.state==='denied'||st.state==='offline');
+  // Open, everything listed counts as seen (and only what this broadcast can
+  // still show is worth remembering).
+  if(lisOpen){lisSeen=new Set(cs.map(c=>c.id));sset('sb.lisSeen',JSON.stringify([...lisSeen]));}
+  const fresh=cs.filter(c=>!lisSeen.has(c.id)).length;
+  put(lis.sum,!sh?'':(cs.length===1?'1 Kommentar':cs.length+' Kommentare')+(!lisOpen&&fresh?' · '+fresh+' neu':''));
+  lis.title.setAttribute('aria-expanded',lisOpen?'true':'false');
+  show(lis.list,lisOpen&&!!sh);
+  if(!lisOpen||!sh)return;
+  lis.list.innerHTML=cs.length?'':'<li class="none">Noch keine freigegebenen Kommentare</li>';
+  cs.forEach(c=>{const li=document.createElement('li');
+   li.innerHTML='<span class="lt">'+(c.receivedAtMs?hmFmt.format(c.receivedAtMs):'')+'</span><span class="ltx">'+esc(c.text)+'</span>';
+   lis.list.appendChild(li);});}
+ lis.title.onclick=()=>{lisOpen=!lisOpen;sset('sb.lisOpen',lisOpen?'1':'0');renderListeners();};
+ // ---- Sendung / the episode on air and its guide from eve ------------------
+ // For the host: the show and its slot and, when the episode is prepared in
+ // eve, the opening and closing to read out, the topics in their planned order
+ // (a cue line readable mid-sentence; the notes fold out) and the questions
+ // that get asked whatever happens. Read-only. The sections are rebuilt only
+ // when eve's guide changes, and an open one stays open.
+ const gd={box:$('guidebox'),title:$('gdTitle'),show:$('gdShow'),state:$('gdState'),
+  body:$('gdBody'),ep:$('gdEp'),parts:$('gdParts')};
+ let gdOpen=sget('sb.gdOpen')!=='0',gdKey='';
+ function renderGuide(){const st=lisStatus,sh=st&&st.show;
+  show(gd.box,!!sh);if(!sh)return;
+  put(gd.show,sh.name+(sh.startMs&&sh.endMs?' · '+hmFmt.format(sh.startMs)+'–'+hmFmt.format(sh.endMs):''));
+  const ep=st.episode||null,g=st.guide;
+  const words=g==='pending'?'Lade den Ablauf aus eve …'
+   :g==='none'?'Für diese Sendung ist in eve kein Ablauf vorbereitet'
+   :g==='unavailable'?(ep?'Stand von vorhin – eve liefert den Ablauf gerade nicht':'Der Ablauf aus eve ist nicht abrufbar'):'';
+  put(gd.state,words);show(gd.state,!!words);
+  gd.state.classList.toggle('warn',g==='unavailable');
+  gd.title.setAttribute('aria-expanded',gdOpen?'true':'false');
+  show(gd.body,gdOpen&&!!ep);
+  if(!ep){gdKey='';return;}
+  const key=JSON.stringify(ep);if(key===gdKey)return;gdKey=key;
+  put(gd.ep,ep.title||'');
+  const was=new Set();
+  try{gd.parts.querySelectorAll('details[open]').forEach(d=>{if(d.dataset&&d.dataset.k)was.add(d.dataset.k);});}catch(e){}
+  // The HTML of scripts and notes is sanitized on the box (listeners/markdown.ts).
+  const fold=(k,head,html)=>'<details data-k="'+esc(k)+'"'+(was.has(k)?' open':'')+'><summary>'+head+'</summary><div class="gdmd">'+html+'</div></details>';
+  let h='';
+  if(ep.opening)h+=fold('opening','<span class="tt">Anmoderation</span>',ep.opening);
+  const ts=ep.topics||[],qs=ep.questions||[];
+  if(ts.length)h+='<h3>Themen</h3><ol class="gdtopics">'+ts.map(t=>{
+   const head='<span class="tt">'+esc(t.title)+'</span>'+(t.cue?'<span class="tc">'+esc(t.cue)+'</span>':'');
+   return '<li>'+(t.html?fold('t'+t.id,head,t.html):head)+'</li>';}).join('')+'</ol>';
+  if(qs.length)h+='<h3>Pflichtfragen</h3><ul class="gdq">'+qs.map(q=>'<li'+(q.asked?' class="asked"':'')+'>'
+   +(q.asked?'<span class="ok" aria-label="gestellt">✓</span> ':'')+esc(q.text)+'</li>').join('')+'</ul>';
+  if(ep.closing)h+=fold('closing','<span class="tt">Abmoderation</span>',ep.closing);
+  gd.parts.innerHTML=h;}
+ gd.title.onclick=()=>{gdOpen=!gdOpen;sset('sb.gdOpen',gdOpen?'1':'0');renderGuide();};
  // ---- Warteschlange / pending play list ----------------------------------
  // One panel, two lists: on air it mirrors the *server's* queue (the box is
  // the player, so the list lives there and every open page sees the same one,
@@ -992,6 +2118,12 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   qsend=document.getElementById('qsend'),qclear=document.getElementById('qclear'),
   addall=document.getElementById('addall');
  let qItems=[],cueList=[],cueSeq=0,qOpen=true;
+ // "einzeln | laufend" — whether the box rolls on into the next title by
+ // itself. Null where the box does not offer the choice (it then runs through).
+ let queueMode=null;
+ const qmSingle=$('qmSingle'),qmChain=$('qmChain');
+ qmSingle.onclick=()=>send({type:'queueMode',value:'single'});
+ qmChain.onclick=()=>send({type:'queueMode',value:'chain'});
  const curQueue=()=>cueing?cueList:qItems;
  // "Musik / Sub / track.flac" with everything but the filename dimmed.
  function qName(it){const p=String(it.name).split('/');const base=p.pop();
@@ -1003,18 +2135,22 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
   // An empty queue has nothing to show and nothing to start — the panel only
   // exists once something is in it (the ＋ buttons bring it back).
   queuebox.style.display=folders.length&&items.length?'':'none';
-  qtitle.textContent=(cueing?'🎧 Vorhören-Queue':'▶ Warteschlange')+' ('+items.length+')'+(qOpen?'':' ▸');
+  qtitle.textContent=(cueing?'🎧 Vorhören-Queue':'Warteschlange')+' ('+items.length+')'+(qOpen?' ▾':' ▸');
+  qtitle.setAttribute('aria-expanded',qOpen?'true':'false');
   qsend.style.display=cueing?'':'none';
+  // The browser's own audition list always runs through; the choice is the box's.
+  show($('qmode'),!!queueMode&&!cueing);
+  setPressed(qmSingle,queueMode==='single');setPressed(qmChain,queueMode==='chain');
   qlist.style.display=qOpen?'':'none';
   qlist.innerHTML='';
   if(!items.length)return;
   items.forEach((it,i)=>{const li=document.createElement('li');
    li.innerHTML='<span class="qn">'+(i+1)+'</span>'+
     '<span class="fname" title="jetzt abspielen (übersprungene Titel fallen raus)">'+qName(it)+'</span>'+
-    '<span class="qb"><button data-a="go" title="Ordner dieses Titels öffnen">📂</button>'+
-    '<button data-a="up" title="nach oben">↑</button>'+
-    '<button data-a="dn" title="nach unten">↓</button>'+
-    '<button data-a="rm" title="entfernen">✕</button></span>';
+    '<span class="qb"><button data-a="go" title="Ordner dieses Titels öffnen" aria-label="Ordner dieses Titels öffnen">📂</button>'+
+    '<button data-a="up" title="nach oben" aria-label="nach oben">↑</button>'+
+    '<button data-a="dn" title="nach unten" aria-label="nach unten">↓</button>'+
+    '<button data-a="rm" title="entfernen" aria-label="entfernen">✕</button></span>';
    li.querySelector('.fname').onclick=()=>qJump(it);
    [...li.querySelectorAll('.qb button')].forEach(b=>{b.onclick=e=>{e.stopPropagation();qAct(b.dataset.a,it);};});
    qlist.appendChild(li);});
@@ -1060,7 +2196,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  // so pre-listening costs the box no audio work and can never interrupt the
  // USB/on-air playout. Extensions browsers can't decode are refused up front.
  const CUE_OK=['.mp3','.m4a','.aac','.wav','.flac','.ogg','.oga','.opus'];
- const cueBtn=document.getElementById('cue'),cuebar=document.getElementById('cuebar'),
+ const cueBtn=document.getElementById('cue'),cueLbl=document.getElementById('cueLbl'),
+  cuebar=document.getElementById('cuebar'),fhint=document.getElementById('fhint'),
   cueAudio=document.getElementById('cueAudio'),cname=document.getElementById('cname'),
   cueStop=document.getElementById('cueStop'),cuejump=document.getElementById('cuejump');
  cuejump.onclick=()=>gotoFile(cueFolder,cueRel);
@@ -1077,8 +2214,11 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  let cueSeek=0,cueLive=false;
  const cuePlayable=n=>{const dot=n.lastIndexOf('.');return CUE_OK.indexOf(dot<0?'':n.slice(dot).toLowerCase())>=0;};
  function setCue(){cueBtn.className='cue'+(cueing?' on':'');
-  cueBtn.textContent=cueing?'🎧 Vorhören AN':'🎧 Vorhören';
+  cueLbl.textContent=cueing?'Vorhören an':'Vorhören';
+  setPressed(cueBtn,cueing);
   document.body.classList.toggle('cueing',cueing);
+  // What a click on a file does right now, in words above the listing.
+  fhint.textContent=cueing?'Vorhören: nur im Browser':'Klick spielt sofort aus';
   if(!cueing)cueStopPlay();
   // The panel shows the queue of whichever mode is active.
   renderQueue();
@@ -1123,7 +2263,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  function cuePlay(f,rel,seek){cueRel=rel;cueSeek=seek>0?seek:0;cueLive=false;
   cuebar.style.display='';cuejump.style.display='';
   cueLabel();
-  cueAudio.src='preview?folder='+f+'&name='+encodeURIComponent(rel);
+  cueAudio.src=withK('preview?folder='+f+'&name='+encodeURIComponent(rel));
   cueAudio.play().catch(()=>{});
   markCue();renderQueue();}
  // Auto-advance when a preview finishes (or the browser chokes on a file):
@@ -1168,6 +2308,10 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
  setRec();
  setShip();
  setMon();
+ setRet();
+ setTone();
+ setEnd();
+ setBed();
  setStop();
  loadFolders();
  connect();

@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>studiobox – Gast</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101214'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%237cc8ff'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<style>
+ /* Guest view (docs/design-guidelines.md, section 3): one question, answered
+    from an arm's length — "is my mic open, and am I at the right distance?".
+    Nothing here can be pressed during a show; the only control is choosing
+    which mic is yours, once. Sizes follow the smaller screen edge, so the
+    same page fits a phone and a tablet, upright or lying down. */
+ body{display:flex;flex-direction:column;gap:clamp(12px,3vmin,28px);height:100vh;height:100dvh;overflow:hidden;
+  padding:max(clamp(16px,4vmin,40px),env(safe-area-inset-top)) max(clamp(16px,5vmin,48px),env(safe-area-inset-right))
+   max(clamp(16px,4vmin,40px),env(safe-area-inset-bottom)) max(clamp(16px,5vmin,48px),env(safe-area-inset-left))}
+ .conn{flex:0 0 auto}
+ /* ---- the mic(s) -------------------------------------------------------- */
+ .mics{flex:1 1 auto;min-height:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
+ .mic{display:flex;flex-direction:column;gap:clamp(8px,2vmin,16px);min-width:0;min-height:0}
+ .mic header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px}
+ /* The name doubles as the way back to the mic chooser — no button in sight. */
+ .name{min-height:44px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;
+  font-size:clamp(1.75rem,6vmin,2.75rem);font-weight:700;line-height:1.1;overflow-wrap:anywhere}
+ /* State: a word on a filled chip, never the colour alone. */
+ .state{display:inline-flex;align-items:center;gap:.4em;padding:.25em .6em;border-radius:12px;
+  font-size:clamp(1.5rem,5vmin,2.125rem);font-weight:800;letter-spacing:.04em;white-space:nowrap}
+ .state .dot{flex:0 0 auto;width:.55em;height:.55em;border-radius:50%;border:3px solid currentColor}
+ .state.OFFEN{background:var(--chip-green);color:#fff}
+ .state.OFFEN .dot{background:#fff}
+ .state.LEISER{background:var(--duck);color:var(--on-duck)}
+ .state.STUMM{background:var(--off);color:var(--text)}
+ .state.PAUSE{background:var(--info);color:var(--on-info)}
+ .state.none{background:var(--raised);color:var(--muted)}
+ .sub{font-size:clamp(1rem,3.2vmin,1.5rem);color:var(--muted);text-align:right}
+ /* Mouth distance: a tall bar with the target band drawn on it, and the
+    verdict beside it in words. */
+ .level{flex:1 1 auto;min-height:0;display:flex;align-items:stretch;gap:clamp(16px,5vmin,40px)}
+ .scale{flex:0 0 auto;display:flex;flex-direction:column;justify-content:space-between;padding:8px 0;
+  font-size:clamp(1rem,3vmin,1.5rem);color:var(--muted);white-space:nowrap}
+ .bar{position:relative;flex:0 0 clamp(88px,22vmin,180px);border-radius:16px;background:var(--surface);overflow:hidden;
+  box-shadow:inset 0 0 0 2px var(--line)}
+ .bar .fill{position:absolute;left:0;right:0;bottom:0;height:0;background:var(--muted)}
+ .bar .band{position:absolute;left:0;right:0;bottom:52%;height:24%;border-top:4px solid var(--text);border-bottom:4px solid var(--text)}
+ .bar .ziel{position:absolute;right:8px;bottom:calc(64% - .7em);padding:0 6px;border-radius:4px;background:var(--bg);
+  font-size:clamp(.875rem,2.4vmin,1.125rem);font-weight:700}
+ .zone{flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:clamp(8px,2vmin,16px)}
+ .zw{font-size:clamp(2.25rem,9vmin,4.5rem);font-weight:800;line-height:1.05;color:var(--muted)}
+ .zh{font-size:clamp(1rem,3.4vmin,1.625rem);line-height:1.35;color:var(--muted);white-space:pre-line}
+ .z-low .fill{background:var(--warn)}
+ .z-low .zw{color:var(--warn)}
+ .z-ok .fill{background:var(--ok)}
+ .z-ok .zw{color:var(--ok)}
+ .z-high .fill{background:var(--onair)}
+ .z-high .zw{color:var(--onair)}
+ /* Two mics on one tablet: side by side, each a column of its own. */
+ .mics.two .mic{align-items:center;padding:0 clamp(8px,3vmin,24px)}
+ .mics.two .mic+.mic{border-left:2px solid var(--raised)}
+ .mics.two .mic header{flex-direction:column;justify-content:flex-start}
+ .mics.two .name{text-align:center;font-size:clamp(1.5rem,5vmin,2.5rem)}
+ .mics.two .state{font-size:clamp(1.25rem,4vmin,1.75rem)}
+ .mics.two .sub{text-align:center;min-height:2.6em;font-size:clamp(.9375rem,2.6vmin,1.25rem)}
+ .mics.two .level{flex-direction:column;align-items:center;gap:clamp(8px,2vmin,16px);width:100%}
+ .mics.two .scale,.mics.two .zh{display:none}
+ .mics.two .bar{flex:1 1 auto;width:clamp(72px,18vmin,140px)}
+ .mics.two .zone{flex:0 0 auto;min-height:2.2em;justify-content:flex-start;text-align:center}
+ .mics.two .zw{font-size:clamp(1.5rem,5.5vmin,2.75rem)}
+ /* ---- setup assistant: the whole screen says who is up ------------------ */
+ .setup{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:clamp(12px,3vmin,24px);text-align:center}
+ .setup .st{font-size:clamp(2rem,8vmin,4rem);font-weight:800;line-height:1.1}
+ .setup .sx{font-size:clamp(1.125rem,3.6vmin,1.75rem);color:var(--muted)}
+ .setup .ss{max-width:24em;font-size:clamp(1.375rem,5vmin,2.5rem);line-height:1.35}
+ .ring{flex:0 0 auto;width:clamp(96px,24vmin,180px);height:auto}
+ .ring .track{stroke:var(--raised)}
+ .ring .arc{stroke:var(--accent)}
+ /* ---- which mic is mine (once; remembered on this device) --------------- */
+ .pick{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:16px;overflow-y:auto}
+ .pick h2{font-size:clamp(1.5rem,5vmin,2.25rem)}
+ .pick p{color:var(--muted)}
+ .pick .opts{display:flex;flex-direction:column;gap:12px}
+ .pick button{min-height:64px;padding:0 20px;border-radius:12px;border:2px solid var(--border);background:var(--raised);
+  color:var(--text);font:inherit;font-size:1.25rem;font-weight:600;text-align:left;cursor:pointer}
+ .pick button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+ .pick button[aria-pressed="true"]::after{content:" ✓"}
+ .pick .ok{align-self:flex-end;min-width:160px;text-align:center;border-color:var(--ok)}
+ .pick .ok:disabled{border-style:dashed;border-color:var(--border);color:var(--muted);cursor:default}
+ /* ---- what plays, and the clock ----------------------------------------- */
+ .bottom{flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;gap:16px 24px;
+  padding:clamp(16px,4vmin,28px) clamp(16px,4.5vmin,32px);border-radius:16px;background:var(--surface)}
+ .ml{display:flex;align-items:center;gap:10px;font-size:clamp(1.125rem,3.4vmin,1.625rem);font-weight:600;color:var(--info)}
+ .ml svg{flex:0 0 auto;width:1em;height:1em}
+ .mt{font-size:clamp(3rem,13vmin,6.5rem);font-weight:800;line-height:1}
+ .ma{min-height:1.4em;font-size:clamp(1rem,3.4vmin,1.625rem);color:var(--muted)}
+ .clock{margin-left:auto;text-align:right}
+ .cl{font-size:clamp(.875rem,2.4vmin,1.125rem);color:var(--muted)}
+ .ct{font-size:clamp(1.75rem,7vmin,3.5rem);font-weight:700;line-height:1}
+ @media (prefers-contrast:more){
+  .bottom,.bar{border:2px solid var(--text);box-shadow:none}
+ }
+</style>
+</head>
+<body class="wait">
+<div id="conn" class="conn" role="status">Verbinde …</div>
+<div id="say" class="sr" role="status"></div>
+<main id="mics" class="mics stale" hidden></main>
+<section id="setup" class="setup stale" aria-live="off" hidden>
+ <div class="st" id="suTitle"></div>
+ <div class="sx" id="suText"></div>
+ <div class="ss" id="suSent" hidden></div>
+ <svg class="ring" id="suRing" viewBox="0 0 120 120" aria-hidden="true">
+  <circle class="track" cx="60" cy="60" r="52" fill="none" stroke-width="12"/>
+  <circle class="arc" id="suArc" cx="60" cy="60" r="52" fill="none" stroke-width="12" stroke-linecap="round"
+   stroke-dasharray="326.73" stroke-dashoffset="326.73" transform="rotate(-90 60 60)"/>
+ </svg>
+</section>
+<section id="pick" class="pick" hidden>
+ <h2 id="pickTitle">Welches Mikro ist deins?</h2>
+ <p id="pickHint">Stehen zwei Mikros vor diesem Tablet, wähle beide.</p>
+ <div class="opts" id="pickOpts"></div>
+ <button class="ok" id="pickOk" disabled>Fertig</button>
+</section>
+<footer class="bottom stale">
+ <div id="music" hidden>
+  <div class="ml"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><span id="mLabel"></span></div>
+  <div class="mt" id="mTime"></div>
+  <div class="ma" id="mAfter"></div>
+ </div>
+ <div class="clock">
+  <div class="cl" id="cLabel">Uhrzeit</div>
+  <div class="ct" id="clock">–</div>
+ </div>
+</footer>
+<script src="meter.js"></script>
+<script>
+(function(){
+ 'use strict';
+ var $=function(id){return document.getElementById(id);};
+ var put=function(el,t){if(el.textContent!==t)el.textContent=t;};
+ // Which mic(s) this tablet stands in front of: from the link (?mic=Gast 1,
+ // repeatable — the technician can hand out a ready-made one), else what was
+ // chosen here before.
+ var KEY='studiobox.guest.mics';
+ var preset=new URLSearchParams(location.search).getAll('mic').slice(0,2);
+ function stored(){try{var v=JSON.parse(localStorage.getItem(KEY)||'[]');
+  return Array.isArray(v)?v.map(String).slice(0,2):[];}catch(e){return [];}}
+ var chosen=preset.length?preset:stored();
+ var all=null;          // the mic labels this box has, once a snapshot arrived
+ var picking=false,sel=[];
+ var last=null,skew=0,clockFmt=SB.timeFormat(undefined,true);
+ var micsEl=$('mics'),setupEl=$('setup'),pickEl=$('pick');
+ // prefers-reduced-motion: the bar moves 5 times a second instead of 20.
+ var calm=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches),drawnAt=0;
+
+ // One polite live region, at most one message every 2 s (the newest wins).
+ var sayAt=0,sayNext=null,sayTimer=0;
+ function announce(t){var now=Date.now();
+  if(now-sayAt>=2000){sayAt=now;$('say').textContent=t;return;}
+  sayNext=t;
+  if(!sayTimer)sayTimer=setTimeout(function(){sayTimer=0;sayAt=Date.now();$('say').textContent=sayNext;},2000-(now-sayAt));}
+
+ // ---- mic cards: built once per choice, updated in place -----------------
+ var cards=[],built=null;
+ function build(){
+  built=chosen.join('|');
+  micsEl.className='mics stale'+(chosen.length>1?' two':'');
+  micsEl.innerHTML='';
+  cards=chosen.map(function(label){
+   var el=document.createElement('section');el.className='mic';
+   el.innerHTML='<header><h1><button class="name"></button></h1>'+
+    '<div class="state none"><span class="dot"></span><span class="sw">—</span></div></header>'+
+    '<p class="sub"></p>'+
+    '<div class="level z-none">'+
+    '<div class="scale" aria-hidden="true"><span>▲ zu laut</span><span>▼ zu leise</span></div>'+
+    '<div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">'+
+    '<div class="fill"></div><div class="band"></div><span class="ziel" aria-hidden="true">Ziel</span></div>'+
+    '<div class="zone"><div class="zw">—</div><div class="zh"></div></div></div>';
+   var q=function(s){return el.querySelector(s);};
+   var name=q('.name');
+   name.textContent=label;
+   name.setAttribute('aria-label',label+' – anderes Mikro wählen');
+   name.onclick=function(){if(all&&all.length>1){picking=true;sel=chosen.slice();render();}};
+   q('.bar').setAttribute('aria-label',chosen.length>1?'Pegel '+label:'Pegel an deinem Mikro');
+   micsEl.appendChild(el);
+   return {label:label,chip:q('.state'),sw:q('.sw'),sub:q('.sub'),level:q('.level'),bar:q('.bar'),
+    fill:q('.fill'),zw:q('.zw'),zh:q('.zh'),state:null,zone:null};});
+ }
+ function update(card){
+  var c=(last.channels||[]).filter(function(x){return x.label===card.label;})[0];
+  var m=SB.guestMic(c,last);
+  if(m.state!==card.state){card.state=m.state;
+   card.chip.className='state '+(m.state==='—'?'none':m.state);card.sw.textContent=m.state;
+   announce((cards.length>1?card.label+': ':'')+m.state+'. '+m.sub);}
+  put(card.sub,m.sub);
+  card.fill.style.height=m.fill+'%';
+  var zk=m.zone+'|'+m.hint;
+  if(zk!==card.zone){card.zone=zk;
+   card.level.className='level z-'+m.zone;card.zw.textContent=m.word;card.zh.textContent=m.hint;
+   card.bar.setAttribute('aria-valuenow',Math.round(m.fill));card.bar.setAttribute('aria-valuetext',m.word);
+   if(m.zone!=='none')announce((cards.length>1?card.label+': ':'')+m.word);}
+ }
+
+ // ---- setup assistant ----------------------------------------------------
+ var suKind=null;
+ function renderSetup(su){
+  put($('suTitle'),su.title);put($('suText'),su.text);
+  $('suSent').hidden=!su.sentence;put($('suSent'),su.sentence);
+  $('suRing').style.display=su.kind==='wait'?'none':'';
+  $('suArc').setAttribute('stroke-dashoffset',String(326.73*(1-Math.max(0,Math.min(1,su.progress)))));
+  if(su.kind!==suKind){suKind=su.kind;announce(su.title+'. '+su.text+(su.sentence?' '+su.sentence:''));}
+ }
+
+ // ---- which mic is mine --------------------------------------------------
+ var pickKey=null;
+ function renderPick(){
+  var key=all.join('|')+'#'+sel.join('|');
+  if(key===pickKey)return;
+  pickKey=key;
+  var opts=$('pickOpts');opts.innerHTML='';
+  if(!all.length){put($('pickTitle'),'Keine Mikrofone');put($('pickHint'),'Diese studiobox hat gerade keine Mikrofone.');
+   $('pickOk').hidden=true;return;}
+  all.forEach(function(label){
+   var b=document.createElement('button');
+   b.textContent=label;b.setAttribute('aria-pressed',sel.indexOf(label)>=0?'true':'false');
+   b.onclick=function(){var i=sel.indexOf(label);
+    if(i>=0)sel.splice(i,1);else{sel.push(label);if(sel.length>2)sel.shift();}
+    render();};
+   opts.appendChild(b);});
+  $('pickOk').disabled=!sel.length;
+ }
+ $('pickOk').onclick=function(){if(!sel.length)return;
+  // In the order the mics have on the mixer, not the order they were tapped.
+  chosen=all.filter(function(l){return sel.indexOf(l)>=0;});
+  try{localStorage.setItem(KEY,JSON.stringify(chosen));}catch(e){/* private mode: just not remembered */}
+  picking=false;render();};
+
+ function render(){
+  if(!last||!all)return;
+  var needPick=picking||!chosen.length;
+  var su=needPick?null:SB.guestSetup(last,chosen);
+  pickEl.hidden=!needPick;setupEl.hidden=!su;micsEl.hidden=needPick||!!su;
+  if(needPick){renderPick();return;}
+  if(su){renderSetup(su);return;}
+  suKind=null;
+  if(built!==chosen.join('|'))build();
+  cards.forEach(update);
+ }
+
+ function onSnapshot(s){
+  if(typeof s.serverNowMs==='number')skew=s.serverNowMs-Date.now();
+  last=s;
+  // Mics only: an operator's connection (roles off) carries the music rows too.
+  var labels=(s.channels||[]).filter(function(c){return c.role==='mic';}).map(function(c){return c.label;});
+  if(!all||labels.join('|')!==all.join('|')){all=labels;
+   // A choice this box does not know is no choice; a single mic needs none.
+   chosen=chosen.filter(function(l){return all.indexOf(l)>=0;});
+   if(!chosen.length&&all.length===1)chosen=all.slice();
+   sel=chosen.slice();pickKey=null;}
+  var now=Date.now();
+  if(!calm||now-drawnAt>=200){drawnAt=now;render();}
+  var mu=SB.guestMusic(s);
+  $('music').hidden=!mu;
+  if(mu){put($('mLabel'),mu.label);put($('mTime'),mu.time);put($('mAfter'),mu.after);}
+  tick();
+ }
+
+ // The clock is Sendezeit where there is an air delay: when what you say now
+ // goes on air.
+ function tick(){if(!last)return;
+  var c=SB.clockOf(last,skew,Date.now());
+  put($('cLabel'),c.label);put($('clock'),clockFmt.format(c.ms));}
+ setInterval(tick,250);
+
+ SB.connect({
+  onState:function(st){document.body.className=st;
+   put($('conn'),st==='lost'?'Verbindung weg – verbinde neu …':'Verbinde …');},
+  onHello:function(h){if(h.tz)clockFmt=SB.timeFormat(h.tz,true);},
+  onSnapshot:onSnapshot
+ });
+
+ // Keep the tablet awake where the browser lets us (needs HTTPS); otherwise
+ // the rehearsal checklist sets Auto-Lock to "Nie".
+ function wake(){if(navigator.wakeLock&&document.visibilityState==='visible'){
+  navigator.wakeLock.request('screen').catch(function(){/* refused: nothing to do */});}}
+ document.addEventListener('visibilitychange',wake);wake();
+})();
+</script>
+</body>
+</html>

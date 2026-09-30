@@ -134,6 +134,10 @@ export class QueuePlayer {
   /** Set while an operator-requested stop is fading out, so the 'ended' it
    *  emits doesn't start the next queued item. */
   private suppressAdvance = false;
+  /** "durchlaufen" (true): a file that ends by itself starts the next pending
+   *  item. "einzeln" (false): it doesn't — one track, then back to the talk;
+   *  the list waits for the next ▶ Start. */
+  private chain = true;
 
   constructor(private deps: QueuePlayerDeps) {
     deps.player.on('ended', () => {
@@ -141,8 +145,17 @@ export class QueuePlayer {
         this.suppressAdvance = false;
         return;
       }
-      this.startNext();
+      if (this.chain) this.startNext();
     });
+  }
+
+  /** Whether playback rolls on into the next pending item by itself. */
+  get autoAdvance(): boolean {
+    return this.chain;
+  }
+
+  set autoAdvance(on: boolean) {
+    this.chain = on;
   }
 
   list(): QueueItem[] {
@@ -239,6 +252,13 @@ export class QueuePlayer {
     }
     if (type === 'queueStart') {
       this.startNext();
+      return true;
+    }
+    if (type === 'queueMode') {
+      // 'single' ("einzeln") | 'chain' ("durchlaufen"); a boolean means chain.
+      this.chain = value === 'chain' || value === true;
+      this.deps.log.info(`queue: ${this.chain ? 'durchlaufen' : 'einzeln'}`);
+      this.deps.onChange();
       return true;
     }
     return false;

@@ -1,12 +1,14 @@
 import { loadConfig } from './config/load';
 import { Pipeline } from './pipeline';
 import { PlayoutPipeline } from './playout';
+import { formatDoctor, runDoctor } from './doctor';
 import { makeLog } from './util/log';
 
 const log = makeLog('studiobox');
 
 function main(): void {
-  // Allow `--config path` / `--profiles path` overrides.
+  // Allow `--config path` / `--profiles path` overrides, and the `doctor`
+  // subcommand.
   const argv = process.argv.slice(2);
   const getArg = (name: string): string | undefined => {
     const i = argv.indexOf(name);
@@ -14,6 +16,14 @@ function main(): void {
   };
 
   const cfg = loadConfig({ configPath: getArg('--config'), profilesPath: getArg('--profiles') });
+
+  // `studiobox doctor`: the preflight. Checks the machine against this config
+  // and exits; nothing is started.
+  if (argv.includes('doctor')) {
+    const { text, code } = formatDoctor(runDoctor(cfg));
+    console.log(text);
+    process.exit(code);
+  }
 
   // `playout` skips capture/DSP entirely — file player -> local hardware only.
   const pipeline =

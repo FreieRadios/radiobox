@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>studiobox – Zuschauer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101214'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%237cc8ff'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<style>
+ /* Spectator view (docs/design-guidelines.md, section 3): one screen, nothing
+    to press — on air or not, what is playing, the programme level, the clock.
+    It is what any browser without a role token gets. Unlike the other views
+    it shows what listeners hear *now*: the title and the level are looked up
+    one air delay back, and the clock is the ordinary one. */
+ body{display:flex;flex-direction:column;justify-content:space-between;gap:clamp(16px,4vmin,32px);
+  height:100vh;height:100dvh;overflow:hidden;
+  padding:max(clamp(20px,6vmin,56px),env(safe-area-inset-top)) max(clamp(20px,6vw,72px),env(safe-area-inset-right))
+   max(clamp(20px,6vmin,56px),env(safe-area-inset-bottom)) max(clamp(20px,6vw,72px),env(safe-area-inset-left))}
+ header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:8px 24px}
+ h1{font-size:clamp(1rem,2.4vmin,1.375rem);font-weight:600;color:var(--muted)}
+ #clock{font-size:clamp(2.25rem,9vmin,4rem);font-weight:700;line-height:1}
+ main{display:flex;flex-direction:column;gap:clamp(16px,4vmin,32px);min-width:0}
+ /* On air: filled red and the words; off air: neutral and the words. */
+ .air{align-self:flex-start;display:flex;align-items:center;gap:.25em;padding:.2em .4em;border-radius:16px;
+  background:var(--raised);color:var(--muted);font-size:clamp(2.5rem,13vmin,6rem);font-weight:800;
+  letter-spacing:.04em;line-height:1;white-space:nowrap}
+ .air .dot{flex:0 0 auto;width:.42em;height:.42em;border-radius:50%;border:.06em solid currentColor}
+ .air.on{background:var(--chip-red);color:#fff}
+ .air.on .dot{background:#fff}
+ .nl{font-size:clamp(1rem,2.6vmin,1.375rem);font-weight:600;color:var(--info)}
+ #title{font-size:clamp(1.375rem,5vmin,2.5rem);font-weight:600;overflow-wrap:anywhere}
+ #title.idle{color:var(--muted);font-weight:400}
+ footer{display:flex;flex-direction:column;gap:10px}
+ .pl{display:flex;justify-content:space-between;font-size:clamp(.9375rem,2.2vmin,1.125rem);color:var(--muted)}
+</style>
+</head>
+<body class="wait">
+<header>
+ <h1>studiobox</h1>
+ <div id="clock">–</div>
+</header>
+<div id="conn" class="conn" role="status">Verbinde …</div>
+<main class="stale">
+ <div id="air" class="air" role="status" hidden><span class="dot"></span><span id="airText"></span></div>
+ <div>
+  <div class="nl">Jetzt läuft</div>
+  <div id="title" class="idle">–</div>
+ </div>
+</main>
+<footer class="stale">
+ <div class="pl"><span>Programm</span><span><span id="lufs">–</span> LUFS</span></div>
+ <div class="meter" id="pkm" role="meter" aria-label="Programmpegel" aria-valuemin="-60" aria-valuemax="0"><div class="fill"></div><div class="cover"></div></div>
+</footer>
+<script src="meter.js"></script>
+<script>
+(function(){
+ 'use strict';
+ var $=function(id){return document.getElementById(id);};
+ var put=function(el,t){if(el.textContent!==t)el.textContent=t;};
+ var hist=new SB.History(),skew=0,clockFmt=SB.timeFormat(undefined,true),airKey=null,shownDb=null;
+ // prefers-reduced-motion: the level moves 5 times a second instead of 20.
+ var calm=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches),drawnAt=0;
+ var cover=$('pkm').querySelector('.cover');
+
+ function onSnapshot(s){
+  var now=Date.now();
+  if(typeof s.serverNowMs==='number')skew=s.serverNowMs-now;
+  hist.push(now,s);
+  tick();
+  var v=SB.spectator(hist,s,now);
+  // The words change rarely; written only then, so a screen reader hears
+  // "ON AIR" once and not twenty times a second.
+  if(v.onAir!==airKey){airKey=v.onAir;
+   $('air').hidden=v.onAir===null;$('air').className='air'+(v.onAir?' on':'');
+   $('airText').textContent=v.onAir?'ON AIR':'OFF AIR';}
+  $('title').className=v.title?'':'idle';
+  put($('title'),v.title?SB.midName(v.title):'Keine Datei');
+  if(calm&&now-drawnAt<200)return;
+  drawnAt=now;
+  put($('lufs'),SB.fmt(v.lufs,0));
+  cover.style.width=(100-SB.pct(v.peakDb))+'%';
+  var db=Math.round(Math.max(-60,Math.min(0,typeof v.peakDb==='number'&&isFinite(v.peakDb)?v.peakDb:-60)));
+  if(db!==shownDb){shownDb=db;$('pkm').setAttribute('aria-valuenow',db);$('pkm').setAttribute('aria-valuetext',SB.fmt(db,0)+' dB');}
+ }
+
+ // What listeners hear is now, so this is the plain clock, not Sendezeit.
+ function tick(){put($('clock'),clockFmt.format(Date.now()+skew));}
+ setInterval(tick,250);
+
+ SB.connect({
+  onState:function(st){document.body.className=st;
+   put($('conn'),st==='lost'?'Verbindung weg – verbinde neu …':'Verbinde …');},
+  onHello:function(h){if(h.tz)clockFmt=SB.timeFormat(h.tz,true);},
+  onSnapshot:onSnapshot
+ });
+})();
+</script>
+</body>
+</html>

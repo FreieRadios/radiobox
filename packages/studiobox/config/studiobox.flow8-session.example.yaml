@@ -1,0 +1,155 @@
+# studiobox — preset for a live talk session with a Behringer Flow 8 (in) and
+# a second USB interface (out, e.g. an ESI MAYA22 into a desk's line input).
+#
+# Four mics, a file player for jingles/music with a looping bed, timestamp-
+# scheduled jingles, the buffered chain (3 s look-ahead, 10 s air delay),
+# music return to the Flow 8 headphones, stereo + multitrack recording, role
+# links for the tablets. Copy to studiobox.yaml and adapt the marked lines;
+# run `yarn workspace @freieradios/studiobox doctor` and the rehearsal first.
+#
+#   cp config/studiobox.flow8-session.example.yaml config/studiobox.yaml
+#
+# Flow 8 wiring this preset assumes:
+#   ch 1 + 2  XLR, 48 V phantom switched ON   -> the two guest (condenser) mics
+#   ch 3 + 4  XLR, no phantom                 -> host and technician (dynamic)
+#   USB       laptop <-> Flow 8 (10 capture channels, 4 playback channels)
+#   headphones on the Flow 8 (direct mics + the music return from studiobox)
+mode: live
+
+capture:
+  backend: alsa
+  # Check with `arecord -l`. The card has shown up as F8 on the reference
+  # machine and is called FLOW8 in older notes — use the name your laptop
+  # prints. plughw (not hw): ALSA then converts the device's native S32_LE to
+  # the FLOAT_LE studiobox reads.
+  device: 'plughw:CARD=F8,DEV=0'
+  sampleRate: 48000 # fixed by design
+  channels: 10 # 8 inputs + main L/R
+  blockSize: 1024
+  bufferMs: 2000 # a busy laptop may hold studiobox up this long without losing input
+  periodMs: 20
+
+lookahead:
+  seconds: 3
+  gateMs: 15
+  mixMs: 150
+
+# The programme leaves 10 s after the room; every view shows the on-air time.
+airDelay:
+  seconds: 10
+  toleranceSeconds: 1
+
+# Labels are what hosts and guests read on the tablets.
+channels:
+  - { source: 1, role: mic, label: Gast 1, profile: condenser }
+  - { source: 2, role: mic, label: Gast 2, profile: condenser }
+  - { source: 3, role: mic, label: Host, profile: dynamic-broadcast }
+  - { source: 4, role: mic, label: Technik, profile: dynamic-broadcast }
+
+automix:
+  enabled: true
+  members: [Gast 1, Gast 2, Host, Technik]
+  responseMs: 120
+  floorDb: -60
+  # Guests go down gently while the host talks — never muted.
+  priority:
+    label: Host
+    attenuate: [Gast 1, Gast 2]
+    depthDb: -8
+
+# No hardware music inputs: the only duckable source is the file player, which
+# opts in through `filePlayer.ducked` below.
+duck:
+  enabled: true
+  targets: []
+  thresholdDb: -40
+  musicPresentDb: -45
+  depthDb: -15
+  attackMs: 40
+  holdMs: 400
+  releaseMs: 600
+
+master:
+  targetLufs: -16
+  truePeakDb: -1.0
+  limiterLookaheadMs: 5
+  limiterReleaseMs: 100
+
+output:
+  # ADAPT: where the programme goes. Leave off for a recording-only session.
+  # Keep the password out of any file you commit.
+  harbor:
+    enabled: false
+    url: 'icecast://source:CHANGEME@stream.example.org:4444/studio-lossless'
+    format: ogg-flac
+    contentType: application/ogg
+  # The session recording. Does not start by itself — arm it on the web page.
+  # One continuous FLAC (24 bit) per recording, named by its on-air time.
+  backup:
+    enabled: true
+    dir: './recordings'
+    segmentSeconds: 0
+    station: 'Radio Z' # ADAPT
+  # 4 mics dry + Zuspieler L/R + Programm L/R = 8 channels, sample-aligned
+  # with the stereo file; a .json channel map is written beside it.
+  multitrack:
+    enabled: true
+    source: dry
+  # ADAPT: the finished programme, 10 s behind the room, as analog audio.
+  # Set the card's mixer to 0 dB (`doctor` tells you) and calibrate the desk
+  # input with the test tone (technician view).
+  monitor:
+    enabled: true
+    backend: alsa
+    device: 'plughw:CARD=USB'
+    # A 2 s device buffer: its latency is part of the air delay, so it costs
+    # nothing and rides out stalls of the laptop.
+    bufferMs: 2000
+    periodMs: 20
+    # latencyMs: 2190 # calibrate against the station clock in the rehearsal
+  # What the room hears of the music: jingles, tracks and the bed, ducked as
+  # on air, WITHOUT the mics and without delay, on the Flow 8's USB playback
+  # 1/2. Check on the Flow 8 that the USB return reaches the headphones.
+  return:
+    enabled: true
+    backend: alsa
+    device: 'plughw:CARD=F8,DEV=0'
+    channels: 4
+    bufferMs: 300
+    periodMs: 10
+
+meters:
+  enabled: true
+  port: 4445
+  fps: 20
+  # Shared Wi-Fi: only a role link may send commands. The links (Technik,
+  # Host, Gäste) are printed at start; anything else is read-only.
+  roles:
+    enabled: true
+
+filePlayer:
+  enabled: true
+  dirs:
+    # ADAPT: absolute paths are the safest; relative ones resolve against the
+    # directory studiobox is started from.
+    # Timestamped jingles (e.g. opener-20261007-190000.flac) start by
+    # themselves, so only this folder is scanned for them.
+    - { path: './session/jingles', label: Jingles, hasScheduled: true }
+    # Number the files (01-…, 02-…) in playing order: "＋ alle" then rebuilds
+    # the whole playlist in one tap after a restart.
+    - { path: './session/playlist', label: Playlist }
+    - { path: './session/musik', label: Musik }
+    # One file in here = the bed the host can switch on at any time.
+    - { path: './session/bett', label: Bett }
+  label: Zuspieler
+  ducked: true
+  fadeOutMs: 800
+  prebufferMs: 250
+  # Timestamps are ON-AIR times: opener-20261007-190000.flac airs at 19:00:00.
+  autoPlay:
+    enabled: true
+    scanSeconds: 10
+    graceSeconds: 30
+  bed:
+    dir: Bett
+    gainDb: -6

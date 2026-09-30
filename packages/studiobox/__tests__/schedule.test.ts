@@ -157,3 +157,65 @@ describe('Scheduler', () => {
     expect(s.next(t0 + 8000_000)).toBeNull();
   });
 });
+
+describe('Scheduler on the on-air clock (air delay)', () => {
+  it('fires `leadMs` ahead of the timestamp on the clock it is given', () => {
+    const t0 = new Date(2026, 9, 5, 12, 59, 0).getTime();
+    const files = [entry('opener-20261005-130000.flac', t0 + 60_000)];
+    const played: ScheduleEntry[] = [];
+    let wall = t0;
+    const D = 10_000; // Sendezeit = wall + 10 s
+    const s = new Scheduler(
+      opts,
+      () => files,
+      (e) => played.push(e),
+      silentLog,
+      { now: () => wall + D, leadMs: 3000 }
+    );
+
+    wall = t0 + 46_000; // Sendezeit 12:59:56: four seconds to go
+    s.tick();
+    expect(played).toEqual([]);
+    wall = t0 + 47_000; // Sendezeit 12:59:57: inside the lead
+    s.tick();
+    expect(played.map((e) => e.name)).toEqual(['opener-20261005-130000.flac']);
+    // The entry carries its on-air target, for the player to cue against.
+    expect(played[0].playAtMs).toBe(t0 + 60_000);
+    wall = t0 + 50_000; // 13:00:00 on air — must not fire again
+    s.tick();
+    expect(played.length).toBe(1);
+  });
+
+  it('lists upcoming entries against the on-air clock', () => {
+    const t0 = new Date(2026, 9, 5, 12, 59, 0).getTime();
+    const files = [entry('a.flac', t0 + 5_000), entry('b.flac', t0 + 60_000)];
+    const s = new Scheduler(
+      opts,
+      () => files,
+      () => {},
+      silentLog,
+      {
+        now: () => t0 + 10_000, // on air it is already 10 s later
+        leadMs: 3000,
+      }
+    );
+    expect(s.upcoming().map((e) => e.name)).toEqual(['b.flac']);
+    expect(s.next()!.name).toBe('b.flac');
+  });
+
+  it('keeps the wall clock and no lead by default (playout mode)', () => {
+    const t0 = Date.now();
+    const files = [entry('soon.flac', t0 + 2_000)];
+    const played: string[] = [];
+    const s = new Scheduler(
+      opts,
+      () => files,
+      (e) => played.push(e.name),
+      silentLog
+    );
+    s.tick(t0 + 1_000);
+    expect(played).toEqual([]);
+    s.tick(t0 + 2_000);
+    expect(played).toEqual(['soon.flac']);
+  });
+});

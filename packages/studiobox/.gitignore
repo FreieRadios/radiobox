@@ -3,3 +3,6 @@ node_modules/
 recordings/
 *.log
 config/studiobox.yaml
+config/*.local.yaml
+session-state.json
+session-state.json.tmp

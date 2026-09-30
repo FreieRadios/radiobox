@@ -7,18 +7,28 @@ the runtime, hardware, and DSP specifics. Package name: `@freieradios/studiobox`
 ## What it does
 
 Captures the discrete channels of a USB mixer, applies per-mic DSP, a Dan
-Dugan-style gain-sharing automix across the mics, and sidechain ducking of music
-under speech, then streams **one lossless Ogg/FLAC** to a Liquidsoap harbor while
-keeping a rolling local FLAC safety recording. Reference hardware: Behringer
-**Flow 8** (8 inputs + main bus over USB).
+Dugan-style gain-sharing automix across the mics (with optional host priority),
+and sidechain ducking of music under speech, then sends the programme to a local
+sound card and/or as **one lossless Ogg/FLAC** to a Liquidsoap harbor, while
+recording it (stereo FLAC + optional multitrack). Reference hardware: Behringer
+**Flow 8** (8 inputs + main bus over USB) in, ESI **MAYA22** out.
+
+The live chain is **buffered, not real-time** (see "Buffered live chain" under
+Status, and `docs/roadmap-stable.md` section 2): the mics are analysed seconds
+ahead of the audio, and the programme leaves a fixed air delay behind the room.
 
 ```
-USB (N ch) ─ffmpeg─► capture ─► per-mic strip (HPF·gate·EQ·de-ess·comp·leveler)
-                                  ├─► Dugan gain-share automix ─┐
-            music pairs ─► gain ──┴─► duck (sidechain on mics) ─┴─► master leveler
-                                                                 ─► limiter ─► ffmpeg FLAC
-                                                       ┌──────────────┴─────────────┐
-                                                 Icecast→harbor               local .flac
+room time                                                          air time (room + D)
+USB (N ch) ─arecord─► strip, 1st half (trim·HPF·gate·EQ·de-ess·comp)
+                        └─► leveler: analysis now, audio 3 s later (voice-keyed)
+                              └─► automix · host priority (decided 150 ms ahead) ─┐
+file player + bed ─► leveler ─┬─► delay (= mic latency) ─► duck ─────────────────┴─► master
+music pairs ────────► gain ───┤                                        leveler ─► limiter
+                              └─► duck (room time, no mics) ─► music return           │
+                                                   (mixer USB playback)               │
+              stereo FLAC + multitrack FLAC (same blocks, sample-aligned) ◄───────────┤
+                                                                                      ▼
+                                  air-delay FIFO ─► output card pulls (aplay) / harbor (ffmpeg)
 ```
 
 ## Commands
@@ -29,7 +39,15 @@ yarn workspace @freieradios/studiobox typecheck  # tsc --noEmit
 yarn workspace @freieradios/studiobox test        # Jest (DSP unit tests)
 yarn workspace @freieradios/studiobox dev         # ts-node, watches .ts/.yaml
 yarn workspace @freieradios/studiobox start       # node dist/index.js
+yarn workspace @freieradios/studiobox doctor      # preflight, see below
 ```
+
+`doctor` (also `node dist/index.js doctor [--config …]`) checks the machine
+against the config and starts nothing: tools, sound cards and their channel
+counts, who holds a device, the output card's mixer level, folders, time zone
+and NTP, disk space, the address for the tablets. Exit code 1 when something
+has to be fixed. Logic in `src/doctor.ts` (pure checks over an `Env`, tested
+against canned `/proc/asound` output in `__tests__/doctor.test.ts`).
 
 Live meters: `http://localhost:4445`.
 
@@ -40,6 +58,15 @@ Live meters: `http://localhost:4445`.
   number of mics, optional music pairs, any class-compliant device.
 - Per-mic DSP defaults come from named **profiles** in `config/profiles.yaml`,
   overridable per channel.
+- Live-mode blocks beyond the channel map, all documented in the example:
+  `lookahead`, `airDelay`, `automix.priority`, `output.multitrack`,
+  `output.return` (music return), `meters.roles`, `filePlayer.bed`,
+  `stateFile`, `listeners` (listener feedback and the episode guide from eve,
+  both modes). `config/studiobox.flow8-session.example.yaml` is the preset for
+  a talk session (4 mics, MAYA22 out, return, multitrack, roles, bed).
+- **Live settings never go into the YAML.** What the setup assistant measured
+  and what was trimmed by hand lives in `session-state.json` next to the config
+  (`src/setup/state.ts`; git-ignored, restored at start, ignored after 12 h).
 
 ## Hardware / runtime (the non-inferable bits)
 
@@ -56,16 +83,55 @@ Live meters: `http://localhost:4445`.
   `output.harbor.url` (reference harbor seen on `http://…:4445`). The stream
   must be flushed so the harbor doesn't stall.
 - If capture fails with a device-busy error, check for other holders with
-  `fuser -v /dev/snd/*`.
+  `fuser -v /dev/snd/*` (or run `doctor`, which names the holder).
+- **Two sound cards, two clocks.** The capture card clocks the DSP graph; the
+  output card pulls from the air-delay FIFO (`Monitor.writeThen`: the next
+  block is written when the pipe took the last one, so nothing queues inside
+  Node). The FIFO absorbs the drift; never write the programme to the output
+  card push-style from the capture callback again.
+- **Latency constants are calibration, not truth.** `output.monitor.latencyMs`
+  (pipe + device buffer behind the FIFO; estimated as aplay's 500 ms buffer +
+  a full 64 KiB pipe + one block when unset), `output.return.latencyMs` and
+  `capture.latencyMs` (default 20) feed the on-air clock. They decide whether
+  a jingle stamped 13:00:00 airs at 13:00:00.0 or .3 — measure against a
+  reference clock in the rehearsal and set `latencyMs`. The estimate follows
+  `bufferMs` when that is set (2000 ms buffer -> ~2190 ms).
+- **Give the sound cards long buffers and the process a quiet machine.** With
+  ALSA's defaults (500 ms buffers, 125 ms periods) a loaded machine (load 29
+  on 16 cores during the first hardware run) made `aplay` underrun several
+  times a minute: a Node process that is descheduled for 200 ms can't feed a
+  sound card. The session configs therefore set `capture.bufferMs: 2000` /
+  `periodMs: 20` and `output.monitor.bufferMs: 2000` / `periodMs: 20` (both
+  granted by the Flow 8 and the MAYA22; the output buffer's latency is simply
+  part of the air delay) and `output.return.bufferMs: 300`; with those the
+  same machine ran clean. The pipeline logs a `slow:` line every 10 s in which
+  the event loop stalled, a block overran its budget or the output was left
+  waiting (`startHealthProbe` in `pipeline.ts`) — if that shows up in a
+  rehearsal, something else on the machine is eating the CPU. Under systemd,
+  `Nice=-10` is worth setting; an ordinary user can't raise the priority.
+- The **music return** has to go to the card the mics come from (same clock:
+  the Flow 8's USB playback is implicit-feedback synced to its capture).
+  Open all of its playback channels (`channels: 4` on the Flow 8); the return
+  is on 1/2.
 
 ## DSP code map (`src/dsp/`)
 
-`graph.ts` wires the chain; per-block files: `biquad`, `channel-strip`, `gate`,
-`deesser`, `compressor`, `leveler`, `automix` (Dugan gain-share), `duck`
-(sidechain), `limiter`, `loudness` (BS.1770), `envelope`, `delay-line`,
-`dsp-math`. Audio I/O in `src/audio/` (`capture`, `encoder`, `format`);
-config in `src/config/`; web meters in `src/meters/server.ts`; orchestration in
-`src/pipeline.ts`.
+`graph.ts` wires the chain; per-block files: `biquad`, `channel-strip` (two
+halves: `pre()` up to the compressor, `level()` = keyed leveler + gain),
+`gate`, `deesser`, `compressor`, `speech-leveler` (mics: voice-keyed, with
+look-ahead), `leveler` (music: windowed AGC), `automix` (Dugan gain-share),
+`priority` (host priority), `duck` (sidechain), `limiter`, `loudness`
+(BS.1770), `envelope`, `delay-line`, `dsp-math`. Audio I/O in `src/audio/`
+(`capture`, `encoder`, `recorder`, `monitor`, `format`, `file-player`, `bed`,
+`play-queue`, `air-fifo`, `sample-clock`); the setup assistant in `src/setup/`
+(`measure` = the arithmetic, `session` = the state machine, `state` = the
+persisted live settings); config in `src/config/`; web views in `src/meters/`
+(`server.ts`, `roles.ts`, `public/`); preflight in `src/doctor.ts`;
+listener feedback and the episode guide from eve in `src/listeners/`
+(`schedule-rules` = which show is on air, `eve-session` = the read-only login,
+`feed` = fetch, socket, poll, `episode` = which episode and its guide,
+`markdown` = the guide's text as escaped HTML);
+orchestration in `src/pipeline.ts` (live) and `src/playout.ts` (playout-only).
 
 ### Gotchas when editing DSP
 
@@ -78,7 +144,28 @@ config in `src/config/`; web meters in `src/meters/server.ts`; orchestration in
 - Capture **all** channels declared in the config; silently dropping channels is
   a class of regression that has bitten this code before.
 - Keep changes covered by the Jest DSP tests (one suite per block under
-  `__tests__/dsp/`).
+  `__tests__/dsp/`; `graph.test.ts` and `lookahead.test.ts` cover the wiring
+  and the roadmap's look-ahead criteria, `__tests__/pipeline.test.ts` the live
+  pipeline on a virtual clock with no sound card).
+- **Latency is part of the graph's contract.** Everything that enters the mix
+  has to arrive `Graph.latencySamples` after the room: a new source or tap
+  needs a delay line of the right length (mics: gate + leveler + mix
+  look-ahead; music: the same plus the return compensation). The click tests
+  in `graph.test.ts` fail on a misalignment of one sample.
+- **Decisions may lead the audio, never trail it.** A control computed ahead
+  (automix share, priority, gate) is combined with its delayed copy so it
+  rises early and falls on time — otherwise word endings get cut. Detectors
+  that lead get the look-ahead added to their hold.
+- **Mutes act in room time** (before the look-ahead delay): what is said after
+  "Mikros zu" never airs, what was said before still plays out.
+- **Room time vs. programme time in the snapshot:** per-channel fields (levels,
+  gate, `speechDb`/`zone`, `active`) are room time; the master meters (LUFS,
+  limiter, duck, peak) are `lookaheadMs` later; `air.nowMs` is the on-air time
+  of what is said now.
+- Test helpers live in `test-support/` (not under `__tests__/`, where Jest
+  would run them as suites). Hot loops bind `Math.*` once (`dsp-math.ts`,
+  `test-support/voice.ts`): under Jest's vm sandbox a `Math.x` lookup per
+  sample makes the DSP suites several times slower.
 
 ## Status
 
@@ -100,14 +187,15 @@ throttles instead of flooding) so only folders with useful contents show — on
 a tiny box browsing a big SMB library the probe is best turned off per-dir with
 `hideEmpty: false` (see the studiobox Pi config);
 `playFile`/schedule names are folder-relative paths like
-`Musik/x.flac`; the top-right ⋮ menu holds the flat folder list, the
-local-playout toggle (live mode only) and a "Scheduled files" modal listing
-every future timestamped file, served by HTTP `/scheduled`; only dirs marked
+`Musik/x.flac`; the configured folders are a flat row of tabs above the
+listing (`#folderList`, absent with a single folder); the top-right ⋮ menu
+holds the local-playout toggle (live mode only) and a "Geplante Sendungen" modal
+listing every future timestamped file, served by HTTP `/scheduled`; only dirs marked
 `hasScheduled: true` are scanned for auto-play timestamps, so e.g. a music
 library can never preempt the program; each dir carries an `icon` emoji —
 configurable, else guessed from the label by `guessDirIcon` in `config/load.ts` —
-shown in the ⋮ menu and on the welcome screen, an overlay of the configured
-sources as clickable tiles opened by clicking the studiobox logo; `/folders`
+shown on the folder tabs and on the welcome screen, an overlay of the configured
+sources as clickable tiles opened by clicking the studiobox title; `/folders`
 therefore serves `{label, icon}` objects, not bare strings),
 and **"Vorhören"** — browser pre-listening (header toggle, meters page). While
 on, clicking a file streams it to the _browser_ from HTTP `/preview` instead of
@@ -175,6 +263,162 @@ playout-only box never describes controls it doesn't have. Keep it in sync when
 operator-facing behaviour changes — it is the only user documentation the
 operators see.
 
+**Hörer:innen** — listener feedback from eve (`listeners` in the YAML, off by
+default; `src/listeners/`). Listeners send comments and hearts to a show from
+eve's public page; a comment waits in eve until somebody who is _not_ at the
+microphone releases it (moderation lives in eve, never here). studiobox signs
+in as a read-only `studiodevice` account (`EveSession`: 15-min token, single-use
+refresh token, sign in again on `invalid-session`) and only ever GETs three
+exports of the eve app: `schedule-rules`, `listener-comments` (released only)
+and `listener-hearts` (a count per show). **The show on air comes from
+studiobox's clock** — Sendezeit in live mode, the wall clock in playout — read
+against the schedule rules (`slotAt`: weekday/start hour/duration, weeks of
+the month incl. `-1` = last, months, `overrides` beats the regular show,
+slots running past midnight; repeats are _not_ slots, a rerun has nobody at
+the mic), and both feedback exports are asked with `?since=<slot start>`, so
+the screen starts empty at every broadcast. `show:` pins a slug for a
+rehearsal outside the slot. Changes arrive over eve's Socket.IO
+(`element:changed`, handshake `auth: {token}`; a notification without data →
+debounced refetch; a refused handshake renews the token and retries with
+back-off), with a slow poll (`pollSeconds`) as fallback; rules are refetched
+every 5 min. `ListenerFeed` pushes `{type:'listeners', status}` to operator
+connections (technician and host; never guest/spectator) on change and on
+connect — not in the meter frames. The page's **Hörer:innen** panel (top of
+the right column, both layouts) is deliberately quiet — the earlier
+`frau-korn` experiment distracted the hosts by pushing every heart and every
+raw message onto their screen: folded by default (remembered per browser),
+folded it shows only "n Kommentare · k neu" and "♥ n"; no animation, no
+sound, no row per heart; nothing on it writes to eve. An unreachable eve or a
+refused login is said in words with the time of the last answer, so an empty
+list never passes for quiet listeners. Covered by `__tests__/listeners/` and
+the Hörer:innen block in `page-queue.test.ts`.
+
+**Sendung** — the episode on air and its conversation guide, from the same
+feed and login (`src/listeners/episode.ts`). Three more eve exports:
+`episodes` (every show's episodes from yesterday to tomorrow, with the show's
+`slug`, `airDate`, `repeat`, `opening`/`closing` markdown), and
+`episode-topics` / `episode-questions` (`?episode=<id>`, in the planned
+order). `pickEpisode` keeps the one of the show on air whose air date lies in
+the slot or on its day (a bare `YYYY-MM-DD` is the local day), never a rerun;
+for a pinned show today's. The markdown is turned into HTML **on the box**
+(`markdown.ts`: everything escaped, a fixed tag set, links keep their text
+only) and the page inserts it as is. The guide travels in the same
+`listeners` status (`episode`, `guide`: `pending` · `ok` · `none` ·
+`unavailable`) and is fetched on a show change, after an eve edit (at once
+for the episode itself or a link from it — `relation:changed` with its
+`fromElementId` — otherwise at most every 10 s, so a heart storm does not
+refetch it one by one) and every 5 min. It is an extra: an eve without these
+exports, or one failing on them, leaves the feedback alone and is asked again
+in 5 min (`guideRetryAt`). The page's **Sendung** panel sits above
+Hörer:innen, open by default (remembered per browser): show and slot, episode
+title, Anmoderation, the topics with their cue lines (notes fold out),
+Pflichtfragen (✓ = marked asked in eve), Abmoderation; the sections are
+rebuilt only when the guide changes and an open one stays open. Read-only —
+questions are ticked in eve. Covered by `episode.test.ts`, `markdown.test.ts`,
+the guide block in `feed.test.ts` and the Sendung block in
+`page-queue.test.ts`.
+
+**Look and layout** of the page follow `docs/design-guidelines.md` and the
+Claude Design mock-ups in `docs/design/studiobox.html` (a bundled artifact —
+open it in a browser). What is implemented: the colour tokens as CSS variables
+at the top of the page's `<style>` (dark by default, the light set via
+`prefers-color-scheme`, plus a `prefers-contrast: more` variant), system UI
+font with tabular numerals, 44 px controls, panels separated by surface tone
+(no shadows), German labels throughout. Header: title, the recording/stream
+toggles as status chips (they say their **state** — "Aufnahme aus" /
+"● Aufnahme läuft" — with `aria-pressed`, never an action label), the
+connection state in words (`setConn`), the server clock, Vorhören, "?" and ⋮.
+Metering (mixer mode only, `body.live`): a **Kanäle** grid — one row per
+channel with its state as a word (OFFEN / PAUSE = all mics closed / STUMM /
+AN), the channel's optional config `color` (e.g. the mic cable; named or hex,
+normalised by `resolveChannelColor` in `config/load.ts`, carried per channel
+in the snapshot) as an outlined stripe beside the name, a −60…0 dB level meter with fixed green/yellow/red zones and a 1.5 s
+peak-hold tick (`setLevel`, `role="meter"`), gate, comp, automix and leveler
+bars, and the Offen/Stumm button — and a **Programm** panel (short-term LUFS
+large, peak meter with scale, Spitze/Limiter/Duck tiles). Footer: the
+always-present **transport** — progress bar, the playing title (cut in its
+middle, `midName`), the remaining time large, then "Mikros offen/zu" and
+"■ Stopp", which is disabled rather than hidden while nothing plays so the
+layout never jumps. Unlike the mock-up's "Jetzt läuft" panel, now-playing sits
+in the footer: on this combined page the file browser and queue need the
+column height.
+
+What the page adds for a live session (each is driven by the snapshot and
+hidden where the box does not report it, so a playout box shows none of it):
+
+- **"AUF SENDUNG" chip** (`setAir`). The box cannot see the desk's fader, so
+  "on air" is defined once, on the server, as _programme is leaving the box_:
+  `onAirOf` in `src/meters/wire.ts` — `air.state` is `live` or `draining` (what
+  was said is still going out) **and** an output runs (the harbor stream, or
+  the local output unless the test tone has taken the programme's place).
+  `MeterServer.broadcast` adds it to every snapshot as `onAir`; it is `null`
+  without `air` (playout mode) and the chip is then absent. Filled red is
+  reserved for it; the other states are words on an outline ("Puffer füllt",
+  "Nicht auf Sendung", "Sendung beendet").
+- **Sendezeit.** With `air` the header clock is `air.nowMs` (labelled, with the
+  studio clock and the delay small beneath; a delay more than 1 s off target is
+  called out), and everything that compares against a filename timestamp uses
+  `airNow()` instead of `srvNow()` — timestamps are on-air times.
+- **Press-and-hold to end output** (`holdBtn`): ■ Stopp, ending the recording,
+  the stream and the local output, "Sendung beenden", and _starting_ the test
+  tone. 800 ms with a visible fill (`.hold.holding`), also from the keyboard
+  (hold Enter/Space). A short tap never acts: it arms a confirm ("… Nochmal
+  tippen", 4 s), and a second tap at least 400 ms later acts — the path for a
+  screen reader's activate gesture and for anybody who cannot hold a press.
+  Starting stays a single tap. Never a `confirm()`.
+  After a recording stop the box keeps writing for the look-ahead (~3 s) and
+  reports `recording: true` that long; the chip reads "Aufnahme endet …"
+  meanwhile (`recEnding`), so it does not look like a stop that failed.
+- **Moderations-Vorrang** panel (`setPrio`, shown when `snapshot.priority` is
+  set): a 0…24 slider sent as `priorityDepth` (negative dB, throttled while
+  dragging); a mic held back by it reads **LEISER** (`priorityDb < -1`,
+  `--duck`). **Trim** column: the value opens a ±1/±3 dB stepper (`trim`).
+- **Einmessen** panel (`setSetup`) on `snapshot.setup`: step tiles with their
+  state as a word (ERLEDIGT / JETZT / OFFEN), who is up and the sentence to
+  read, then one card per mic (verdict, "vorher → nachher" per setting, the
+  gain advice with "Nur diesen Kanal neu messen") and Übernehmen / Verwerfen.
+  The buttons are fixed elements switched by phase and the tiles are updated
+  in place — nothing is rebuilt under a finger. Idle, the panel is one line
+  below the meters.
+- **Bett** button in the footer (`snapshot.bed`, command `bed`; it follows the
+  snapshot, no optimistic flip), and in the bed's own folder a 🛏 per file
+  (`bedSelect`). **einzeln | laufend** in the queue head (`queueMode`).
+- ⋮ menu (technician): local output, Musik-Rückweg, Testton, Sendung beenden.
+
+**Views and roles.** `MeterServer` picks the view from the request's role
+(`Roles.roleOf`, the `?k=` token — never the route alone, see `viewFor`): a
+technician or host token gets this page, a guest token the guest view, anything
+else the spectator view; with roles disabled everybody is a technician, `/` is
+the page as before and `/guest`, `/spectator` show those views. The page takes
+its role from the WebSocket `hello` (`setRole`): `body.host` hides everything
+marked `.techonly` / `.td` (processing meters, trims, per-mic mute, Programm,
+Vorrang, Einmessen, stream/output switches) and shows the mics as compact
+bars — the host layout is this page, not a fourth file; a technician opening
+`/host` gets it too. Hiding is convenience: the server's allowlist is the
+protection, the file-tree routes (`/folders`, `/files`, `/scheduled`,
+`/preview`) answer 403 without an operator token (the page appends its `k` via
+`withK`), and guest/spectator connections get a cut-down snapshot and no queue
+pushes (`guestSnapshot` / `spectatorSnapshot` in `wire.ts`).
+The guest and spectator views are real files in `src/meters/public/`
+(`guest.html`, `spectator.html`, shared `tokens.css` and `meter.js`; copied to
+`dist/` by `build`, read per request, no build step). Their decisions — mic
+state word, zone word and bar height, whose turn it is in the setup assistant,
+how far back the spectator looks (it shows what listeners hear _now_, one air
+delay behind the room) — are pure functions in `meter.js`, tested in
+`__tests__/meters/page-views.test.ts`; the HTML only binds them. The guest view
+has no controls during a show: which mic is "mine" comes from `?mic=` in the
+link or a one-time chooser (localStorage), one or two mics per tablet.
+Until Einmessen has been applied (`setupApplied: false`) the zone is only as
+good as the mics' raw sensitivities, and the guest hint says so.
+`tokens.css` duplicates the page's tokens until the page moves out of
+`server.ts` too (roadmap M2.1) — change both. Routing, gating and the per-role
+cuts are covered by `__tests__/meters/server-views.test.ts` and
+`wire.test.ts`.
+
+Still open from the mock-ups: a recording timer on the chip, L/R programme
+meters and integrated LUFS (the snapshot has neither), and the host mock-up's
+per-row "Vorhören / Einreihen" buttons (the page keeps its one Vorhören mode).
+
 Everything that names a file also offers a **jump to where it plays from** —
 the now-playing line, the Vorhören bar and every queue row carry a 📂 that
 switches the browser to that file's folder/subfolder and flashes its row
@@ -213,7 +457,7 @@ timer so playback starts on the timestamp, not on the next poll — preempting
 current playback;
 the web page marks upcoming files and shows the next pending start; timestamps
 are parsed in the **server's** timezone, so the page renders all schedule times
-and a live footer clock in that zone — keep the box's system TZ set to the
+and a live header clock in that zone — keep the box's system TZ set to the
 zone operators use in filenames, e.g. `timedatectl set-timezone Europe/Berlin`),
 and a **playout-only mode** (`mode: playout` in `studiobox.yaml`): no capture,
 no DSP graph, no encoder/recorder — only FilePlayer -> Monitor plus the web UI
@@ -224,10 +468,87 @@ periods stream silence. Built for the memory/thermally constrained studiobox
 Pi 3, which runs this mode as `studiobox.service` (systemd) with the docker
 stack (liquidsoap/icecast/radiobox containers) disabled.
 
+### Buffered live chain (roadmap M1, backend — 2026-09-30)
+
+Everything below is live mode only (`src/pipeline.ts`); playout mode is
+unchanged. Verified by unit tests and an end-to-end run against fake sound
+cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
+
+- **Look-ahead** (`lookahead`, default 3 s / 15 ms / 150 ms). The mic leveler
+  (`SpeechLeveler`) estimates loudness only while its mic is the _active
+  talker_ — gate open and within 10 dB of the loudest mic (`DOMINANCE_DB` in
+  `graph.ts`), so bleed and room noise don't pump it — and applies the gain to
+  audio delayed by the look-ahead: a quiet voice is at target on its first
+  word. The gate opens 15 ms before an onset. Automix shares, host priority
+  and the programme ducker are decided 150 ms ahead of the audio.
+- **Host priority** (`automix.priority`): listed mics go down by `depthDb`
+  (default −8, never below −24: not a mute) while the priority mic talks;
+  `priorityDepth` command, `priority` + per-mic `priorityDb` in the snapshot.
+- **Air delay and Sendezeit** (`airDelay`, default 10 s). `AirFifo` stamps
+  every programme block with the room time of its sound (`SampleClock` maps
+  the capture's sample counter to wall time, immune to bursty block arrival)
+  and releases it when due. With a sound card it is pull-driven and absorbs
+  the two cards' drift within `toleranceSeconds`, nudging back one block at a
+  time during silence; without one it is a plain delay line in front of the
+  harbor encoder. Snapshot `air`: `targetMs`, measured `delayMs`, `nowMs`
+  (= Sendezeit), `state` (`filling` after a start · `live` · `draining` ·
+  `ended`), `underruns`, `resyncs`.
+- **The schedule runs on Sendezeit.** `Scheduler` takes a clock and a lead;
+  an entry is cued 3 s ahead (`FilePlayer.cue`: decodes ahead, starts on the
+  sample that carries the timestamp), so a file stamped 13:00:00 _airs_ at
+  13:00:00. `nextScheduled`/`/scheduled` times are therefore on-air times.
+- **"Sendung beenden"** (`endShow`; `false` cancels): closes the mics in room
+  time, lets the buffer (and a file still playing) air, then stops the
+  recording; `air.state` goes `draining` → `ended`. The output keeps running;
+  opening the mics returns to `live`.
+- **Music return** (`output.return`): the music/jingle/bed mix, ducked by a
+  second, causal ducker, without mics, in room time, to the mixer's USB
+  playback. The programme's music is delayed by the return's latency on top of
+  the mic latency, so talk and music line up on air as they did in the room.
+- **Recording** (`recording` command arms both files): stereo FLAC 24 bit as
+  **one continuous file** named by the on-air time of its first sample, with
+  Vorbis comments; with `output.multitrack` an N-channel FLAC (mics, stereo
+  sources, programme; ≤ 8 channels) written from the same blocks plus a
+  `.multitrack.json` channel map. `dry` taps are the raw sources delayed to
+  line up with the programme. A stop keeps recording for the look-ahead, so
+  what was said up to the button press is in the file (`recording` stays true
+  for those ~3 s). `Recorder.stop()` closes stdin and lets ffmpeg finalize.
+- **Setup assistant "Einmessen"** (`src/setup/`): `setupStart` (optionally
+  `{only:[label]}` to re-measure after a gain-knob change) → 5 s room silence →
+  each voice until 6 s of speech are collected (the talking mic is detected
+  from the audio; the prompted mic only settles ambiguous frames; bleed onto
+  the other mics is measured) → per-mic result: verdict and German gain-knob
+  advice (the knob is the one thing studiobox can't set), and the settings it
+  _can_ set — input trim (speech to −20 dBFS RMS), gate threshold, compressor
+  threshold, HPF from the fundamental, de-esser threshold, leveler seed
+  (simulated through the retuned strip), guest-zone centre, automix floor.
+  Nothing changes until `setupApply` (`Graph.retune`, click-free, then
+  persisted); `setupDiscard` drops it. Snapshot `setup` (`SetupStatus`) shows
+  phase, who is up, the sentence to read, progress and results on every view.
+  `trim {label, trimDb}` is the hand trim.
+- **Guest level indicator**: per mic `speechDb` (RMS after trim, before gate,
+  compressor and leveler, only while that mic is the talker; expires 2 s
+  after) and `zone` (`low`/`ok`/`high` against `zoneCenterDb` ± `zoneWidthDb`).
+- **Bed deck** (`filePlayer.bed`, `src/audio/bed.ts`): a second, looping
+  `FilePlayer` summed into the file-player source (leveled and ducked with
+  it); `bed` on/off with fades, `bedSelect {folder,name}`, snapshot `bed`.
+- **Queue mode** `queueMode` `single`/`chain` ("einzeln / durchlaufen"); live
+  mode starts in `single` (one track, then the talk), playout mode keeps
+  chaining. **Test tone** `testTone`: 1 kHz at −18 dBFS on the local output
+  only (not recorded, not streamed).
+- **Roles** (`meters.roles`, `src/meters/roles.ts`): per-connection role from
+  the `?k=` token, command allowlist enforced in `MeterServer`; off by default
+  (playout boxes), role links printed at start when on.
+
 ## TODO / roadmap (pick up here)
 
 Actionable backlog for continued development. Keep this list current as items
 land. Each item names a likely entry point and how to know it's done.
+
+The milestone plan toward a stable version (session-ready M1, stable M2) is in
+`docs/roadmap-stable.md`; every UI view follows `docs/design-guidelines.md`
+(roles, tokens, WCAG 2.2 AA checklist). Local test rigs use git-ignored
+`config/*.local.yaml`.
 
 - [x] **Local audio file player on the meters page.** Done: the meters page
       offers a folder dropdown over `filePlayer.dirs` (HTTP `/folders`) and

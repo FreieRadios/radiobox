@@ -44,6 +44,11 @@ export class Automix {
     return this.gains;
   }
 
+  /** Change the noise floor term live (setup assistant). */
+  set floorDb(db: number) {
+    this.floorAmp = dbToGain(db);
+  }
+
   get currentGains(): Float32Array {
     return this.gains;
   }

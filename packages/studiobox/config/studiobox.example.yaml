@@ -23,13 +23,47 @@ capture:
   sampleRate: 48000
   channels: 10 # total channels the device presents (Flow 8 = 8 inputs + main L/R)
   blockSize: 1024 # frames per DSP block (latency is not critical here)
+  # latencyMs: 20 # mic -> studiobox (USB + ALSA reader); part of the air delay
+  # ALSA capture buffer and period (arecord --buffer-time / --period-time).
+  # Unset = arecord's defaults (~500 ms buffer, handed over 125 ms at a time).
+  # For a live session: a long buffer, so a busy machine loses no input, and
+  # short periods, so the audio arrives smoothly. Adds no latency.
+  # bufferMs: 2000
+  # periodMs: 20
+
+# Buffered, not real-time. studiobox assumes nobody monitors its output while
+# talking (headphones hang on the mixer), so it spends delay freely:
+#
+# `lookahead` — the mic chain runs this far behind its own analysis, so every
+# automatic gain acts BEFORE the sound it reacts to: the leveler has the right
+# gain on the first word, the gate is open on the first consonant, music ducks
+# just before speech starts. All zeros give the old real-time chain.
+lookahead:
+  seconds: 3 # leveler look-ahead
+  gateMs: 15 # gate opens this long before the onset
+  mixMs: 150 # automix shares, host priority and ducking move ahead by this much
+
+# `airDelay` — the programme leaves this long after the room (0..60 s). A FIFO
+# in front of the output holds it there; the output card pulls from it at its
+# own clock, the FIFO absorbs the drift against the capture card. The measured
+# delay is the on-air clock ("Sendezeit" = wall clock + delay) every view
+# shows, and filename timestamps are on-air times: a jingle stamped 13:00:00
+# AIRS at 13:00:00 (it leaves the player `seconds` earlier). Values below the
+# look-ahead are raised to it.
+airDelay:
+  seconds: 10
+  toleranceSeconds: 1 # beyond this the FIFO re-centres in one step (after a device stall)
 
 # `source` is the 1-based channel index within the capture stream.
 # A stereo source (music) takes a [left, right] pair.
 # Remove/add rows freely — more mics, fewer mics, or no music at all.
+# Optional `color` per channel (e.g. the mic cable's colour): a name — red/rot,
+# blue/blau, yellow/gelb, green/grün, black/schwarz, white/weiß, orange,
+# purple/lila, pink, grey/grau, brown/braun — or #rrggbb. Shown as a stripe
+# next to the channel name on the page.
 channels:
-  - { source: 1, role: mic, label: Host, profile: dynamic-broadcast }
-  - { source: 2, role: mic, label: Guest, profile: cheap-lav }
+  - { source: 1, role: mic, label: Host, color: yellow, profile: dynamic-broadcast }
+  - { source: 2, role: mic, label: Guest, color: red, profile: cheap-lav }
   - { source: 3, role: mic, label: Phone, profile: generic }
   - { source: 4, role: mic, label: Spare, profile: condenser }
   - { source: [5, 6], role: music, label: Playout }
@@ -43,6 +77,12 @@ automix:
   members: [Host, Guest, Phone, Spare]
   responseMs: 120 # smoothing of the share computation
   floorDb: -60 # mics below this are treated as silent
+  # Host priority: while this mic talks, the listed ones are turned down by
+  # depthDb — gently, never muted; adjustable live from the technician view.
+  # priority:
+  #   label: Host
+  #   attenuate: [Guest, Phone]
+  #   depthDb: -8
 
 # Sidechain ducking: mic activity attenuates the music buses.
 # Per spec, only armed while a music channel is actually playing.
@@ -72,7 +112,20 @@ output:
   backup:
     enabled: true
     dir: './recordings' # rolling local FLAC safety copy
-    segmentSeconds: 3600
+    # 0 = one continuous, tagged file per recording, named by the on-air time
+    # of its first sample (what a session is handed out as). > 0 rolls
+    # segments of that length instead (an always-on safety copy).
+    segmentSeconds: 0
+    # station: 'Radio Z' # Vorbis comment ORGANIZATION
+  # Multitrack next to the stereo file, written from the same blocks so both
+  # are sample-aligned: every mic, every stereo music source, the programme.
+  # One FLAC holds at most 8 channels (e.g. 4 mics + file player + programme).
+  # `dry` = raw sources, delayed to line up with the programme (to remix
+  # from); `processed` = each source as it enters the mix. A .json channel map
+  # is written beside it. About 0.3 GB per channel and hour.
+  multitrack:
+    enabled: false
+    source: dry # dry | processed
   # Direct local hardware playout: send the finished program to a locally
   # plugged audio device (sound card / USB interface, e.g. a Focusrite
   # Scarlett) for monitoring or to feed a transmitter/PA. Independent of the
@@ -85,11 +138,60 @@ output:
     # Scarlett). Prefer a plughw:/hw: device, not the *.analog-stereo node.
     # Pulse: a sink name (empty selects the default sink).
     device: 'hw:CARD=USB'
+    # channels: 2 # device channels to open; the programme uses the first two
+    # ALSA buffer / period (aplay --buffer-time / --period-time); unset =
+    # aplay's defaults (~500 ms / a quarter of it). In live mode the buffer's
+    # latency is part of the air delay, so a long one costs nothing and keeps
+    # the output from running dry when the machine is busy:
+    # bufferMs: 2000
+    # periodMs: 20
+    # latencyMs: 2190 # block handed over -> heard (pipe + buffer). Feeds the
+    #   air-delay clock; calibrate against a reference clock in the rehearsal.
+  # Music return to the room: the music / jingle / bed mix, ducked as on air
+  # but WITHOUT the mics and in room time (no look-ahead, no air delay), sent
+  # to the mixer's USB playback so the room hears the music in the headphones
+  # next to the direct mics. Same keys as `monitor`. Send it to the card the
+  # mics come from (one clock). On a Flow 8: its 4 playback channels, the
+  # return on 1/2.
+  return:
+    enabled: false
+    backend: alsa
+    device: 'plughw:CARD=FLOW8,DEV=0'
+    channels: 4
+    bufferMs: 300 # the room hears the music this long after "play"
+    periodMs: 10
 
 meters:
   enabled: true
   port: 4445
   fps: 20
+  # Role tokens. With `enabled`, a connection may only send the commands of
+  # the role its token stands for: /tech?k=… everything, /host?k=… playout,
+  # queue, bed and "mics open/closed", /guest?k=… and no token: nothing
+  # (read-only). The links are printed at start. Turn this on whenever the
+  # network is shared. Off = every connection may do everything.
+  roles:
+    enabled: false
+    # tokens: { tech: '…', host: '…', guest: '…' } # fixed; else new per start
+
+# Optional: listener feedback from eve. Listeners send comments and hearts to
+# the show on air from eve's public page; a comment shows up here only after
+# somebody not at the microphone released it (in eve, /app/<app>/feedback).
+# The operators' page then shows the released comments and a heart count for
+# the show the schedule has on air (read from eve's schedule rules against
+# studiobox's clock), from the start of its slot on. Above it, the show's
+# episode as prepared in eve: opening and closing, the topics in order, the
+# must-ask questions (eve's `episodes`, `episode-topics`, `episode-questions`
+# exports; an eve without them only costs the guide). studiobox signs in as a
+# read-only device account and writes nothing to eve.
+listeners:
+  enabled: false
+  url: http://localhost:3000 # eve's API; Socket.IO runs on the same host
+  app: radio-z
+  username: studiobox # a `studiodevice` account
+  password: '' # or set STUDIOBOX_EVE_PASSWORD in the environment
+  pollSeconds: 45 # fallback when eve's change socket is down (30–300)
+  # show: gruenfunk # rehearsal only: pin a show slug instead of the schedule
 
 # Optional: a local audio file player exposed on the meters page. The configured
 # `dirs` appear in a folder dropdown; clicking a file decodes it to 48 kHz
@@ -141,7 +243,23 @@ filePlayer:
     graceSeconds: 30 # how late (after its timestamp) a file may still auto-start
 
 
+  # Audio bed ("Bett"): a second deck that loops one file under the talk until
+  # switched off — the host's fallback when a track fails or a pause needs
+  # filling. `dir` is the LABEL of one of the dirs above; its first audio file
+  # is the bed until another is chosen. It is leveled and ducked with the
+  # player.
+  # bed:
+  #   dir: Bed
+  #   gainDb: -6
+  #   fadeInMs: 1500
+  #   fadeOutMs: 2500
+
   # Optional music-style processing overrides (defaults match music channels):
   # processing:
   #   leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 }
   #   gainDb: 0
+# Where live settings are kept between restarts: what the setup assistant
+# ("Einmessen") measured and what was trimmed by hand. Never written into this
+# file. Default: session-state.json next to this config; ignored once it is
+# older than 12 hours.
+# stateFile: session-state.json

@@ -58,6 +58,20 @@ class SlidingSum {
 const msToLufs = (meanSq: number): number =>
   meanSq <= 0 ? -Infinity : ABS_OFFSET + 10 * Math.log10(meanSq);
 
+/** Mean K-weighted power -> LUFS (BS.1770 calibration offset applied). */
+export const powerToLufs = msToLufs;
+
+/** The BS.1770 K-weighting pre-filter on its own (48 kHz), for blocks that
+ *  integrate the weighted power themselves (e.g. the voice-keyed leveler). */
+export class KWeighting {
+  private k1 = kWeightStage1();
+  private k2 = kWeightStage2();
+
+  process(x: number): number {
+    return this.k2.process(this.k1.process(x));
+  }
+}
+
 /** Stereo loudness meter: momentary (400 ms) and short-term (3 s). */
 export class StereoLoudness {
   private k1L = kWeightStage1();

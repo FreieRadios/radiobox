@@ -207,3 +207,43 @@ describe('QueuePlayer', () => {
     expect(qp.handleCommand('queueClear', {})).toBe(true);
   });
 });
+
+describe('QueuePlayer "einzeln / durchlaufen"', () => {
+  const files = { '0:a.flac': '/m/a.flac', '0:b.flac': '/m/b.flac' };
+
+  it('einzeln: a track that ends by itself does not start the next one', () => {
+    const { player, qp } = setup(files);
+    qp.autoAdvance = false;
+    qp.handleCommand('queueAdd', {
+      items: [
+        { folder: 0, name: 'a.flac' },
+        { folder: 0, name: 'b.flac' },
+      ],
+    });
+    qp.handleCommand('queueStart', {});
+    expect(player.playing).toBe('/m/a.flac');
+    player.end();
+    expect(player.playing).toBeNull(); // back to the talk
+    expect(qp.list().map((i) => i.name)).toEqual(['b.flac']); // the list waits
+    qp.handleCommand('queueStart', {}); // next music break
+    expect(player.playing).toBe('/m/b.flac');
+  });
+
+  it('switches by command and reports the change', () => {
+    const { player, qp, changes } = setup(files);
+    expect(qp.autoAdvance).toBe(true); // durchlaufen unless told otherwise
+    expect(qp.handleCommand('queueMode', 'single')).toBe(true);
+    expect(qp.autoAdvance).toBe(false);
+    expect(changes()).toBe(1);
+    qp.handleCommand('queueMode', 'chain');
+    qp.handleCommand('queueAdd', {
+      items: [
+        { folder: 0, name: 'a.flac' },
+        { folder: 0, name: 'b.flac' },
+      ],
+    });
+    qp.handleCommand('queueStart', {});
+    player.end();
+    expect(player.playing).toBe('/m/b.flac');
+  });
+});

@@ -21,6 +21,11 @@ import { Log } from './util/log';
  *  - Preemption is implicit: firing an entry calls `onPlay`, and
  *    `FilePlayer.play()` replaces whatever is currently playing — the same
  *    outcome as the original's `q_prefetch.skip()` overrun handling.
+ *
+ * With an air delay (live mode) the timestamps are **on-air times**: the
+ * scheduler is given the on-air clock ("Sendezeit" = wall clock + delay) and a
+ * lead, fires that much ahead, and the player cues the file to start on the
+ * sample that airs at the timestamp (`SchedulerTiming`).
  */
 
 /** One auto-playable file: where it lives and when it should start. */
@@ -72,6 +77,16 @@ export function parsePlayAtMs(name: string): number | null {
  *  that the grace window has long closed on its own. */
 const FIRED_RETENTION_MS = 24 * 3600 * 1000;
 
+/** Which clock the timestamps are compared against, and how far ahead of a
+ *  timestamp its entry is handed to `onPlay`. */
+export interface SchedulerTiming {
+  /** The clock the filename timestamps refer to (epoch ms). Default: wall clock. */
+  now?: () => number;
+  /** Fire this many ms before the timestamp, so the receiver can prepare a
+   *  sample-accurate start. Default 0: fire at the timestamp. */
+  leadMs?: number;
+}
+
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   /** One-shot timer aimed at the next entry's exact timestamp (see armPrecise). */
@@ -79,6 +94,8 @@ export class Scheduler {
   private running = false;
   /** key -> epoch ms the entry fired; pruned by retention. */
   private fired = new Map<string, number>();
+  private now: () => number;
+  private leadMs: number;
 
   constructor(
     private opts: AutoPlayConfig,
@@ -86,8 +103,12 @@ export class Scheduler {
     private list: () => ScheduleEntry[],
     /** Starts playback of a due entry (replaces current playback). */
     private onPlay: (entry: ScheduleEntry) => void,
-    private log: Log
-  ) {}
+    private log: Log,
+    timing: SchedulerTiming = {}
+  ) {
+    this.now = timing.now ?? Date.now;
+    this.leadMs = Math.max(0, timing.leadMs ?? 0);
+  }
 
   private key(e: ScheduleEntry): string {
     return `${e.folder}:${e.name}:${e.playAtMs}`;
@@ -116,7 +137,7 @@ export class Scheduler {
   }
 
   /** One scan pass. Exposed (with an injectable clock) for tests. */
-  tick(nowMs: number = Date.now()): void {
+  tick(nowMs: number = this.now()): void {
     for (const [k, at] of this.fired) {
       if (nowMs - at > FIRED_RETENTION_MS) this.fired.delete(k);
     }
@@ -126,7 +147,7 @@ export class Scheduler {
     const due = entries
       .filter((e) => {
         const age = nowMs - e.playAtMs;
-        return age >= 0 && age <= graceMs && !this.fired.has(this.key(e));
+        return age >= -this.leadMs && age <= graceMs && !this.fired.has(this.key(e));
       })
       .sort((a, b) => a.playAtMs - b.playAtMs);
 
@@ -161,10 +182,12 @@ export class Scheduler {
     if (!this.running) return;
     let next: ScheduleEntry | null = null;
     for (const e of entries) {
-      if (e.playAtMs > nowMs && (!next || e.playAtMs < next.playAtMs)) next = e;
+      if (this.fired.has(this.key(e))) continue;
+      const fireAt = e.playAtMs - this.leadMs;
+      if (fireAt > nowMs && (!next || e.playAtMs < next.playAtMs)) next = e;
     }
     if (!next) return;
-    const delay = next.playAtMs - nowMs;
+    const delay = next.playAtMs - this.leadMs - nowMs;
     if (delay > this.opts.scanSeconds * 1000) return; // a later scan re-arms
     // Small cushion so the fired tick's clock is safely past the target.
     this.precise = setTimeout(() => this.tick(), delay + 5);
@@ -172,14 +195,14 @@ export class Scheduler {
   }
 
   /** Entries whose target is still in the future, soonest first. */
-  upcoming(nowMs: number = Date.now()): ScheduleEntry[] {
+  upcoming(nowMs: number = this.now()): ScheduleEntry[] {
     return this.list()
       .filter((e) => e.playAtMs > nowMs)
       .sort((a, b) => a.playAtMs - b.playAtMs);
   }
 
   /** The next future entry, or null. */
-  next(nowMs: number = Date.now()): ScheduleEntry | null {
+  next(nowMs: number = this.now()): ScheduleEntry | null {
     return this.upcoming(nowMs)[0] ?? null;
   }
 }

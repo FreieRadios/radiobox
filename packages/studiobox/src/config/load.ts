@@ -2,14 +2,23 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
+  AirDelayConfig,
+  AutomixConfig,
   AutoPlayConfig,
+  BackupConfig,
+  BedConfig,
   ChannelConfig,
   ChannelProcessing,
   FilePlayerConfig,
   FilePlayerDir,
+  ListenersConfig,
+  LookaheadConfig,
+  MetersConfig,
   Mode,
   MonitorConfig,
+  MultitrackConfig,
   OutputConfig,
+  PriorityConfig,
   StudioboxConfig,
 } from './schema';
 
@@ -96,6 +105,51 @@ export function guessDirIcon(label: string, dirPath: string): string {
   return '📁';
 }
 
+/** Channel marker colours by name (English and German, as for the icons).
+ *  Saturated cable/tape tones; the page outlines every swatch, so black stays
+ *  visible on the dark theme. */
+const CHANNEL_COLORS: Record<string, string> = {
+  red: '#e53935',
+  rot: '#e53935',
+  yellow: '#fdd835',
+  gelb: '#fdd835',
+  blue: '#1e88e5',
+  blau: '#1e88e5',
+  green: '#43a047',
+  grün: '#43a047',
+  gruen: '#43a047',
+  black: '#000000',
+  schwarz: '#000000',
+  white: '#f5f5f5',
+  weiß: '#f5f5f5',
+  weiss: '#f5f5f5',
+  orange: '#fb8c00',
+  purple: '#8e24aa',
+  violet: '#8e24aa',
+  lila: '#8e24aa',
+  pink: '#ec407a',
+  rosa: '#ec407a',
+  grey: '#9e9e9e',
+  gray: '#9e9e9e',
+  grau: '#9e9e9e',
+  brown: '#795548',
+  braun: '#795548',
+};
+
+/** Resolve a channel's `color` to CSS hex: a name from CHANNEL_COLORS or
+ *  `#rgb`/`#rrggbb`. Undefined when unset; throws on anything else, so a typo
+ *  fails at load instead of silently showing no colour. */
+export function resolveChannelColor(raw: unknown, label: string): string | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const v = String(raw).trim().toLowerCase();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(v)) return v;
+  const named = CHANNEL_COLORS[v];
+  if (named) return named;
+  throw new Error(
+    `channel "${label}": unknown color "${raw}" (use #rrggbb or one of ${Object.keys(CHANNEL_COLORS).join(', ')})`
+  );
+}
+
 /** Normalize the configured browsable folders. Accepts the new `dirs` array
  *  (each entry a string or `{ path, label, hasScheduled, hideEmpty, icon }`)
  *  and the legacy single `dir` string for backward compatibility. Labels
@@ -167,6 +221,21 @@ function resolveAutoPlay(raw: unknown): AutoPlayConfig {
   };
 }
 
+/** The audio bed: on as soon as a `dir` label is given. */
+function resolveBed(raw: unknown): BedConfig {
+  const r = isObj(raw) ? raw : {};
+  const dir = typeof r.dir === 'string' ? r.dir.trim() : '';
+  const num = (v: unknown, def: number): number =>
+    v !== undefined && v !== null && Number.isFinite(Number(v)) ? Number(v) : def;
+  return {
+    enabled: r.enabled !== false && dir !== '',
+    dir,
+    gainDb: num(r.gainDb, -6),
+    fadeInMs: Math.max(0, num(r.fadeInMs, 1500)),
+    fadeOutMs: Math.max(0, num(r.fadeOutMs, 2500)),
+  };
+}
+
 /** Resolve the optional local file player into a music-style source. */
 function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
   if (!isObj(raw) || !raw.enabled) return undefined;
@@ -184,28 +253,149 @@ function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
         ? Number(raw.prebufferMs)
         : 250,
     autoPlay: resolveAutoPlay(raw.autoPlay),
+    bed: resolveBed(raw.bed),
     processing,
   };
 }
 
-/** Normalize the optional local hardware playout (monitor) block. Defaults to
+const finite = (v: unknown, def: number): number =>
+  v !== undefined && v !== null && Number.isFinite(Number(v)) ? Number(v) : def;
+
+/** Normalize a local hardware output block (`output.monitor` — the programme
+ *  — or `output.return` — the music return to the room). Defaults to
  *  disabled; backend falls back to ALSA. The device is required when enabled
  *  (checked in validate). */
 function resolveMonitor(raw: unknown): MonitorConfig {
   if (!isObj(raw)) return { enabled: false, backend: 'alsa', device: '' };
   const backend = raw.backend === 'pulse' ? 'pulse' : 'alsa';
-  return {
+  const out: MonitorConfig = {
     enabled: !!raw.enabled,
     backend,
     device: typeof raw.device === 'string' ? raw.device.trim() : '',
   };
+  const channels = finite(raw.channels, 2);
+  if (channels > 2) out.channels = Math.floor(channels);
+  if (finite(raw.bufferMs, 0) > 0) out.bufferMs = finite(raw.bufferMs, 0);
+  if (finite(raw.periodMs, 0) > 0) out.periodMs = finite(raw.periodMs, 0);
+  if (raw.latencyMs !== undefined) out.latencyMs = Math.max(0, finite(raw.latencyMs, 0));
+  return out;
 }
 
-/** Resolve the output block, filling in the monitor sub-config defaults so it
- *  is always present (harbor/backup are taken from YAML as-is). */
+/** The stereo recording. `segmentSeconds` defaults to 0: one continuous file
+ *  per recording. */
+function resolveBackup(raw: unknown): BackupConfig {
+  const r = isObj(raw) ? raw : {};
+  const out: BackupConfig = {
+    enabled: !!r.enabled,
+    dir: typeof r.dir === 'string' && r.dir.trim() ? r.dir.trim() : './recordings',
+    segmentSeconds: Math.max(0, finite(r.segmentSeconds, 0)),
+  };
+  if (typeof r.station === 'string' && r.station.trim()) out.station = r.station.trim();
+  if (typeof r.title === 'string' && r.title.trim()) out.title = r.title.trim();
+  return out;
+}
+
+function resolveMultitrack(raw: unknown): MultitrackConfig {
+  const r = isObj(raw) ? raw : {};
+  return { enabled: !!r.enabled, source: r.source === 'processed' ? 'processed' : 'dry' };
+}
+
+/** Resolve the output block, filling in the sub-config defaults so every
+ *  output is always present (harbor is taken from YAML as-is). */
 function resolveOutput(raw: unknown): OutputConfig {
-  const out = (isObj(raw) ? raw : {}) as unknown as OutputConfig;
-  return { ...out, monitor: resolveMonitor(isObj(raw) ? raw.monitor : undefined) };
+  const r = isObj(raw) ? raw : {};
+  const out = r as unknown as OutputConfig;
+  return {
+    ...out,
+    harbor: out.harbor ?? { enabled: false, url: '', format: 'ogg-flac', contentType: '' },
+    backup: resolveBackup(r.backup),
+    multitrack: resolveMultitrack(r.multitrack),
+    monitor: resolveMonitor(r.monitor),
+    return: resolveMonitor(r.return),
+  };
+}
+
+/** Look-ahead defaults: 3 s for the leveler, 15 ms for the gate, 150 ms for
+ *  the mix decisions. `lookahead: { seconds: 0, gateMs: 0, mixMs: 0 }` gives
+ *  the old real-time chain. */
+function resolveLookahead(raw: unknown): LookaheadConfig {
+  const r = isObj(raw) ? raw : {};
+  return {
+    seconds: Math.min(10, Math.max(0, finite(r.seconds, 3))),
+    gateMs: Math.min(100, Math.max(0, finite(r.gateMs, 15))),
+    mixMs: Math.min(1000, Math.max(0, finite(r.mixMs, 150))),
+  };
+}
+
+/** Air delay: 10 s unless configured, 0..60 s. */
+function resolveAirDelay(raw: unknown): AirDelayConfig {
+  const r = isObj(raw) ? raw : {};
+  return {
+    seconds: Math.min(60, Math.max(0, finite(r.seconds, 10))),
+    toleranceSeconds: Math.min(5, Math.max(0.2, finite(r.toleranceSeconds, 1))),
+  };
+}
+
+/** Host priority inside the automix block. Off unless a label is given. */
+function resolvePriority(raw: unknown): PriorityConfig {
+  const r = isObj(raw) ? raw : {};
+  const label = typeof r.label === 'string' ? r.label : '';
+  return {
+    enabled: r.enabled !== false && label !== '',
+    label,
+    attenuate: Array.isArray(r.attenuate) ? r.attenuate.map(String) : [],
+    depthDb: Math.min(0, Math.max(-24, finite(r.depthDb, -8))),
+    thresholdDb: finite(r.thresholdDb, -35),
+    attackMs: Math.max(0, finite(r.attackMs, 120)),
+    holdMs: Math.max(0, finite(r.holdMs, 300)),
+    releaseMs: Math.max(0, finite(r.releaseMs, 800)),
+  };
+}
+
+function resolveMeters(raw: unknown): MetersConfig {
+  const r = isObj(raw) ? raw : {};
+  const roles = isObj(r.roles) ? r.roles : {};
+  const t = isObj(roles.tokens) ? roles.tokens : {};
+  const tok = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() ? v.trim() : undefined;
+  return {
+    enabled: !!r.enabled,
+    port: finite(r.port, 4445),
+    fps: Math.max(1, finite(r.fps, 20)),
+    roles: {
+      enabled: !!roles.enabled,
+      tokens: { tech: tok(t.tech), host: tok(t.host), guest: tok(t.guest) },
+    },
+  };
+}
+
+/** Listener feedback from eve. Off unless enabled; the password may come
+ *  from the environment so it need not sit in the YAML. */
+function resolveListeners(raw: unknown): ListenersConfig {
+  const r = isObj(raw) ? raw : {};
+  const str = (v: unknown, d = ''): string => (typeof v === 'string' && v.trim() ? v.trim() : d);
+  const show = str(r.show);
+  return {
+    enabled: !!r.enabled,
+    url: str(r.url),
+    app: str(r.app, 'radio-z'),
+    username: str(r.username),
+    password:
+      process.env.STUDIOBOX_EVE_PASSWORD || (typeof r.password === 'string' ? r.password : ''),
+    pollSeconds: Math.min(300, Math.max(30, finite(r.pollSeconds, 45))),
+    ...(show ? { show } : {}),
+  };
+}
+
+function resolveAutomix(raw: unknown): AutomixConfig {
+  const r = isObj(raw) ? raw : {};
+  return {
+    enabled: !!r.enabled,
+    members: Array.isArray(r.members) ? r.members.map(String) : [],
+    responseMs: finite(r.responseMs, 120),
+    floorDb: finite(r.floorDb, -60),
+    priority: resolvePriority(r.priority),
+  };
 }
 
 function readYaml(file: string): Dict {
@@ -234,6 +424,7 @@ function resolveChannel(raw: Dict, profiles: Dict): ChannelConfig {
     source: raw.source as number | [number, number],
     role: (raw.role as ChannelConfig['role']) ?? 'unused',
     label: String(raw.label),
+    color: resolveChannelColor(raw.color, String(raw.label)),
     profile: profileName,
     processing,
   };
@@ -264,7 +455,22 @@ export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
   const mode: Mode = root.mode === 'playout' ? 'playout' : 'live';
   const filePlayer = resolveFilePlayer(root.filePlayer);
   const output = resolveOutput(root.output);
-  const cfg = { ...root, mode, channels, filePlayer, output } as unknown as StudioboxConfig;
+  const cfg = {
+    ...root,
+    mode,
+    channels,
+    filePlayer,
+    output,
+    automix: resolveAutomix(root.automix),
+    lookahead: resolveLookahead(root.lookahead),
+    airDelay: resolveAirDelay(root.airDelay),
+    meters: resolveMeters(root.meters),
+    listeners: resolveListeners(root.listeners),
+    stateFile:
+      typeof root.stateFile === 'string' && root.stateFile.trim()
+        ? path.resolve(path.dirname(configPath), root.stateFile.trim())
+        : path.resolve(path.dirname(configPath), 'session-state.json'),
+  } as unknown as StudioboxConfig;
   // Playout-only machines don't capture; the capture block then only supplies
   // the block clock (sample rate / block size) and may be omitted entirely.
   if (mode === 'playout' && !cfg.capture) {
@@ -279,6 +485,12 @@ function validate(cfg: StudioboxConfig, file: string): void {
   const fail = (msg: string): never => {
     throw new Error(`${file}: ${msg}`);
   };
+  const lis = cfg.listeners;
+  if (lis.enabled) {
+    if (!/^https?:\/\/[^/]/.test(lis.url)) fail('listeners.url must be an http(s) URL of eve');
+    if (!lis.username) fail('listeners.username is required');
+    if (!lis.password) fail('listeners.password (or STUDIOBOX_EVE_PASSWORD) is required');
+  }
   if (cfg.mode === 'playout') {
     // No capture in playout mode: only the file player -> monitor path runs.
     if (!cfg.filePlayer?.enabled) fail('mode "playout" requires filePlayer.enabled');
@@ -312,11 +524,34 @@ function validate(cfg: StudioboxConfig, file: string): void {
   for (const t of cfg.duck?.targets ?? []) {
     if (!labels.has(t)) fail(`duck.targets references unknown channel "${t}"`);
   }
-  if (
-    cfg.output?.monitor?.enabled &&
-    cfg.output.monitor.backend === 'alsa' &&
-    !cfg.output.monitor.device
-  ) {
-    fail('output.monitor.device is required when monitor is enabled with the alsa backend');
+  const bed = cfg.filePlayer?.bed;
+  if (bed?.enabled && !cfg.filePlayer!.dirs.some((d) => d.label === bed.dir)) {
+    fail(`filePlayer.bed.dir: no filePlayer.dirs entry is labelled "${bed.dir}"`);
+  }
+  const pri = cfg.automix.priority;
+  if (pri.enabled) {
+    if (!labels.has(pri.label)) fail(`automix.priority.label: unknown channel "${pri.label}"`);
+    for (const a of pri.attenuate) {
+      if (!labels.has(a)) fail(`automix.priority.attenuate references unknown channel "${a}"`);
+    }
+  }
+  for (const key of ['monitor', 'return'] as const) {
+    const o = cfg.output[key];
+    if (o.enabled && o.backend === 'alsa' && !o.device) {
+      fail(`output.${key}.device is required when ${key} is enabled with the alsa backend`);
+    }
+  }
+  if (cfg.output.multitrack.enabled) {
+    // FLAC carries at most 8 channels: mics + 2 per music source + programme.
+    const mics = cfg.channels.filter((c) => c.role === 'mic').length;
+    const music =
+      cfg.channels.filter((c) => c.role === 'music').length + (cfg.filePlayer?.enabled ? 1 : 0);
+    const total = mics + 2 * music + 2;
+    if (total > 8) {
+      fail(
+        `output.multitrack: ${mics} mics + ${music} stereo sources + programme = ${total} ` +
+          `channels, but one FLAC holds at most 8`
+      );
+    }
   }
 }

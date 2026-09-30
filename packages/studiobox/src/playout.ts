@@ -7,6 +7,7 @@ import { QueuePlayer } from './audio/play-queue';
 import { interleaveStereo } from './audio/format';
 import { MeterSnapshot } from './dsp/graph';
 import { MeterServer } from './meters/server';
+import { ListenerFeed } from './listeners/feed';
 import { Scheduler } from './schedule';
 import { makeLog } from './util/log';
 
@@ -35,6 +36,8 @@ export class PlayoutPipeline {
   private fileDirs: FileDirs;
   private playQueue: QueuePlayer;
   private meters: MeterServer | null;
+  /** Listener feedback from eve for the show on air (see ListenerFeed). */
+  private listeners: ListenerFeed | null = null;
   private scheduler: Scheduler | null;
   private outL: Float32Array;
   private outR: Float32Array;
@@ -53,7 +56,9 @@ export class PlayoutPipeline {
     );
     this.fileDirs = new FileDirs(cfg.filePlayer.dirs, log);
     this.monitor = new Monitor(cfg.output.monitor, cfg.capture, makeLog('monitor'));
-    this.meters = cfg.meters.enabled ? new MeterServer(cfg.meters.port, makeLog('meters')) : null;
+    this.meters = cfg.meters.enabled
+      ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
+      : null;
     // Pending play list: chains the next file when one ends by itself. Never
     // starts audio on its own (see QueuePlayer).
     this.playQueue = new QueuePlayer({
@@ -68,6 +73,20 @@ export class PlayoutPipeline {
     this.meters?.onListFiles((folder, sub) => this.fileDirs.list(folder, sub));
     this.meters?.onListScheduled(() => this.scheduler?.upcoming() ?? []);
     this.meters?.onResolveFile((folder, name) => this.fileDirs.resolve(folder, name));
+    // Listener feedback for the host: read-only from eve, on the page only.
+    // No air delay here: the wall clock is the on-air clock.
+    if (cfg.listeners.enabled && !this.meters) {
+      log.warn('listeners.enabled needs meters.enabled (the feedback is shown on the page)');
+    } else if (cfg.listeners.enabled) {
+      this.listeners = new ListenerFeed({
+        cfg: cfg.listeners,
+        clock: Date.now,
+        onChange: (s) => this.meters?.broadcastListeners(s),
+        log: makeLog('listeners'),
+      });
+      const feed = this.listeners;
+      this.meters?.onListListeners(() => feed.status());
+    }
     this.scheduler = cfg.filePlayer.autoPlay.enabled
       ? new Scheduler(
           cfg.filePlayer.autoPlay,
@@ -174,6 +193,7 @@ export class PlayoutPipeline {
     });
     this.pump();
     this.scheduler?.start();
+    this.listeners?.start();
 
     if (this.meters) {
       this.meters.start();
@@ -186,8 +206,9 @@ export class PlayoutPipeline {
     this.stopping = true;
     if (this.metersTimer) clearInterval(this.metersTimer);
     this.scheduler?.stop();
+    this.listeners?.stop();
     this.meters?.stop();
-    this.filePlayer.stop();
+    this.filePlayer.shutdown();
     this.monitor.stop();
     log.info('stopped');
   }
