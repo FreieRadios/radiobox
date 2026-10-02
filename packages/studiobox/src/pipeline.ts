@@ -179,6 +179,7 @@ export class Pipeline {
     this.meters = cfg.meters.enabled
       ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
       : null;
+    this.meters?.setMics(cfg.channels.filter((c) => c.role === 'mic').map((c) => c.label));
 
     // --- air delay ---
     this.graphLatencyMs = (this.graph.latencySamples / sr) * 1000;

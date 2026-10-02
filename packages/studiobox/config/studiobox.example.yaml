@@ -168,8 +168,11 @@ meters:
   # Role tokens. With `enabled`, a connection may only send the commands of
   # the role its token stands for: /tech?k=… everything, /host?k=… playout,
   # queue, bed and "mics open/closed", /guest?k=… and no token: nothing
-  # (read-only). The links are printed at start. Turn this on whenever the
-  # network is shared. Off = every connection may do everything.
+  # (read-only). The links are printed at start, and the technician's page
+  # shows them as QR codes (⋮ → Geräte verbinden; a guest code per mic opens
+  # with that mic chosen). Pin the tokens so a printed code survives a
+  # restart. Turn this on whenever the network is shared. Off = every
+  # connection may do everything.
   roles:
     enabled: false
     # tokens: { tech: '…', host: '…', guest: '…' } # fixed; else new per start

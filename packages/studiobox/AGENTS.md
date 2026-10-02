@@ -383,7 +383,13 @@ hidden where the box does not report it, so a playout box shows none of it):
 - **Bett** button in the footer (`snapshot.bed`, command `bed`; it follows the
   snapshot, no optimistic flip), and in the bed's own folder a 🛏 per file
   (`bedSelect`). **einzeln | laufend** in the queue head (`queueMode`).
-- ⋮ menu (technician): local output, Musik-Rückweg, Testton, Sendung beenden.
+- ⋮ menu (technician): local output, Musik-Rückweg, Testton, Sendung beenden,
+  **Geräte verbinden** — the role links as QR codes (`/connect`, technician
+  token only, 403 otherwise; SVGs rendered on the box with `qrcode`): one per
+  role plus a guest link per mic (`&mic=<label>`, so the guest view opens with
+  that mic chosen). The codes point at the address the technician's browser
+  used, or the LAN address when that was `localhost`. Unpinned tokens are
+  called out: the codes then die at the next start (`Roles.pinned`).
 
 **Views and roles.** `MeterServer` picks the view from the request's role
 (`Roles.roleOf`, the `?k=` token — never the route alone, see `viewFor`): a
@@ -538,7 +544,8 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   only (not recorded, not streamed).
 - **Roles** (`meters.roles`, `src/meters/roles.ts`): per-connection role from
   the `?k=` token, command allowlist enforced in `MeterServer`; off by default
-  (playout boxes), role links printed at start when on.
+  (playout boxes), role links (incl. one guest link per mic) printed at start
+  when on, and as QR codes under ⋮ → Geräte verbinden.
 
 ## TODO / roadmap (pick up here)
 

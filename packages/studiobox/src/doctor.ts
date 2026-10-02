@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { MonitorConfig, StudioboxConfig } from './config/schema';
 import { AUDIO_EXTENSIONS } from './audio/file-player';
 import { parsePlayAtMs } from './schedule';
+import { pickLanAddress } from './util/lan';
 
 /**
  * `studiobox doctor` — the preflight: everything that has to be true before a
@@ -76,12 +76,7 @@ export function systemEnv(): Env {
         }
       }
     },
-    lanAddress: () => {
-      for (const list of Object.values(os.networkInterfaces())) {
-        for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) return a.address;
-      }
-      return null;
-    },
+    lanAddress: () => pickLanAddress(),
     now: () => Date.now(),
   };
 }

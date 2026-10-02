@@ -133,6 +133,52 @@ describe('MeterServer — views and what each role gets', () => {
     expect((await get(port, '/public/meter.js')).status).toBe(404);
   });
 
+  it('hands the role links and their QR codes to the technician only', async () => {
+    await boot(true);
+    server.setMics(['Host', 'Gast 1']);
+    for (const q of ['', '?k=nope', '?k=H', '?k=G']) {
+      expect((await get(port, `/connect${q}`)).status).toBe(403);
+    }
+    const res = await get(port, '/connect?k=T');
+    expect(res.status).toBe(200);
+    const d = JSON.parse(res.body);
+    expect(d).toMatchObject({ enabled: true, pinned: true });
+    expect(d.links.map((l: any) => l.label)).toEqual([
+      'Technik',
+      'Host',
+      'Gäste',
+      'Gäste: Host',
+      'Gäste: Gast 1',
+      'Zuschauer',
+    ]);
+    for (const l of d.links) expect(l.svg).toMatch(/^<svg[\s\S]*<\/svg>\s*$/);
+    // A scanned guest code opens the guest view with its mic chosen.
+    const guest = new URL(d.links.find((l: any) => l.mic === 'Gast 1').url);
+    expect(guest.pathname).toBe('/guest');
+    expect(guest.searchParams.get('mic')).toBe('Gast 1');
+    expect(view((await get(port, guest.pathname + guest.search)).body)).toBe('studiobox – Gast');
+  });
+
+  it('points the codes at the address the technician used, unless that is the box', async () => {
+    await boot(true);
+    const linksVia = (host: string): Promise<string[]> =>
+      new Promise((resolve, reject) => {
+        http
+          .get({ host: '127.0.0.1', port, path: '/connect?k=T', headers: { host } }, (res) => {
+            let body = '';
+            res.on('data', (c) => (body += c));
+            res.on('end', () => resolve(JSON.parse(body).links.map((l: any) => l.url)));
+          })
+          .on('error', reject);
+      });
+    expect((await linksVia('studio.local:4445'))[0]).toBe('http://studio.local:4445/tech?k=T');
+    const viaLocal = (await linksVia(`localhost:${port}`))[0];
+    expect(viaLocal).not.toContain('localhost:');
+    expect(viaLocal).toMatch(new RegExp(`:${port}/tech\\?k=T$`));
+    // Nothing odd from the header makes it into a link.
+    expect((await linksVia('evil"/x'))[0]).not.toContain('evil');
+  });
+
   it('answers 403 on the file tree without an operator token', async () => {
     await boot(true);
     for (const url of [

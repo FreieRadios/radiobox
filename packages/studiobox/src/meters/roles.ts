@@ -45,12 +45,33 @@ export interface RoleTokens {
  *  nobody on the same Wi-Fi guesses it. */
 const newToken = (): string => randomBytes(12).toString('base64url');
 
+/** One link to hand out: who it is for and where it leads. */
+export interface RoleLink {
+  role: ViewRole;
+  /** What the link is for, in German (the label printed beside its QR code). */
+  label: string;
+  url: string;
+  /** The mic a guest link opens with (`&mic=<label>`). */
+  mic?: string;
+}
+
+const ROLE_LABEL: Record<ViewRole, string> = {
+  tech: 'Technik',
+  host: 'Host',
+  guest: 'Gäste',
+  spectator: 'Zuschauer',
+};
+
 export class Roles {
   readonly enabled: boolean;
   readonly tokens: RoleTokens;
+  /** Every token comes from the config: the links survive a restart, so a
+   *  printed QR code stays good. Otherwise they change at every start. */
+  readonly pinned: boolean;
 
   constructor(cfg: RolesConfig) {
     this.enabled = cfg.enabled;
+    this.pinned = !!(cfg.tokens.tech && cfg.tokens.host && cfg.tokens.guest);
     this.tokens = {
       tech: cfg.tokens.tech ?? newToken(),
       host: cfg.tokens.host ?? newToken(),
@@ -90,6 +111,26 @@ export class Roles {
       guest: `${b}/guest?k=${this.tokens.guest}`,
       spectator: `${b}/`,
     };
+  }
+
+  /** The links for "Geräte verbinden" and the start log: one per role, and
+   *  the guest link once more per mic, so a guest scans the code at their
+   *  seat and lands on the guest view with their mic chosen. */
+  links(base: string, mics: readonly string[] = []): RoleLink[] {
+    const u = this.urls(base);
+    const one = (role: ViewRole): RoleLink => ({ role, label: ROLE_LABEL[role], url: u[role] });
+    return [
+      one('tech'),
+      one('host'),
+      one('guest'),
+      ...mics.map((mic) => ({
+        role: 'guest' as const,
+        label: `${ROLE_LABEL.guest}: ${mic}`,
+        url: `${u.guest}&mic=${encodeURIComponent(mic)}`,
+        mic,
+      })),
+      one('spectator'),
+    ];
   }
 }
 

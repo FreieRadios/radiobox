@@ -142,7 +142,12 @@ const FOLDERS = [
 
 /** Boot the page against the stub DOM. `listings` maps "folder/path" to rows;
  *  `search` is the page's query string (the role token, `?k=…`). */
-function boot(listings: Record<string, FileRow[]>, folders = FOLDERS, search = '') {
+function boot(
+  listings: Record<string, FileRow[]>,
+  folders = FOLDERS,
+  search = '',
+  connectBody: unknown = { enabled: true, pinned: true, links: [] }
+) {
   const els: Record<string, El> = {};
   const byId = (id: string) => (els[id] ??= new El());
   const sent: Array<{ type: string; value?: unknown }> = [];
@@ -199,9 +204,10 @@ function boot(listings: Record<string, FileRow[]>, folders = FOLDERS, search = '
         const sub = decodeURIComponent(/path=([^&]*)/.exec(q)?.[1] ?? '');
         return Promise.resolve({ files: listings[`${folder}/${sub}`] ?? [], now: Date.now() });
       }
+      if (url.startsWith('connect')) return Promise.resolve(connectBody);
       return Promise.resolve({ scheduled: [], now: Date.now() });
     };
-    return Promise.resolve({ json });
+    return Promise.resolve({ ok: true, json });
   };
 
   const run = new Function(
@@ -1460,6 +1466,44 @@ describe('meters page — roles', () => {
     expect(p.byId('setupLine').textContent).toContain('jetzt: Host');
     p.push(liveFrame({ setup: setup('idle') }));
     expect(p.byId('setupLine').style.display).toBe('none');
+  });
+
+  it('shows the technician a QR code per role link, the guest link per mic', async () => {
+    const links = [
+      { role: 'tech', label: 'Technik', url: 'http://box:4445/tech?k=T', svg: '<svg>T</svg>' },
+      {
+        role: 'guest',
+        label: 'Gäste: <Gast 1>',
+        url: 'http://box:4445/guest?k=G&mic=%3CGast%201%3E',
+        mic: '<Gast 1>',
+        svg: '<svg>G</svg>',
+      },
+    ];
+    const p = boot(LISTINGS, FOLDERS, '?k=T', { enabled: true, pinned: false, links });
+    await p.flush();
+    p.push({ type: 'hello', role: 'tech' });
+    p.byId('connBtn').click();
+    await p.flush();
+    expect(p.fetched).toContain('connect?k=T');
+    expect(p.byId('connect').style.display).toBe('');
+    const cards = p.byId('connList').children.map((c) => c.innerHTML);
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toContain('<svg>T</svg>');
+    expect(cards[0]).toContain('http://box:4445/tech?k=T');
+    // Labels and links are text; only the server's SVG goes in as markup.
+    expect(cards[1]).toContain('Gäste: &lt;Gast 1&gt;');
+    expect(cards[1]).toContain('mic=%3CGast%201%3E');
+    // Unpinned tokens: the page says the codes won't outlive a restart.
+    expect(p.byId('connNote').textContent).toContain('nächsten Neustart');
+  });
+
+  it('never fetches the role links for a host', async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=H');
+    await p.flush();
+    p.push({ type: 'hello', role: 'host' });
+    p.byId('connBtn').click();
+    await p.flush();
+    expect(p.fetched.some((u) => u.startsWith('connect'))).toBe(false);
   });
 
   it('carries the role token on every request for the file tree', async () => {

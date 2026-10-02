@@ -83,4 +83,25 @@ describe('Roles', () => {
       spectator: 'http://10.0.0.5:4445/',
     });
   });
+
+  it('adds a guest link per mic, with the mic chosen', () => {
+    const r = on({ tech: 'T', host: 'H', guest: 'G' });
+    const links = r.links('http://10.0.0.5:4445', ['Gast 1', 'A&B']);
+    expect(links.map((l) => [l.role, l.label, l.url])).toEqual([
+      ['tech', 'Technik', 'http://10.0.0.5:4445/tech?k=T'],
+      ['host', 'Host', 'http://10.0.0.5:4445/host?k=H'],
+      ['guest', 'Gäste', 'http://10.0.0.5:4445/guest?k=G'],
+      ['guest', 'Gäste: Gast 1', 'http://10.0.0.5:4445/guest?k=G&mic=Gast%201'],
+      ['guest', 'Gäste: A&B', 'http://10.0.0.5:4445/guest?k=G&mic=A%26B'],
+      ['spectator', 'Zuschauer', 'http://10.0.0.5:4445/'],
+    ]);
+    // The guest view reads the mic back from exactly this parameter.
+    expect(new URL(links[4].url).searchParams.getAll('mic')).toEqual(['A&B']);
+  });
+
+  it('knows whether the links survive a restart', () => {
+    expect(on({ tech: 'T', host: 'H', guest: 'G' }).pinned).toBe(true);
+    expect(on({ tech: 'T', host: 'H' }).pinned).toBe(false);
+    expect(on().pinned).toBe(false);
+  });
 });

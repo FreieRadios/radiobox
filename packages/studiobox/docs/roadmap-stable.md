@@ -148,7 +148,7 @@ instance was holding both devices while this was written.
 | M1.1 Einmessen            | Done: measurement (`src/setup/`), live apply, `session-state.json`; commands `setup*`, `trim`      | A run with four real voices (the technician panel and the prompts on the host and guest views are built)           |
 | M1.2 Air delay, Sendezeit | Done: FIFO, pull-driven output, measured delay, schedule on Sendezeit, `endShow`                   | **Calibrate `output.monitor.latencyMs`** against a reference clock; 3 h soak (the Sendezeit clock is on the views) |
 | M1.3 Look-ahead DSP       | Done: tests (a)–(d) pass (`__tests__/dsp/lookahead.test.ts`)                                       | Listen to it                                                                                                       |
-| M1.4 Roles                | Done: tokens, allowlist per role, links printed at start (`meters.roles`)                          | QR codes; the four views on a real phone and tablet (built, so far only checked in headless Chromium)              |
+| M1.4 Roles                | Done: tokens, allowlist per role, links printed at start (`meters.roles`), QR codes (M1.18)        | The four views on a real phone and tablet (built, so far only checked in headless Chromium)                        |
 | M1.5 Guest indicator      | Done: `speechDb`, `zone`, `zoneCenterDb`/`zoneWidthDb` per mic                                     | In the rehearsal: "passt" at a normal speaking distance (the guest view is built)                                  |
 | M1.6 Recording            | Done: one continuous tagged stereo FLAC + 8-channel multitrack + channel map, sample-aligned       | Open the multitrack in Audacity/Reaper once                                                                        |
 | M1.7 Music return         | Done: `output.return`, room time, no mics, ducked; programme music delayed by the return's latency | **Open point 9** on the hardware; set `output.return.latencyMs`                                                    |
@@ -219,7 +219,7 @@ What it did find, and the item that takes it up (section 5):
 | The eve feed works but is off in every config (no `listeners` block in the rig config or the session preset); the only eve known is dev on the desktop                         | M1.16, open point 12 |
 | The episode guide was never seen with data (eve dev has no episode from yesterday to tomorrow); `episode-topics` / `episode-questions` are covered by tests only               | M1.16                |
 | Role tokens are new at every start (the preset does not pin `meters.roles.tokens`): after a restart every tablet is a read-only spectator until it gets the new link           | M1.17                |
-| No QR codes: the role links are printed in the log and nowhere on the page                                                                                                     | M1.18                |
+| ~~No QR codes~~ — done: ⋮ → "Geräte verbinden" shows a QR code per role and per guest mic (`/connect`, technician only)                                                        | M1.18                |
 | Nothing audible is verified: the music return was never listened to, and no Einmessen ran with voices (there is no `session-state.json` on the rig)                            | Rehearsal            |
 | In the headphones the music ducks about 0.3 s after the first word (the return's 300 ms buffer); on air it ducks ahead of the speech                                           | Rehearsal            |
 | A lost Flow 8 is not said on the page — the meters just freeze (a lost output card is, since `monitorFault` / `musicReturnFault`)                                              | M1.19                |
@@ -410,7 +410,8 @@ should-items, each with a fallback.
     takes them already. Generated once and kept is M2.2.
     _Done when:_ after a restart the tablets come back in their roles without
     a new link.
-18. **QR codes for the role links** (R18; open since M1.4 and M1.13). A
+18. **QR codes for the role links** (R18; open since M1.4 and M1.13). **Done
+    2026-10-02**, still to scan with a real phone. A
     technician-only "Geräte verbinden" in the ⋮ menu: link and QR code per
     role, the guest link once per mic (`/guest?k=…&mic=<label>`), so a guest
     scans and sees their own level, the running track and the time left. The

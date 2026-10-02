@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import * as QRCode from 'qrcode';
 import { WebSocketServer, WebSocket } from 'ws';
 import { MeterSnapshot } from '../dsp/graph';
 import { FileEntry, FolderEntry } from '../audio/file-dirs';
@@ -9,8 +9,9 @@ import { QueueItem } from '../audio/play-queue';
 import { ListenerStatus } from '../listeners/feed';
 import { ScheduleEntry } from '../schedule';
 import { RolesConfig } from '../config/schema';
+import { pickLanAddress } from '../util/lan';
 import { Log } from '../util/log';
-import { Roles, ViewRole } from './roles';
+import { RoleLink, Roles, ViewRole } from './roles';
 import { Snapshot, guestSnapshot, onAirOf, spectatorSnapshot } from './wire';
 
 /** Routes that serve a view (see `Roles.urls`, and `viewFor` for which one). */
@@ -18,6 +19,10 @@ const VIEW_ROUTES = new Set(['/', '/index.html', '/tech', '/host', '/guest', '/s
 
 /** Routes that expose the file tree: operators only (technician, host). */
 const DATA_ROUTES = new Set(['/folders', '/files', '/scheduled', '/preview']);
+
+/** The role links with their QR codes ("Geräte verbinden"): the keys to the
+ *  session, so the technician's alone. */
+const CONNECT_ROUTE = '/connect';
 
 /** The guest and spectator views and what they share, as real files (no
  *  build step; the technician/host page still lives in `PAGE` below until it
@@ -129,6 +134,8 @@ export class MeterServer {
   readonly roles: Roles;
   /** The role each open connection was given when it connected. */
   private roleOfWs = new WeakMap<WebSocket, ViewRole>();
+  /** Mic labels, for one guest link per mic (`setMics`). */
+  private mics: string[] = [];
 
   constructor(
     private port: number,
@@ -143,6 +150,8 @@ export class MeterServer {
         this.serveView(url, role, res);
       } else if (url in PUBLIC_FILES && !url.endsWith('.html')) {
         this.servePublic(url, res);
+      } else if (url === CONNECT_ROUTE) {
+        this.serveConnect(req, role, res);
       } else if (DATA_ROUTES.has(url) && !isOperator(role)) {
         // Hiding the file browser is not the protection — this is.
         res.writeHead(403);
@@ -206,6 +215,64 @@ export class MeterServer {
         this.onCmd?.(cmd);
       });
     });
+  }
+
+  /** The mics a guest can sit at: each gets its own guest link. */
+  setMics(labels: readonly string[]): void {
+    this.mics = [...labels];
+  }
+
+  /** The links to hand out, for the address the tablets reach this box at. */
+  links(base = `http://${lanAddress()}:${this.listenPort()}`): RoleLink[] {
+    return this.roles.links(base, this.mics);
+  }
+
+  /** The port actually listened on (the configured one may be 0 = any). */
+  private listenPort(): number {
+    const a = this.server.address();
+    return a && typeof a === 'object' ? a.port : this.port;
+  }
+
+  /** `/connect`: every role link with its QR code as SVG, for the
+   *  technician's "Geräte verbinden". The address is the one the technician's
+   *  browser used, so the codes lead where the page came from — unless that
+   *  was the box itself (localhost), which no tablet can reach. */
+  private serveConnect(req: http.IncomingMessage, role: ViewRole, res: http.ServerResponse): void {
+    if (role !== 'tech') {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    const host = req.headers.host ?? '';
+    const local = /^(localhost|127\.[\d.]+|\[::1\])(:\d+)?$/i.test(host);
+    const base =
+      !local && /^[\w.-]+(:\d+)?$|^\[[\da-f:.]+\](:\d+)?$/i.test(host)
+        ? `http://${host}`
+        : undefined;
+    const links = this.links(base);
+    Promise.all(
+      links.map((l) =>
+        QRCode.toString(l.url, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' })
+      )
+    )
+      .then((svgs) => {
+        res.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        });
+        res.end(
+          JSON.stringify({
+            enabled: this.roles.enabled,
+            pinned: this.roles.pinned,
+            links: links.map((l, i) => ({ ...l, svg: svgs[i] })),
+          })
+        );
+      })
+      .catch((err: unknown) => {
+        this.log.warn(`QR codes failed: ${(err as Error).message}`);
+        res.writeHead(500);
+        res.end();
+      });
   }
 
   /** Which view a route shows. The token decides, never the route alone:
@@ -373,12 +440,16 @@ export class MeterServer {
       if (!this.roles.enabled) return;
       // Role links for the tablets. Anything opened without a token is
       // read-only, so these lines are the keys to the session.
-      const urls = this.roles.urls(`http://${lanAddress()}:${this.port}`);
+      const links = this.links();
+      const w = Math.max(...links.map((l) => l.label.length)) + 1;
       this.log.info(`role links (a connection without a token is read-only):`);
-      this.log.info(`  Technik:   ${urls.tech}`);
-      this.log.info(`  Host:      ${urls.host}`);
-      this.log.info(`  Gäste:     ${urls.guest}`);
-      this.log.info(`  Zuschauer: ${urls.spectator}`);
+      for (const l of links) this.log.info(`  ${`${l.label}:`.padEnd(w)} ${l.url}`);
+      this.log.info(
+        this.roles.pinned
+          ? `QR codes: ⋮ → Geräte verbinden on the technician's page`
+          : `QR codes: ⋮ → Geräte verbinden; the tokens are new at every start ` +
+              `(pin meters.roles.tokens so printed codes stay good)`
+      );
     });
   }
 
@@ -407,16 +478,9 @@ export class MeterServer {
   }
 }
 
-/** The address the tablets reach this machine at: the first non-internal
- *  IPv4 address, `localhost` when there is none. */
-function lanAddress(): string {
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const a of list ?? []) {
-      if (a.family === 'IPv4' && !a.internal) return a.address;
-    }
-  }
-  return 'localhost';
-}
+/** The address the tablets reach this machine at (`pickLanAddress`),
+ *  `localhost` when there is none. */
+const lanAddress = (): string => pickLanAddress() ?? 'localhost';
 
 /** The server's IANA timezone. Filename timestamps are parsed in this zone
  *  (schedule.ts builds local Dates), so the page renders all schedule times
@@ -790,6 +854,17 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  #mlist li.none{background:transparent;color:var(--muted)}
  #mlist .fname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  #mlist .when{flex:0 0 auto;color:var(--warn);font-weight:600;white-space:nowrap}
+ /* "Geräte verbinden": one card per role link, its QR code always dark on
+    white (an inverted code scans badly), the link beneath to read or copy. */
+ #connList{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;padding:16px;overflow-y:auto}
+ #connList .none{grid-column:1/-1;color:var(--muted)}
+ .qr{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:8px;background:var(--raised)}
+ .qr h4{margin:0;font-size:1rem}
+ .qr .code{background:#fff;border-radius:6px;line-height:0}
+ .qr .code svg{width:100%;height:auto}
+ .qr .url{font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere;user-select:all}
+ #connNote{margin:0}
+ #connNote.warn{color:var(--warn)}
  /* Welcome screen: the configured sources as big clickable tiles. */
  .mbox .sub{padding:12px 16px 0;color:var(--muted)}
  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:16px;overflow-y:auto}
@@ -941,6 +1016,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     <button id="tone" class="hold techonly" style="display:none">Testton aus</button>
     <button id="endShow" class="hold techonly" style="display:none">Sendung beenden</button>
     <button id="schedBtn">⏰ Geplante Sendungen</button>
+    <button id="connBtn" class="techonly">📱 Geräte verbinden</button>
    </div>
   </div>
  </div>
@@ -1068,6 +1144,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mTitle">
   <div class="mhead"><h3 id="mTitle">⏰ Geplante Sendungen</h3><button id="mclose" class="icon" aria-label="Schließen">✕</button></div>
   <ul id="mlist"></ul>
+ </div>
+</div>
+<div id="connect" class="modal" style="display:none">
+ <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="cTitle">
+  <div class="mhead"><h3 id="cTitle">📱 Geräte verbinden</h3><button id="cclose" class="icon" aria-label="Schließen">✕</button></div>
+  <p class="sub" id="connNote"></p>
+  <div id="connList"></div>
  </div>
 </div>
 <div id="help" class="modal" style="display:none">
@@ -1226,6 +1309,10 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      legt 1 kHz bei −18 dBFS auf die lokale Ausgabe, um den Eingang am Pult
      einzupegeln. Er <b>ersetzt dort das Programm</b>; oben steht so lange
      <span class="k">TESTTON</span>.</li>
+     <li class="techonly"><span class="k">⋮ → Geräte verbinden</span> zeigt
+     für jede Rolle einen QR-Code (Technik, Host, Gäste — für Gäste auch einen
+     je Mikro, das Tablet zeigt dann gleich dessen Pegel — und Zuschauer). Wer
+     ihn scannt, bekommt genau diese Ansicht und darf nur, was sie erlaubt.</li>
      <li><span class="k">Bett aus</span> / <span class="k">Bett läuft</span>
      (unten): ein Musikbett, das in Schleife läuft und unter Sprache leiser
      wird — auch als Notnagel, wenn nichts anderes bereit ist. Im Bett-Ordner
@@ -2016,6 +2103,28 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     li.innerHTML='<span class="fname">'+fl+esc(e.name)+'</span><span class="when">'+fmtWhen(e.playAtMs)+'</span>';
     mlist.appendChild(li);});
   }).catch(()=>{mlist.innerHTML='<li class="none">Der Plan konnte nicht geladen werden</li>';});}
+ // "Geräte verbinden" (technician): the role links as QR codes, the guest
+ // link once per mic. The server renders the codes; the page only lays them out.
+ const connBox=document.getElementById('connect'),connList=document.getElementById('connList'),
+  connNote=document.getElementById('connNote');
+ function openConnect(){connBox.style.display='';connNote.textContent='';connNote.className='sub';
+  connList.innerHTML='<div class="none">lädt …</div>';
+  fetch(withK('connect')).then(r=>{if(!r.ok)throw new Error(r.status);return r.json();}).then(d=>{
+   if(!d.enabled){connNote.className='sub warn';
+    connNote.textContent='Rollen sind aus (meters.roles): jedes Gerät mit der Adresse darf alles.';}
+   else if(!d.pinned){connNote.className='sub warn';
+    connNote.textContent='Diese Links gelten nur bis zum nächsten Neustart. Für gedruckte Codes '+
+     'die Schlüssel in meters.roles.tokens festlegen.';}
+   else connNote.textContent='Mit der Kamera scannen. Der Link entscheidet, was das Gerät sieht und darf.';
+   connList.innerHTML='';
+   (d.links||[]).forEach(l=>{const c=document.createElement('section');c.className='qr';
+    c.innerHTML='<h4>'+esc(l.label)+'</h4><div class="code" role="img" aria-label="QR-Code '+esc(l.label)+'">'+
+     l.svg+'</div><div class="url">'+esc(l.url)+'</div>';
+    connList.appendChild(c);});
+  }).catch(()=>{connList.innerHTML='<div class="none">Die Links konnten nicht geladen werden</div>';});}
+ document.getElementById('connBtn').onclick=()=>{menu.style.display='none';if(tech())openConnect();};
+ document.getElementById('cclose').onclick=()=>{connBox.style.display='none';};
+ connBox.onclick=e=>{if(e.target===connBox)connBox.style.display='none';};
  // Help modal (header "?"): a short German manual for new operators.
  const help=document.getElementById('help');
  document.getElementById('helpBtn').onclick=e=>{e.stopPropagation();menu.style.display='none';help.style.display='';};
@@ -2030,7 +2139,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  welcome.onclick=e=>{if(e.target===welcome)welcome.style.display='none';};
  document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;
   welcome.style.display='none';modal.style.display='none';menu.style.display='none';
-  help.style.display='none';});
+  help.style.display='none';connBox.style.display='none';});
  // ---- Hörer:innen / listener feedback from eve ------------------------------
  // Released comments and the heart count of the show on air. The host decides
  // when to look: the panel is folded unless opened (remembered per browser),
