@@ -1,6 +1,7 @@
 # studiobox — roadmap to a stable version
 
-**Written:** 2026-09-30 · **First target:** the live session in the week of
+**Written:** 2026-09-30 · **Updated:** 2026-10-02 (audit, see section 3) ·
+**First target:** the live session in the week of
 2026-10-05 · **Basis:** `docs/analysis/studiobox-audit-2026-09-29.md`, the
 code on branch `studiobox`, a first run on the test rig and the Radio Z
 signal chain as documented in eve (`apps/radio-z/radioz-technik/Aufbau.md`).
@@ -200,6 +201,38 @@ Two things the hardware will decide:
   mic settle ties); the leveler key is only reliable _after_ the trims are
   applied. Run Einmessen before judging the leveler.
 
+### Audit of 2026-10-02
+
+Checked on the rig the day before the freeze. Typecheck and the 46 suites
+(444 tests) are green. A fresh clone of `main` installs
+(`yarn install --frozen-lockfile`), builds and runs `doctor`. The eve adapter
+ran against eve dev: read-only login, `schedule-rules`, `listener-comments`,
+`listener-hearts`, `episodes` and the change socket all answered, and the show
+on air was picked from the plan. No correctness bug turned up in the DSP core,
+the air FIFO or the role allowlist.
+
+What it did find, and the item that takes it up (section 5):
+
+| Finding                                                                                                                                                                        | Taken up in          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| GitHub is behind: `main` was 28 commits ahead of `origin/main`, and the commits with M1 and eve are on neither remote branch                                                   | M1.15                |
+| The eve feed works but is off in every config (no `listeners` block in the rig config or the session preset); the only eve known is dev on the desktop                         | M1.16, open point 12 |
+| The episode guide was never seen with data (eve dev has no episode from yesterday to tomorrow); `episode-topics` / `episode-questions` are covered by tests only               | M1.16                |
+| Role tokens are new at every start (the preset does not pin `meters.roles.tokens`): after a restart every tablet is a read-only spectator until it gets the new link           | M1.17                |
+| No QR codes: the role links are printed in the log and nowhere on the page                                                                                                     | M1.18                |
+| Nothing audible is verified: the music return was never listened to, and no Einmessen ran with voices (there is no `session-state.json` on the rig)                            | Rehearsal            |
+| In the headphones the music ducks about 0.3 s after the first word (the return's 300 ms buffer); on air it ducks ahead of the speech                                           | Rehearsal            |
+| A lost Flow 8 is not said on the page — the meters just freeze (a lost output card is, since `monitorFault` / `musicReturnFault`)                                              | M1.19                |
+| `doctor` does not check eve, and the address for the tablets is the first non-internal IPv4, which on a machine with Docker or a VPN can be a bridge                           | M1.20                |
+| The README still describes the "Phase 1 scaffold" and recommends `hw:` where the code needs `plughw:`; `scripts/studiobox.service` is the Pi's playout unit (`MemoryMax=300M`) | M1.21                |
+| Sound cards are not found by themselves: device names are typed into the YAML                                                                                                  | M2.11                |
+| The capture card clocks everything: file player, bed, scheduler, recorders and return advance only on capture blocks, so they stop with the Flow 8                             | M2.8                 |
+| A crash loses the queue, the recording's arming and the tokens; there is no `uncaughtException` handler                                                                        | M2.2, M2.9           |
+| One Node thread does DSP, web and file work; the scheduler's rescan reads folders synchronously (`FileDirs.entries`), which can stall audio on a slow share                    | M2.10                |
+| Unknown config keys are ignored: `listeners.enable: true` just leaves the feature off                                                                                          | M2.12                |
+| Plain HTTP with the tokens in the URL, and no Origin check on the WebSocket                                                                                                    | M2.6                 |
+| `server.ts` is 2 323 lines, about 1 900 of them the page as a template string                                                                                                  | M2.1                 |
+
 ## 4. Requirement → gap
 
 | #   | Requirement                           | Today                                                                         | Gap                                                                      |
@@ -221,7 +254,7 @@ Two things the hardware will decide:
 | R15 | Analog out via MAYA22                 | Works; mixer at −23.5 dB                                                      | Calibrated reference level, test tone                                    |
 | R16 | Processed FLAC + multichannel         | Processed stereo FLAC, 24 bit, cut into 1 h segments                          | One continuous tagged file per session + **multitrack** (dry default)    |
 | R17 | Lossless to a Liquidsoap harbor       | Encoder exists                                                                | Test against the real harbor                                             |
-| R18 | Plug and play                         | Device names by hand                                                          | `doctor` preflight, QR codes                                             |
+| R18 | Plug and play                         | Device names by hand                                                          | `doctor` preflight, QR codes (M1.18), cards found by themselves (M2.11)  |
 
 ## 5. Milestones
 
@@ -352,6 +385,67 @@ whatever is not finished by the freeze stays out.
     _Fallback:_ the rehearsal checklist.
 14. **Safeguards** from the audit: `error` listeners on encoder/recorder stdin.
 
+#### From the audit of 2026-10-02
+
+Found the day before the freeze (section 3, "Audit of 2026-10-02"). 15–17 are
+housekeeping and configuration and go in before the rehearsal; 18–21 are
+should-items, each with a fallback.
+
+15. **Push.** The commits with M1 and eve exist only on the desktop.
+    _Done when:_ a fresh clone from GitHub on the session machine builds and
+    `doctor` runs there.
+16. **eve in the session config.** Add a `listeners` block to
+    `config/studiobox.flow8-session.example.yaml` (off, marked ADAPT) and
+    switch it on in the session's `studiobox.yaml`: the URL of an eve the
+    session machine reaches (open point 12), the `studiodevice` account, the
+    password through `STUDIOBOX_EVE_PASSWORD`. For the rehearsal pin the show
+    (`show: <slug>`) — outside its slot the plan has another show on air —
+    and take the pin out for the broadcast.
+    _Done when:_ in the rehearsal the host tablet shows the episode prepared
+    in eve with its topics and questions, and a heart sent from eve's public
+    page raises the count within a few seconds.
+    _Fallback:_ `listeners` stays off; the host reads eve on a second device.
+17. **Role tokens that survive a restart.** Pin `meters.roles.tokens`
+    (`tech`, `host`, `guest`) in the session's `studiobox.yaml`; the loader
+    takes them already. Generated once and kept is M2.2.
+    _Done when:_ after a restart the tablets come back in their roles without
+    a new link.
+18. **QR codes for the role links** (R18; open since M1.4 and M1.13). A
+    technician-only "Geräte verbinden" in the ⋮ menu: link and QR code per
+    role, the guest link once per mic (`/guest?k=…&mic=<label>`), so a guest
+    scans and sees their own level, the running track and the time left. The
+    same links at start in the terminal. Entry: `Roles.urls` in
+    `src/meters/roles.ts`, a route in `src/meters/server.ts` that only a
+    technician token gets, a QR encoder (none among the dependencies yet).
+    Needs 17, or a printed code goes stale at the next start.
+    _Done when:_ a phone scanning a guest code lands on the guest view with
+    its mic chosen, and a test shows a host, guest or spectator connection is
+    refused the links.
+    _Fallback:_ the pinned links (17) sent by messenger, or turned into QR
+    codes by hand and printed.
+19. **A lost mixer is said on the page.** `captureFault` in `LiveStatus`,
+    like `monitorFault` and `musicReturnFault`, and a "Pult fehlt" state on
+    the technician and host layouts. Entry: the capture's `exit` handler in
+    `src/pipeline.ts`, `setAir` in the page.
+    _Done when:_ pulling the Flow 8 is said on both layouts within 2 s
+    (pipeline test and page test).
+    _Fallback:_ frozen meters and the log.
+20. **`doctor`: eve and the address.** With `listeners.enabled`: reach the
+    URL, sign in, ask for the exports — a refused login fails, missing episode
+    exports warn. The address for the tablets from the interface with the
+    default route (or a `meters.publicUrl` in the YAML) instead of the first
+    non-internal IPv4. Entry: `src/doctor.ts` (the `Env` gets a `fetch`),
+    `src/listeners/eve-session.ts`, `lanAddress` in `src/meters/server.ts`.
+    _Fallback:_ open the page and read the panel's state line; type the
+    address by hand.
+21. **Install notes for the session machine.** In
+    `packages/studiobox/README.md`: system packages (Node 20, Yarn 1, ffmpeg
+    with ffprobe, alsa-utils), clone, `yarn install`, build, copy the session
+    preset, `doctor`, start; `plughw:` throughout. A unit for live mode
+    beside the Pi's (`scripts/`): `Nice=-10`, no `MemoryMax=300M`, user and
+    path not hard-coded.
+    _Fallback:_ started by hand in a terminal, as on the rig.
+
 #### Rehearsal in the Großes Studio
 
 MAYA22 into the extern cinch input; tone calibrated; desk mics closed; Flow 8
@@ -360,22 +454,70 @@ scheduled on Sendezeit and checked against the station clock; Optimod reaction
 to the studiobox level; 60 minutes with a playlist and bed; pull and replug
 both USB devices; "Sendung beenden"; all three tablets on the venue Wi-Fi.
 
+Added by the audit of 2026-10-02: listen to the music return on the Flow 8
+headphones while talking (open point 9) — the duck arrives about 0.3 s after
+the first word; if that irritates, lower `output.return.bufferMs` as far as
+the machine stays clean and set its `latencyMs` to match; check how four
+people get headphones from the Flow 8; pull the Flow 8 while the bed plays
+(today the bed stops with it, see M2.8) and decide what the host does then;
+Sendung and Hörer:innen on the host tablet with the show pinned (M1.16);
+restart studiobox once and see the tablets come back (M1.17); a guest scans
+their code (M1.18).
+
 ### M2 — Stable 1.0 (after the session, target end of 2026-10)
 
 1. **Move the existing page out of `server.ts`** into real files (audit,
    section 5).
-2. **Persistence**: queue, trims and assistant results survive a restart;
+2. **Persistence**: queue, trims and assistant results survive a restart, and
+   so do the role tokens (generated once, kept beside the session state) and
+   the recording's arming (after a crash it resumes in a new file);
    **voice profiles per person**, so regulars start pre-tuned.
 3. **Drift correction**: slow resampling (±0.01 %) to hold the FIFO at exactly
    D over any length of show.
 4. **Wiring tests** for `pipeline.ts`, `playout.ts` and `graph.ts`.
 5. **True-peak limiter** and **music loudness normalisation** (existing TODOs).
 6. **HTTPS on the LAN** (Screen Wake Lock needs it; tokens then not readable on
-   the shared Wi-Fi). Automatic reconnect on all views.
+   the shared Wi-Fi). An Origin check on the WebSocket. Automatic reconnect on
+   all views.
 7. **Multitrack beyond 8 channels** (RF64/WAV or per-channel FLAC).
-8. **Definition of stable**: three real sessions in a row without a restart; a
-   4-hour soak without underrun; all four views pass the design checklist;
-   tests green; a README that describes the product as it is.
+8. **Playout that survives a lost mixer.** The capture card clocks
+   everything: file player, bed, scheduler, recorders and the return advance
+   only on capture blocks (`Pipeline.processBlock`), so when the Flow 8 drops
+   out the emergency bed and the scheduled jingles stop with it and the
+   output plays silence. While the capture is away, clock the blocks from a
+   timer (or the output card's pull) with silent mic inputs.
+   _Done when:_ in `__tests__/pipeline.test.ts` the capture stops while the
+   bed plays and the bed keeps reaching the output; when the capture returns
+   the mics are back without a restart.
+9. **Fail cleanly.** An `uncaughtException` / `unhandledRejection` handler in
+   `src/index.ts`: log, finalise the recordings, exit non-zero for systemd.
+   With item 2 a restart then costs the refill of the buffer (D seconds) and
+   nothing else.
+   _Done when:_ a test that throws inside a block leaves a readable FLAC, and
+   the restarted process has the queue, the tokens and the recording back.
+10. **Blocking work off the audio thread.** The scheduler's rescan walks the
+    folders with `readdirSync` (`FileDirs.entries` under `scheduled()`), and
+    `FileDirs.resolve` and `/preview` stat synchronously — on a stalled SMB
+    share that holds up the DSP. Make them async like the listing; then
+    measure whether the DSP should move to a worker thread.
+    _Done when:_ with a file-system stub that blocks for 2 s no block
+    overruns its budget, and a soak with the share unplugged logs no `slow:`
+    line.
+11. **Sound cards found by themselves** (R18). `device: auto`, or
+    `doctor --suggest` printing the lines for the YAML: the capture card by
+    its channel count, the outputs by name, from `/proc/asound/cards`
+    (`parseCards` and `parseStreamChannels` in `src/doctor.ts` exist).
+    _Done when:_ on a machine studiobox has never run on, with the Flow 8 and
+    one output card plugged in, the session preset starts without a device
+    name being edited.
+12. **Config typos are reported.** Unknown keys warn at load
+    (`listeners.enable: true` today just leaves the feature off). Entry:
+    `src/config/load.ts`.
+    _Done when:_ a config with a misspelt key produces a warning that names
+    it.
+13. **Definition of stable**: three real sessions in a row without a restart;
+    a 4-hour soak without underrun; all four views pass the design checklist;
+    tests green; a README that describes the product as it is.
 
 ### M3 — Later
 
@@ -428,3 +570,13 @@ Still open:
 11. **Roles on the test rig** are off (`meters.roles.enabled: false` in
     `studiobox.local.yaml`) so `http://localhost:4445` keeps working; the
     session preset has them on.
+12. **Which eve does the session machine talk to?** Only eve dev on the
+    desktop (`http://localhost:3000`) is known. The session needs an eve the
+    machine reaches from the venue's Wi-Fi, with the `radio-z` exports and a
+    `studiodevice` account, and its public page reachable for the listeners
+    (M1.16).
+13. **Do guests and spectators see the show from eve?** Today the show, the
+    episode and the comments go to host and technician only; a guest sees
+    their mic, the running track and the time left. The show's name on the
+    guest and spectator views would be harmless; the comments stay with the
+    operators.
