@@ -47,10 +47,17 @@ export function outputLatencyMs(
 /** Blocks `writeThen` hands over back to back before yielding to the event
  *  loop: enough to refill an empty pipe (8 stereo blocks of 1024 frames). */
 const MAX_BURST = 8;
+/** After the process died on its own, a restart counts as up only once it
+ *  has run this long: a device that fails on open is restarted every second
+ *  and would otherwise read as on-and-off on the page. */
+const STABLE_MS = 2000;
 
 export class Monitor extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private burst = 0;
+  private startedAt = 0;
+  /** The last process ended on its own (device missing, unplugged, …). */
+  private failed = false;
 
   constructor(
     private monitor: MonitorConfig,
@@ -63,6 +70,17 @@ export class Monitor extends EventEmitter {
   /** True while the playout process is running. */
   get active(): boolean {
     return this.proc !== null;
+  }
+
+  /** Running for real: like `active`, but after a failure only once the
+   *  restart has held for STABLE_MS. What the page and "on air" go by. */
+  up(now = Date.now()): boolean {
+    return this.proc !== null && (!this.failed || now - this.startedAt >= STABLE_MS);
+  }
+
+  /** Died on its own and not (yet) back up. */
+  failing(now = Date.now()): boolean {
+    return this.failed && !this.up(now);
   }
 
   /** Channels the device is opened with (the programme uses the first two). */
@@ -129,6 +147,7 @@ export class Monitor extends EventEmitter {
     this.log.info('monitor playout:', bin, args.join(' '));
     const proc = spawn(bin, args);
     this.proc = proc;
+    this.startedAt = Date.now();
 
     proc.stderr.on('data', (d: Buffer) => {
       const s = d.toString().trim();
@@ -141,7 +160,10 @@ export class Monitor extends EventEmitter {
     proc.stdin.on('error', (err) => this.log.warn(`monitor ${bin} stdin:`, err.message));
     proc.on('error', (err) => this.log.error('monitor spawn error:', err.message));
     proc.on('close', (code) => {
-      if (this.proc === proc) this.proc = null;
+      if (this.proc === proc) {
+        this.proc = null;
+        this.failed = true;
+      }
       this.emit('exit', code);
     });
   }
@@ -239,6 +261,7 @@ export class Monitor extends EventEmitter {
 
   /** Stop playout, closing the device. */
   stop(): void {
+    this.failed = false;
     if (this.proc) {
       this.proc.stdin.end();
       this.proc.kill('SIGTERM');

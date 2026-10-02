@@ -44,6 +44,11 @@ const RETURN_BACKLOG_SEC = 0.5;
 export interface LiveStatus {
   air: AirStatus;
   musicReturn: boolean | null;
+  /** Switched on but the device keeps failing (missing, unplugged): the
+   *  pipeline retries every second. */
+  musicReturnFault: boolean;
+  /** The same for the local output (`monitor`). */
+  monitorFault: boolean;
   multitrack: boolean | null;
   /** Setup assistant ("Einmessen") state. */
   setup: SetupStatus;
@@ -729,10 +734,14 @@ export class Pipeline {
   snapshot(): MeterSnapshot & LiveStatus {
     const next = this.scheduler?.next() ?? null;
     this.graph.setNextScheduled(next ? { name: next.name, playAtMs: next.playAtMs } : null);
+    const now = Date.now();
+    if (this.monitor) this.graph.setMonitor(this.monitor.up(now));
     return {
       ...this.graph.getMeters(),
       air: this.airStatus(),
-      musicReturn: this.ret ? this.ret.active : null,
+      musicReturn: this.ret ? this.ret.up(now) : null,
+      musicReturnFault: !!this.ret && this.returnArmed && this.ret.failing(now),
+      monitorFault: !!this.monitor && this.monitorArmed && this.monitor.failing(now),
       multitrack: this.multitrack ? this.multitrack.active : null,
       setup: this.setup.status(),
       setupApplied: this.setupApplied,
@@ -807,6 +816,7 @@ export class Pipeline {
       const mon = this.monitor;
       mon.start();
       this.graph.setMonitor(mon.active);
+      // The page's state follows `up()` in snapshot(), not these restarts.
       mon.on('exit', (code) => {
         if (this.stopping || !this.monitorArmed) return;
         log.warn(`monitor exited (code ${code}); restarting in 1s`);
@@ -814,7 +824,6 @@ export class Pipeline {
         setTimeout(() => {
           if (this.stopping || !this.monitorArmed) return;
           mon.start();
-          this.graph.setMonitor(mon.active);
         }, 1000);
       });
       this.pump();

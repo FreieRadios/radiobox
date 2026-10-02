@@ -1524,13 +1524,16 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  holdBtn(sbtn,()=>streaming===true,()=>{if(streaming===null||!tech())return;
   streaming=!streaming;setShip();send({type:'streaming',value:streaming});},setShip,'Stream beenden?');
  const mbtn2=document.getElementById('mon');
- function setMon(){setTog(mbtn2,'mon hold techonly',monitor,'Lokale Ausgabe läuft','Lokale Ausgabe aus','Die Ausgabe auf der Soundkarte',true);}
+ let monFault=false;
+ function setMon(){setTog(mbtn2,'mon hold techonly',monitor,'Lokale Ausgabe läuft',monFault?'Lokale Ausgabe: Gerät fehlt':'Lokale Ausgabe aus','Die Ausgabe auf der Soundkarte',true);
+  if(monFault&&monitor===false)mbtn2.title='Die Soundkarte antwortet nicht — studiobox versucht es jede Sekunde neu';}
  holdBtn(mbtn2,()=>monitor===true,()=>{if(monitor===null||!tech())return;
   monitor=!monitor;setMon();send({type:'monitor',value:monitor});},setMon,'Ausgabe beenden?');
  // Music return to the room (the mixer's USB playback): no programme hangs on
  // it, so it is a plain switch.
- const retBtn=$('ret');let musicReturn=null;
- function setRet(){setTog(retBtn,'mon techonly',musicReturn,'Musik-Rückweg läuft','Musik-Rückweg aus','Der Musik-Rückweg ins Studio');}
+ const retBtn=$('ret');let musicReturn=null,retFault=false;
+ function setRet(){setTog(retBtn,'mon techonly',musicReturn,'Musik-Rückweg läuft',retFault?'Musik-Rückweg: Gerät fehlt':'Musik-Rückweg aus','Der Musik-Rückweg ins Studio');
+  if(retFault&&musicReturn===false)retBtn.title='Das Pult antwortet nicht — studiobox versucht es jede Sekunde neu';}
  retBtn.onclick=()=>{if(musicReturn===null||!tech())return;musicReturn=!musicReturn;setRet();send({type:'musicReturn',value:musicReturn});};
  // Alignment tone: it replaces the programme on the local output, so here it
  // is *starting* that is guarded; a chip in the header says it is on.
@@ -1952,12 +1955,14 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     if(!(s.recording===true&&recEnding())){recording=s.recording;recEndAt=0;setRec();}}
    else if(recEndAt&&!recording){recEndAt=0;setRec();}
    if(s.streaming!==streaming){streaming=s.streaming;setShip();}
-   if(s.monitor!==monitor){monitor=s.monitor;setMon();}
+   const mf=s.monitorFault===true;
+   if(s.monitor!==monitor||mf!==monFault){monitor=s.monitor;monFault=mf;setMon();}
    setAir(s);
    const ek=air?air.state:'';
    if(ek!==endKey){endKey=ek;setEnd();}
    const mr=typeof s.musicReturn==='boolean'?s.musicReturn:null;
-   if(mr!==musicReturn){musicReturn=mr;setRet();}
+   const rf=s.musicReturnFault===true;
+   if(mr!==musicReturn||rf!==retFault){musicReturn=mr;retFault=rf;setRet();}
    // The tone only exists where there is a local output to put it on.
    const tt=typeof s.testTone==='boolean'&&typeof s.monitor==='boolean'?s.testTone:null;
    if(tt!==testTone){testTone=tt;setTone();}

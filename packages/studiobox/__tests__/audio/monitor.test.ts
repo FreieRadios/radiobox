@@ -69,4 +69,28 @@ describe('Monitor', () => {
     await exited;
     expect(mon.active).toBe(false);
   });
+
+  maybe('reads as failing, not on-and-off, while a missing device is retried', async () => {
+    const cfg: MonitorConfig = { ...MONITOR, device: 'studiobox_no_such_pcm' };
+    const mon = new Monitor(cfg, CAPTURE, makeLog());
+    expect(mon.failing()).toBe(false);
+    const exited = new Promise<void>((resolve) => mon.once('exit', () => resolve()));
+    mon.start();
+    await exited;
+    expect(mon.up()).toBe(false);
+    expect(mon.failing()).toBe(true);
+
+    // A restart that comes up again counts only once it has held.
+    cfg.device = 'null';
+    mon.start();
+    expect(mon.active).toBe(true);
+    expect(mon.up()).toBe(false);
+    expect(mon.failing()).toBe(true);
+    expect(mon.up(Date.now() + 2500)).toBe(true);
+    expect(mon.failing(Date.now() + 2500)).toBe(false);
+
+    // Switching it off clears the fault.
+    mon.stop();
+    expect(mon.failing()).toBe(false);
+  });
 });
