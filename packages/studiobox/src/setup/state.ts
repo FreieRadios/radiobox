@@ -15,6 +15,8 @@ export interface SessionState {
   mics: Record<string, StripSettings>;
   automixFloorDb?: number;
   priorityDepthDb?: number;
+  /** Level of the music return in the headphones (dB). */
+  returnGainDb?: number;
   /** 'single' ("einzeln") | 'chain' ("durchlaufen"). */
   queueMode?: 'single' | 'chain';
 }
@@ -66,6 +68,7 @@ export function loadState(
   const out: SessionState = { savedAt, mics };
   if (Number.isFinite(r.automixFloorDb)) out.automixFloorDb = Number(r.automixFloorDb);
   if (Number.isFinite(r.priorityDepthDb)) out.priorityDepthDb = Number(r.priorityDepthDb);
+  if (Number.isFinite(r.returnGainDb)) out.returnGainDb = Number(r.returnGainDb);
   if (r.queueMode === 'single' || r.queueMode === 'chain') out.queueMode = r.queueMode;
   return out;
 }

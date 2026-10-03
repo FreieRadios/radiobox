@@ -160,6 +160,10 @@ output:
     channels: 4
     bufferMs: 300 # the room hears the music this long after "play"
     periodMs: 10
+    # Level of the return in dB (-60..+12). The music arrives leveled like the
+    # programme, often far louder than the direct mics in the headphones;
+    # turn it down here instead of the headphone knob. Programme unaffected.
+    # gainDb: -12
 
 meters:
   enabled: true

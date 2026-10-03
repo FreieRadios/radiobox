@@ -117,27 +117,30 @@ export class Monitor extends EventEmitter {
       args.push('-'); // stdin
       return { bin: 'aplay', args };
     }
-    // PulseAudio/PipeWire via ffmpeg. Input options precede -i; the output is
-    // the named pulse sink (empty string selects the default sink).
-    return {
-      bin: 'ffmpeg',
-      args: [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-f',
-        'f32le',
-        '-ar',
-        rate,
-        '-ac',
-        String(this.channels),
-        '-i',
-        'pipe:0',
-        '-f',
-        'pulse',
-        this.monitor.device || 'studiobox',
-      ],
-    };
+    // PulseAudio/PipeWire via ffmpeg. Input options precede -i. The pulse
+    // muxer takes the sink from -device (none selects the default sink); its
+    // positional argument is only the stream name. Float keeps the full
+    // resolution (the muxer would otherwise send s16).
+    const args = [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'f32le',
+      '-ar',
+      rate,
+      '-ac',
+      String(this.channels),
+      '-i',
+      'pipe:0',
+      '-c:a',
+      'pcm_f32le',
+      '-f',
+      'pulse',
+    ];
+    if (this.monitor.device) args.push('-device', this.monitor.device);
+    args.push('studiobox');
+    return { bin: 'ffmpeg', args };
   }
 
   /** Start (or restart) the playout process. No-op if already active. */

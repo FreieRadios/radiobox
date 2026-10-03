@@ -193,6 +193,8 @@ export class Graph {
   private priorityDb = 0; // attenuation applied to the prioritised mics now
   private ducker: Ducker;
   private returnDucker: Ducker;
+  private returnGainDb: number; // output.return.gainDb, live from the page
+  private returnGain: number;
   private limiter: Limiter;
   private outMeter: StereoLoudness;
   private preMeter: StereoLoudness;
@@ -331,6 +333,8 @@ export class Graph {
     // also let go that much early: the hold gets the head start back.
     this.ducker = new Ducker({ ...cfg.duck, holdMs: cfg.duck.holdMs + look.mixMs }, sr);
     this.returnDucker = new Ducker(cfg.duck, sr);
+    this.returnGainDb = cfg.output?.return?.gainDb ?? 0;
+    this.returnGain = dbToGain(this.returnGainDb);
     this.limiter = new Limiter(
       sr,
       cfg.master.truePeakDb,
@@ -546,8 +550,8 @@ export class Graph {
       // --- music return for the room: ducked like on air, but now ---
       if (aux.retL && aux.retR) {
         const rg = this.returnDucker.process(roomKey, (retTgtL + retTgtR) * 0.5);
-        aux.retL[n] = retTgtL * rg + retOthL;
-        aux.retR[n] = retTgtR * rg + retOthR;
+        aux.retL[n] = (retTgtL * rg + retOthL) * this.returnGain;
+        aux.retR[n] = (retTgtR * rg + retOthR) * this.returnGain;
       }
 
       // --- programme ducking (keyed ahead of the speech by the mix delay) ---
@@ -715,6 +719,18 @@ export class Graph {
   levelerDb(label: string): number | null {
     const mic = this.mics.find((m) => m.label === label);
     return mic ? mic.strip.meters().levelerDb : null;
+  }
+
+  /** Level of the music return (dB, clamped to -60..+12). The room's
+   *  headphones only; the programme is untouched. */
+  setReturnGain(db: number): void {
+    if (!Number.isFinite(db)) return;
+    this.returnGainDb = Math.min(12, Math.max(-60, db));
+    this.returnGain = dbToGain(this.returnGainDb);
+  }
+
+  get returnLevelDb(): number {
+    return this.returnGainDb;
   }
 
   /** Change the host-priority depth live. No-op when priority is not configured. */

@@ -188,6 +188,33 @@ describe('Graph music return (roadmap M1.7)', () => {
     expect(before - under).toBeGreaterThan(13);
   });
 
+  it('takes output.return.gainDb on the return only, not the programme', () => {
+    const base = config([mic(1, 'A')], { lookahead: LOOK, filePlayer: player({ ducked: false }) });
+    const graph = new Graph({
+      ...base,
+      output: { ...base.output, return: { ...base.output.return, gainDb: -12 } },
+    });
+    graph.setMicsMuted(true);
+    const out = run(graph, [silence(1)], tone(-20, 1, 440));
+    expect(rmsDb(out.retL, SR / 2)).toBeCloseTo(-32, 0);
+    expect(rmsDb(out.l, SR / 2)).toBeGreaterThan(-25);
+  });
+
+  it('changes the return level live and clamps it', () => {
+    const graph = new Graph(
+      config([mic(1, 'A')], { lookahead: LOOK, filePlayer: player({ ducked: false }) })
+    );
+    graph.setMicsMuted(true);
+    graph.setReturnGain(-6);
+    expect(graph.returnLevelDb).toBe(-6);
+    const out = run(graph, [silence(1)], tone(-20, 1, 440));
+    expect(rmsDb(out.retL, SR / 2)).toBeCloseTo(-26, 0);
+    graph.setReturnGain(-100);
+    expect(graph.returnLevelDb).toBe(-60);
+    graph.setReturnGain(NaN);
+    expect(graph.returnLevelDb).toBe(-60);
+  });
+
   it('comes back up as soon as the mics are closed', () => {
     const graph = new Graph(config([mic(1, 'A')], { lookahead: LOOK, filePlayer: player(), duck }));
     graph.setMicsMuted(true);

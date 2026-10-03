@@ -2,7 +2,7 @@ import * as http from 'node:http';
 import { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import { MeterSnapshot } from '../../src/dsp/graph';
-import { MeterServer } from '../../src/meters/server';
+import { MAX_BUFFERED_BYTES, MeterServer, toWire } from '../../src/meters/server';
 
 const makeLog = () => ({ info: () => {}, warn: () => {}, error: () => {} });
 
@@ -230,5 +230,45 @@ describe('MeterServer — views and what each role gets', () => {
     expect(spec.got[1].onAir).toBe(true);
 
     for (const c of [tech, guest, spec]) c.ws.close();
+  });
+});
+
+describe('MeterServer — meter frames on a slow link', () => {
+  /** A connection as broadcast() sees it, with a send buffer we control. */
+  const fakeClient = (bufferedAmount: number) => ({
+    readyState: WebSocket.OPEN,
+    bufferedAmount,
+    sent: [] as string[],
+    send(m: string) {
+      this.sent.push(m);
+    },
+  });
+
+  it('skips a frame for a connection that has not taken the last one', () => {
+    const server = new MeterServer(0, makeLog());
+    const wss = (server as unknown as { wss: { clients: Set<unknown> } }).wss;
+    const fast = fakeClient(0);
+    const slow = fakeClient(MAX_BUFFERED_BYTES + 1);
+    wss.clients.add(fast);
+    wss.clients.add(slow);
+    server.broadcast(SNAPSHOT);
+    expect(fast.sent).toHaveLength(1);
+    expect(slow.sent).toHaveLength(0);
+    // Caught up: it gets the newest frame, not the ones it missed.
+    slow.bufferedAmount = 0;
+    server.broadcast({ ...SNAPSHOT, outPeakDb: -6 } as MeterSnapshot);
+    expect(slow.sent.map((m) => JSON.parse(m).outPeakDb)).toEqual([-6]);
+    server.stop();
+  });
+
+  it('cuts fractions to two decimals and keeps whole numbers', () => {
+    expect(
+      JSON.parse(toWire({ a: -18.123456, b: 1759400000123, c: [0.005, -0.004], d: 'x' }))
+    ).toEqual({
+      a: -18.12,
+      b: 1759400000123,
+      c: [0.01, 0],
+      d: 'x',
+    });
   });
 });

@@ -278,6 +278,7 @@ function resolveMonitor(raw: unknown): MonitorConfig {
   if (finite(raw.bufferMs, 0) > 0) out.bufferMs = finite(raw.bufferMs, 0);
   if (finite(raw.periodMs, 0) > 0) out.periodMs = finite(raw.periodMs, 0);
   if (raw.latencyMs !== undefined) out.latencyMs = Math.max(0, finite(raw.latencyMs, 0));
+  if (raw.gainDb !== undefined) out.gainDb = Math.min(12, Math.max(-60, finite(raw.gainDb, 0)));
   return out;
 }
 

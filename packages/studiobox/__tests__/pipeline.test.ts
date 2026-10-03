@@ -372,6 +372,24 @@ describe('Pipeline: setup assistant and live settings (roadmap M1.1)', () => {
   });
 });
 
+describe('Pipeline: music return level', () => {
+  it('starts from the config, changes live and comes back after a restart', () => {
+    const ret = { enabled: true, backend: 'alsa' as const, device: 'null', gainDb: -12 };
+    const { pipeline, p, cfg } = make({ output: { return: ret } as StudioboxConfig['output'] });
+    expect(pipeline.snapshot().returnGainDb).toBe(-12);
+    p.onCommand('returnGain', -20);
+    expect(pipeline.snapshot().returnGainDb).toBe(-20);
+    expect(JSON.parse(fs.readFileSync(cfg.stateFile, 'utf8')).returnGainDb).toBe(-20);
+    expect(new Pipeline(cfg).snapshot().returnGainDb).toBe(-20);
+  });
+
+  it('is null and ignores the command without a return', () => {
+    const { pipeline, p } = make();
+    p.onCommand('returnGain', -20);
+    expect(pipeline.snapshot().returnGainDb).toBeNull();
+  });
+});
+
 describe('Pipeline: live status', () => {
   it('reports queue mode, tone, return, bed and priority state', () => {
     const { pipeline, p } = make();

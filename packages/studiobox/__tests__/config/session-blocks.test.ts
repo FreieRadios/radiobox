@@ -79,6 +79,16 @@ describe('config: buffered-design blocks and their defaults', () => {
     });
   });
 
+  it('reads and bounds the level of the music return', () => {
+    const level = (v: string) =>
+      load([], {
+        output: `output:\n  return: { enabled: true, backend: alsa, device: "hw:F8", gainDb: ${v} }`,
+      }).cfg().output.return.gainDb;
+    expect(level('-12')).toBe(-12);
+    expect(level('-200')).toBe(-60);
+    expect(level('40')).toBe(12);
+  });
+
   it('requires a device for an enabled return', () => {
     const l = load([], { output: 'output:\n  return: { enabled: true, backend: alsa }' });
     expect(l.cfg).toThrow(/output\.return\.device is required/);

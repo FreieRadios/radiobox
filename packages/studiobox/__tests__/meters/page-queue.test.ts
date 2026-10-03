@@ -792,13 +792,65 @@ describe('meters page — states in words, not only colour', () => {
     await p.flush();
     p.push(liveFrame());
     const host = p.byId('rows').children[0];
-    expect(host.querySelector('.s-lvl .val').textContent).toBe('−18,3 dB');
-    expect(host.querySelector('.s-comp .val').textContent).toBe('−3,2 dB');
-    expect(host.querySelector('.s-lev .val').textContent).toBe('+2,5 dB');
+    expect(host.querySelector('.s-lvl .val').textContent).toBe('−18 dB');
+    expect(host.querySelector('.s-comp .val').textContent).toBe('−3 dB');
+    expect(host.querySelector('.s-lev .val').textContent).toBe('+3 dB');
     expect(host.querySelector('.s-lvl .meter').attrs['aria-valuetext']).toBe('−18 dB, ok');
+    // The large short-term loudness keeps its decimal; the rest is whole dB.
     expect(p.byId('st').textContent).toBe('−16,3');
-    expect(p.byId('mom').textContent).toBe('−15,0');
-    expect(p.byId('lgr').textContent).toBe('−1,2');
+    expect(p.byId('mom').textContent).toBe('−15');
+    expect(p.byId('lgr').textContent).toBe('−1');
+  });
+
+  it('changes the numbers once a second, showing the highest level in between', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const hostCh = (outDb: number, compGrDb = 3.2) => ({
+      ...liveFrame().channels[0],
+      outDb,
+      compGrDb,
+    });
+    const val = (s: string) => p.byId('rows').children[0].querySelector(s).textContent;
+    p.push(liveFrame({ channels: [hostCh(-30)], shortTermLufs: -20, outPeakDb: -10 }));
+    expect(val('.s-lvl .val')).toBe('−30 dB');
+    p.tick(300);
+    p.push(liveFrame({ channels: [hostCh(-12, 6)], shortTermLufs: -18, outPeakDb: -2 }));
+    p.tick(300);
+    p.push(liveFrame({ channels: [hostCh(-25)], shortTermLufs: -19, outPeakDb: -9 }));
+    // Within the second nothing moves.
+    expect(val('.s-lvl .val')).toBe('−30 dB');
+    expect(p.byId('st').textContent).toBe('−20,0');
+    p.tick(400);
+    p.push(liveFrame({ channels: [hostCh(-28)], shortTermLufs: -19.4, outPeakDb: -8 }));
+    // The reading is the loudest moment of the second, not the last frame;
+    // loudness is already a window and reads as it is now.
+    expect(val('.s-lvl .val')).toBe('−12 dB');
+    expect(val('.s-comp .val')).toBe('−6 dB');
+    expect(p.byId('pk').textContent).toBe('−2');
+    expect(p.byId('st').textContent).toBe('−19,4');
+    // The next second starts afresh.
+    p.tick(1000);
+    p.push(liveFrame({ channels: [hostCh(-28)], outPeakDb: -8 }));
+    expect(val('.s-lvl .val')).toBe('−28 dB');
+    expect(p.byId('pk').textContent).toBe('−8');
+  });
+
+  it('lets the level bar rise at once and fall back gently', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const cover = () =>
+      parseFloat(p.byId('rows').children[0].querySelector('.s-lvl .cover').style.width);
+    const hostAt = (outDb: number) =>
+      liveFrame({ channels: [{ ...liveFrame().channels[0], outDb }] });
+    p.push(hostAt(-6));
+    expect(cover()).toBeCloseTo(10); // −6 dB of −60…0
+    p.tick(100);
+    p.push(hostAt(-60));
+    // 100 ms at 20 dB/s: −8 dB, not the silence of this frame.
+    expect(cover()).toBeCloseTo((8 / 60) * 100);
+    p.tick(100);
+    p.push(hostAt(-3));
+    expect(cover()).toBeCloseTo(5);
   });
 
   it('shows a dash, not −159 LUFS, while the programme is digital silence', async () => {
@@ -808,6 +860,7 @@ describe('meters page — states in words, not only colour', () => {
     expect(p.byId('st').textContent).toBe('–');
     expect(p.byId('mom').textContent).toBe('–');
     expect(p.byId('pk').textContent).toBe('–');
+    p.tick(1000);
     p.push(liveFrame({ shortTermLufs: -42.5, momentaryLufs: -40, outPeakDb: -30 }));
     expect(p.byId('st').textContent).toBe('−42,5');
   });
@@ -1113,6 +1166,42 @@ describe('meters page — Sendezeit', () => {
     p.byId('folderList').children[0].click(); // reload the listing
     await p.flush();
     expect(p.byId('flist').children[0].has('sched')).toBe(false);
+  });
+});
+
+describe('meters page — music return level', () => {
+  const lvl = (p: ReturnType<typeof boot>) =>
+    p.byId('retLvl') as unknown as { value: string; oninput: () => void; onchange: () => void };
+
+  it('is absent without a music return', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ returnGainDb: null }));
+    expect(p.byId('retLvlBox').style.display).toBe('none');
+    p.push(liveFrame({ returnGainDb: -12 }));
+    expect(p.byId('retLvlBox').style.display).toBe('');
+    expect(lvl(p).value).toBe('-12');
+    expect(p.byId('retLvlVal').textContent).toBe('−12 dB');
+  });
+
+  it('sends the level and does not fight the finger with stale echoes', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ returnGainDb: -12 }));
+    lvl(p).value = '-20';
+    lvl(p).oninput();
+    expect(p.sent).toEqual([{ type: 'returnGain', value: -20 }]);
+    p.push(liveFrame({ returnGainDb: -12 }));
+    expect(lvl(p).value).toBe('-20');
+    p.tick(50);
+    lvl(p).value = '-22';
+    lvl(p).oninput();
+    lvl(p).onchange();
+    expect(p.sent[1]).toEqual({ type: 'returnGain', value: -22 });
+    p.tick(2000);
+    p.push(liveFrame({ returnGainDb: -22 }));
+    expect(lvl(p).value).toBe('-22');
+    expect(p.byId('retLvlVal').textContent).toBe('−22 dB');
   });
 });
 

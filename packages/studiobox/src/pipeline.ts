@@ -47,6 +47,8 @@ export interface LiveStatus {
   /** Switched on but the device keeps failing (missing, unplugged): the
    *  pipeline retries every second. */
   musicReturnFault: boolean;
+  /** Level of the music return (dB); null without a return. */
+  returnGainDb: number | null;
   /** The same for the local output (`monitor`). */
   monitorFault: boolean;
   multitrack: boolean | null;
@@ -313,6 +315,7 @@ export class Pipeline {
     }
     if (s.automixFloorDb !== undefined) this.graph.setAutomixFloor(s.automixFloorDb);
     if (s.priorityDepthDb !== undefined) this.graph.setPriorityDepth(s.priorityDepthDb);
+    if (s.returnGainDb !== undefined) this.graph.setReturnGain(s.returnGainDb);
     if (s.queueMode && this.playQueue) this.playQueue.autoAdvance = s.queueMode === 'chain';
     this.state = s;
     this.setupApplied = n > 0;
@@ -371,6 +374,13 @@ export class Pipeline {
       if (this.returnArmed) this.ret.start();
       else this.ret.stop();
       log.info(`music return ${this.ret.active ? 'started' : 'stopped'}`);
+    } else if (type === 'returnGain' && this.ret) {
+      const db = Number(value);
+      if (Number.isFinite(db)) {
+        this.graph.setReturnGain(db);
+        this.state.returnGainDb = this.graph.returnLevelDb;
+        this.persist();
+      }
     } else if (type === 'endShow') {
       if (value === false) this.cancelEndShow();
       else this.endShow();
@@ -742,6 +752,7 @@ export class Pipeline {
       air: this.airStatus(),
       musicReturn: this.ret ? this.ret.up(now) : null,
       musicReturnFault: !!this.ret && this.returnArmed && this.ret.failing(now),
+      returnGainDb: this.ret ? this.graph.returnLevelDb : null,
       monitorFault: !!this.monitor && this.monitorArmed && this.monitor.failing(now),
       multitrack: this.multitrack ? this.multitrack.active : null,
       setup: this.setup.status(),

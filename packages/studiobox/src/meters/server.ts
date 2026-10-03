@@ -45,6 +45,20 @@ const PUBLIC_DIR =
 
 const isOperator = (role: ViewRole): boolean => role === 'tech' || role === 'host';
 
+/** Unsent bytes a connection may hold before it skips meter frames: about
+ *  one snapshot, so a slow client is never more than a frame behind. */
+export const MAX_BUFFERED_BYTES = 16 * 1024;
+
+/** A snapshot as JSON with its fractions cut to two decimals: the meters are
+ *  dB and seconds, and the DSP's full float precision only made every frame
+ *  several times longer on the air. Whole numbers (clock times) are kept. */
+export const toWire = (v: unknown): string =>
+  JSON.stringify(v, (_k, x) =>
+    typeof x === 'number' && !Number.isInteger(x) && Number.isFinite(x)
+      ? Math.round(x * 100) / 100
+      : x
+  );
+
 /** Content types for the "Vorhören" (browser preview) route. Every one of
  *  these plays natively in current browsers, so preview streams the file's own
  *  bytes — no transcode, no extra ffmpeg, ~zero CPU on a small box, and the
@@ -89,6 +103,7 @@ export function isPreviewable(name: string): boolean {
  *   - { type: 'queueMode', value: 'single' | 'chain' } "einzeln" / "durchlaufen"
  *  Live mode only:
  *   - { type: 'musicReturn', value: boolean } start/stop the music return output
+ *   - { type: 'returnGain', value: dB }       level of the music return
  *   - { type: 'endShow', value?: false }      "Sendung beenden" (false cancels)
  *   - { type: 'testTone', value: boolean }    1 kHz alignment tone on the monitor
  *   - { type: 'priorityDepth', value: dB }    host-priority depth
@@ -454,20 +469,25 @@ export class MeterServer {
   }
 
   /** Push a meter snapshot to every connection, each in the cut its role
-   *  gets (serialized once per cut, and only for cuts somebody listens to). */
+   *  gets (serialized once per cut, and only for cuts somebody listens to).
+   *  A connection that has not taken the last frame yet (a tablet on a slow
+   *  WLAN) skips this one: snapshots are state, not events, so it gets the
+   *  newest when it catches up instead of a queue that falls ever further
+   *  behind — and the queue/listener pushes behind it are not held up. */
   broadcast(snapshot: MeterSnapshot): void {
     const s: Snapshot = snapshot;
     const onAir = onAirOf(s);
     const cuts: { full?: string; guest?: string; spectator?: string } = {};
     for (const client of this.wss.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
+      if (client.bufferedAmount > MAX_BUFFERED_BYTES) continue;
       const role = this.roleOfWs.get(client) ?? 'spectator';
       if (role === 'guest') {
-        client.send((cuts.guest ??= JSON.stringify(guestSnapshot(s, onAir))));
+        client.send((cuts.guest ??= toWire(guestSnapshot(s, onAir))));
       } else if (role === 'spectator') {
-        client.send((cuts.spectator ??= JSON.stringify(spectatorSnapshot(s, onAir))));
+        client.send((cuts.spectator ??= toWire(spectatorSnapshot(s, onAir))));
       } else {
-        client.send((cuts.full ??= JSON.stringify({ ...s, onAir })));
+        client.send((cuts.full ??= toWire({ ...s, onAir })));
       }
     }
   }
@@ -634,7 +654,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  .stage .val{font-size:.8125rem;color:var(--muted);white-space:nowrap;overflow:hidden}
  /* Level meter, −60…0 dB: the zones (ok below −10, attention to −3, too loud
     above) are a fixed gradient; a cover slides back from the right and a tick
-    holds the peak. No transitions — they would lag behind the audio. */
+    holds the peak. No transitions — they would lag behind the audio; the
+    bar rises at once and falls back gently instead (setLevel). */
  .meter{position:relative;height:10px;border-radius:3px;background:var(--bg);overflow:hidden;
   outline:1px solid var(--m-edge);outline-offset:-1px}
  .meter .fill{position:absolute;top:0;bottom:0;left:0;right:0;
@@ -1013,6 +1034,10 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <div id="menu" class="menu" style="display:none">
     <button id="mon" class="mon hold techonly" style="display:none">Lokale Ausgabe aus</button>
     <button id="ret" class="mon techonly" style="display:none">Musik-Rückweg aus</button>
+    <div id="retLvlBox" class="techonly" style="display:none">
+     <label for="retLvl">Musik im Kopfhörer</label>
+     <div class="prio"><input id="retLvl" type="range" min="-40" max="6" step="1" value="0"><output id="retLvlVal" for="retLvl"></output></div>
+    </div>
     <button id="tone" class="hold techonly" style="display:none">Testton aus</button>
     <button id="endShow" class="hold techonly" style="display:none">Sendung beenden</button>
     <button id="schedBtn">⏰ Geplante Sendungen</button>
@@ -1304,7 +1329,9 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      <li class="techonly"><span class="k">⋮ → Lokale Ausgabe</span> gibt das Programm
      auf der angeschlossenen Soundkarte aus, <span class="k">⋮ →
      Musik-Rückweg</span> schickt die Musik (ohne Mikros) zurück ins Studio,
-     damit man sie im Kopfhörer hört.</li>
+     damit man sie im Kopfhörer hört. Der Regler <span class="k">Musik im
+     Kopfhörer</span> darunter stellt ein, wie laut sie dort neben den
+     Mikrofonen ist — die Sendung bleibt davon unberührt.</li>
      <li class="techonly"><span class="k">⋮ → Testton</span> (gedrückt halten)
      legt 1 kHz bei −18 dBFS auf die lokale Ausgabe, um den Eingang am Pult
      einzupegeln. Er <b>ersetzt dort das Programm</b>; oben steht so lange
@@ -1399,11 +1426,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   return t.replace('-','−').replace('.',',');};
  // Gain reduction (compressor, limiter, duck) always reads as a cut, whichever
  // sign the DSP block reports it with.
- const fmtGr=v=>fmt(typeof v==='number'?-Math.abs(v):v);
+ const fmtGr=(v,d)=>fmt(typeof v==='number'?-Math.abs(v):v,d);
  // Digital silence has no loudness and no peak worth a number: below the
  // BS.1770 absolute gate (−70 LUFS) and below −120 dB the readout is a dash.
- const fmtLufs=v=>typeof v==='number'&&v<-70?'–':fmt(v);
- const fmtPeak=v=>typeof v==='number'&&v<-120?'–':fmt(v);
+ const fmtLufs=(v,d)=>typeof v==='number'&&v<-70?'–':fmt(v,d);
+ const fmtPeak=(v,d)=>typeof v==='number'&&v<-120?'–':fmt(v,d);
  const grPct=v=>isFinite(v)?Math.max(0,Math.min(1,Math.abs(v)/20))*100:0;
  const mmss=v=>{if(v===null||v===undefined||!isFinite(v))return '–';const s=Math.max(0,Math.round(v));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1430,8 +1457,14 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  // bar; per frame only the cover (and the peak tick) move.
  const pct=db=>isFinite(db)?Math.max(0,Math.min(100,(db+60)/60*100)):0;
  const HOLD_MS=1500;
+ // Meter ballistics: the bar follows a rise at once and falls back at
+ // FALL_DB_S, so it breathes with the voice instead of flickering between
+ // frames (and does not drop to nothing when a slow link skips a frame).
+ const FALL_DB_S=20;
  function setLevel(m,db,now){
-  m.cover.style.width=(100-pct(db))+'%';
+  const fell=m.bar-FALL_DB_S*Math.max(0,now-m.barAt)/1000;
+  m.bar=isFinite(db)&&!(db<fell)?db:fell;m.barAt=now;
+  m.cover.style.width=(100-pct(m.bar))+'%';
   // Peak-hold tick: the highest level of the last 1.5 s.
   if(!(db<m.pk)||now-m.pkAt>HOLD_MS){m.pk=db;m.pkAt=now;}
   m.peak.style.left=m.pk>-60?'calc('+pct(m.pk)+'% - 2px)':'-4px';
@@ -1441,7 +1474,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   if(v!==m.now){m.now=v;m.el.setAttribute('aria-valuenow',v);
    m.el.setAttribute('aria-valuetext',fmt(v,0)+' dB, '+(v>-3?'zu laut':v>-10?'Achtung':'ok'));}
  }
- const levelMeter=(el,cover,peak)=>({el:el,cover:cover,peak:peak,pk:-Infinity,pkAt:0,now:null});
+ const levelMeter=(el,cover,peak)=>({el:el,cover:cover,peak:peak,pk:-Infinity,pkAt:0,now:null,bar:-Infinity,barAt:0});
+ // The numbers beside the bars change at most once per NUM_MS, in whole dB
+ // (only the large short-term loudness keeps its decimal): the bars carry the
+ // motion, the digits are there to be read. Levels and gain reductions show
+ // the highest value since the last reading, so a peak in between is not lost.
+ const NUM_MS=1000;
+ const hiOf=(acc,k,v)=>{if(typeof v==='number'&&isFinite(v)&&!(acc[k]>=v))acc[k]=v;return acc[k];};
  // One meter cell of a channel row: a bar plus its value in words/numbers.
  const stage=(k,level)=>'<div class="stage s-'+k+(level?'':' td')+'"><div class="meter'+(level?'"'+
   ' role="meter" aria-valuemin="-60" aria-valuemax="0"':' plain"')+'><div class="fill"></div><div class="cover"></div>'+
@@ -1468,22 +1507,25 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    lvl.el.setAttribute('aria-label','Pegel '+c.label);
    const trim=mic?q('.trimbtn'):null;
    if(trim)trim.onclick=()=>openTrim(trimLabel===c.label?null:c.label);
-   return {label:c.label,mic:mic,st:'',state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,
+   return {label:c.label,mic:mic,st:'',hi:{},fresh:true,state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,
     gate:q('.s-gate .cover'),gateVal:q('.s-gate .val'),comp:q('.s-comp .cover'),compVal:q('.s-comp .val'),
     mix:q('.s-mix .cover'),mixVal:q('.s-mix .val'),lev:q('.s-lev .fill'),levVal:q('.s-lev .val'),mbtn:q('.mtbtn')};});
  }
- function updateRows(channels,now){
+ function updateRows(channels,now,nums){
   ensureRows(channels);
   channels.forEach((c,i)=>{const r=rowEls[i];
    setLevel(r.lvl,c.outDb,now);
-   r.lvlVal.textContent=fmt(c.outDb)+' dB';
+   const lvlHi=hiOf(r.hi,'lvl',c.outDb),compHi=hiOf(r.hi,'comp',Math.abs(c.compGrDb));
+   // A row built mid-window gets its numbers at once, not a second later.
+   const n=nums||r.fresh;r.fresh=false;
+   if(n){r.hi={};r.lvlVal.textContent=fmt(lvlHi,0)+' dB';}
    if(r.mic){
     r.gate.style.width=(100-Math.max(0,Math.min(1,c.gateOpen))*100)+'%';
     r.gateVal.textContent=c.gateOpen>=0.5?'offen':'zu';
     r.comp.style.width=(100-grPct(c.compGrDb))+'%';
-    r.compVal.textContent=fmtGr(c.compGrDb)+' dB';
     r.mix.style.width=(100-grPct(c.automixGainDb))+'%';
-    r.mixVal.textContent=fmt(c.automixGainDb)+' dB';
+    if(n){r.compVal.textContent=fmtGr(compHi,0)+' dB';
+     r.mixVal.textContent=fmt(c.automixGainDb,0)+' dB';}
     const t=typeof c.trimDb==='number'?c.trimDb:0;
     if(t!==r.trimDb){r.trimDb=t;r.trim.textContent=sgn(t);
      r.trim.setAttribute('aria-label','Trim '+c.label+': '+sgn(t)+' dB, ändern');
@@ -1493,7 +1535,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    const lv=isFinite(c.levelerDb)?Math.max(-20,Math.min(20,c.levelerDb)):0;
    r.lev.style.left=(lv<0?50+lv*2.5:50)+'%';
    r.lev.style.width=Math.abs(lv)*2.5+'%';
-   r.levVal.textContent=(c.levelerDb>=0.05?'+':'')+fmt(c.levelerDb)+' dB';
+   if(n)r.levVal.textContent=(c.levelerDb>=0.5?'+':'')+fmt(c.levelerDb,0)+' dB';
    // The channel's state as a word, not only a colour. PAUSE = this mic is
    // fine but all mics are closed (music only); LEISER = host priority is
    // holding it back right now. Written only on change so the mute button is
@@ -1531,7 +1573,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  const duckOn=document.getElementById('duckOn');
  // prefers-reduced-motion: the meters tick at 5 fps instead of every frame.
  const calm=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
- let meterAt=0;
+ let meterAt=0,numAt=-Infinity,pgHi={};
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
  // Where the playing file lives ({folder,name}), so the page can jump back to
  // it — the server reports it because only the box knows how playback started.
@@ -1920,6 +1962,18 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   const v=String(Math.round(-p.depthDb));
   if(prio.value!==v)prio.value=v;
   const t=prioText(v);if(prioVal.textContent!==t)prioVal.textContent=t;}
+ // Music return level: what the room hears of the music in the headphones,
+ // next to the direct mics. Same drag rules as the priority slider.
+ const retLvl=$('retLvl'),retLvlVal=$('retLvlVal');let retLvlAt=0,retLvlSentAt=0;
+ const retLvlText=v=>Number(v)>0?'+'+v+' dB':Number(v)<0?'−'+(-Number(v))+' dB':'0 dB';
+ function sendRetLvl(){retLvlSentAt=Date.now();send({type:'returnGain',value:Number(retLvl.value)});}
+ retLvl.oninput=()=>{retLvlAt=Date.now();retLvlVal.textContent=retLvlText(retLvl.value);if(retLvlAt-retLvlSentAt>=150)sendRetLvl();};
+ retLvl.onchange=()=>{retLvlAt=Date.now();sendRetLvl();};
+ function setRetLvl(db){show($('retLvlBox'),typeof db==='number');if(typeof db!=='number')return;
+  if(Date.now()-retLvlAt<1500)return;
+  const v=String(Math.round(db));
+  if(retLvl.value!==v)retLvl.value=v;
+  const t=retLvlText(v);if(retLvlVal.textContent!==t)retLvlVal.textContent=t;}
  // ---- Einmessen (setup assistant) ----------------------------------------
  // The box listens and measures; the page only shows where it is. The buttons
  // are fixed elements switched by phase, and the step tiles are built once per
@@ -2062,6 +2116,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     bed=s.bed||null;setBed();if(moved)loadFiles();}
    setSetup(s);
    setPrio(playoutOnly?null:s.priority||null);
+   setRetLvl(playoutOnly?null:s.returnGainDb);
    // Two files in different folders can share a basename, so the location is
    // part of what makes the now-playing line stale, not just the name.
    const atKey=s.filePlayingAt?s.filePlayingAt.folder+':'+s.filePlayingAt.name:'';
@@ -2073,13 +2128,17 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    updateFileTime(s.filePosition,s.fileDuration);
    if(!playoutOnly&&(!calm||playPosAt-meterAt>=200)){
     meterAt=playPosAt;
-    updateRows(s.channels,playPosAt);
-    document.getElementById('mom').textContent=fmtLufs(s.momentaryLufs);
-    document.getElementById('st').textContent=fmtLufs(s.shortTermLufs);
-    document.getElementById('pk').textContent=fmtPeak(s.outPeakDb);
-    document.getElementById('lgr').textContent=fmtGr(s.limiterGrDb);
-    document.getElementById('duck').textContent=fmtGr(s.duckDepthDb);
-    duckOn.style.display=Math.abs(s.duckDepthDb)>0.5?'':'none';
+    const nums=playPosAt-numAt>=NUM_MS;if(nums)numAt=playPosAt;
+    updateRows(s.channels,playPosAt,nums);
+    const pkHi=hiOf(pgHi,'pk',s.outPeakDb),lgrHi=hiOf(pgHi,'lgr',Math.abs(s.limiterGrDb)),
+     duckHi=hiOf(pgHi,'duck',Math.abs(s.duckDepthDb));
+    if(nums){pgHi={};
+     document.getElementById('mom').textContent=fmtLufs(s.momentaryLufs,0);
+     document.getElementById('st').textContent=fmtLufs(s.shortTermLufs);
+     document.getElementById('pk').textContent=fmtPeak(pkHi,0);
+     document.getElementById('lgr').textContent=fmtGr(lgrHi,0);
+     document.getElementById('duck').textContent=fmtGr(duckHi,0);
+     duckOn.style.display=duckHi>0.5?'':'none';}
     setLevel(pkm,s.outPeakDb,playPosAt);
    }
   };

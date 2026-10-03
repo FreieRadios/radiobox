@@ -231,6 +231,11 @@ export interface MonitorConfig {
    *  in ms: the pipe and the device buffer. Feeds the air-delay measurement;
    *  calibrate it in the rehearsal against a reference clock. */
   latencyMs?: number;
+  /** Fixed level of the music return in dB (`output.return` only; -60..+12,
+   *  default 0). The return arrives at the mixer leveled like the programme
+   *  music, usually far hotter than the direct mics in the headphones; this
+   *  pulls it down without touching the programme. */
+  gainDb?: number;
 }
 
 export interface OutputConfig {

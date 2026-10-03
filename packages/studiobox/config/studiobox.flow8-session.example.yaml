@@ -117,6 +117,9 @@ output:
     channels: 4
     bufferMs: 300
     periodMs: 10
+    # Level of the music in the headphones only (dB, -60..+12); the
+    # programme is unaffected. Lower it until you hear yourself again.
+    # gainDb: -12
 
 meters:
   enabled: true

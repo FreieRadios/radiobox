@@ -335,7 +335,14 @@ normalised by `resolveChannelColor` in `config/load.ts`, carried per channel
 in the snapshot) as an outlined stripe beside the name, a −60…0 dB level meter with fixed green/yellow/red zones and a 1.5 s
 peak-hold tick (`setLevel`, `role="meter"`), gate, comp, automix and leveler
 bars, and the Offen/Stumm button — and a **Programm** panel (short-term LUFS
-large, peak meter with scale, Spitze/Limiter/Duck tiles). Footer: the
+large, peak meter with scale, Spitze/Limiter/Duck tiles). Calm on purpose:
+level bars rise at once and fall back at 20 dB/s (`FALL_DB_S`), and the
+numbers change once a second (`NUM_MS`) in whole dB — levels and gain
+reductions as the highest value of that second, only the large short-term
+LUFS with a decimal. A connection whose send buffer still holds the last
+frame skips meter frames (`MAX_BUFFERED_BYTES` in `broadcast`), so a tablet
+on slow WLAN shows the newest state instead of falling behind; snapshots go
+out with two decimals (`toWire`). Footer: the
 always-present **transport** — progress bar, the playing title (cut in its
 middle, `midName`), the remaining time large, then "Mikros offen/zu" and
 "■ Stopp", which is disabled rather than hidden while nothing plays so the
@@ -383,7 +390,8 @@ hidden where the box does not report it, so a playout box shows none of it):
 - **Bett** button in the footer (`snapshot.bed`, command `bed`; it follows the
   snapshot, no optimistic flip), and in the bed's own folder a 🛏 per file
   (`bedSelect`). **einzeln | laufend** in the queue head (`queueMode`).
-- ⋮ menu (technician): local output, Musik-Rückweg, Testton, Sendung beenden,
+- ⋮ menu (technician): local output, Musik-Rückweg with its level slider
+  ("Musik im Kopfhörer", `returnGain`), Testton, Sendung beenden,
   **Geräte verbinden** — the role links as QR codes (`/connect`, technician
   token only, 403 otherwise; SVGs rendered on the box with `qrcode`): one per
   role plus a guest link per mic (`&mic=<label>`, so the guest view opens with
@@ -511,6 +519,11 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   second, causal ducker, without mics, in room time, to the mixer's USB
   playback. The programme's music is delayed by the return's latency on top of
   the mic latency, so talk and music line up on air as they did in the room.
+  `output.return.gainDb` (-60..+12) sets the return's level on its own: the
+  music arrives leveled like the programme's, usually far hotter than the
+  direct mics in the headphones, and the Flow 8 has no ALSA volume for it.
+  Live: `returnGain` command, `returnGainDb` in the snapshot, kept in the
+  state file (so it beats the YAML for 12 h).
 - **Recording** (`recording` command arms both files): stereo FLAC 24 bit as
   **one continuous file** named by the on-air time of its first sample, with
   Vorbis comments; with `output.multitrack` an N-channel FLAC (mics, stereo
