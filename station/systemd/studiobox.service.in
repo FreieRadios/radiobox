@@ -1,0 +1,31 @@
+[Unit]
+Description=studiobox live (capture, DSP, recording, stream, web views)
+Documentation=file://@APP_DIR@/station/README.md
+After=network-online.target sound.target docker.service icecast2.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+SupplementaryGroups=audio
+WorkingDirectory=@APP_DIR@/packages/studiobox
+EnvironmentFile=/etc/studiobox/station.env
+Environment=PATH=@NODE_DIR@:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+# Picks the output card that is plugged in now and renders the config.
+ExecStartPre=@NODE_BIN@ @APP_DIR@/station/bin/prestart.js @STATE_DIR@/studiobox.template.yaml @STATE_DIR@/studiobox.yaml
+ExecStart=@NODE_BIN@ dist/index.js --config @STATE_DIR@/studiobox.yaml
+Restart=always
+RestartSec=3
+# A stop finalises the recordings (ffmpeg closes the FLACs): give it time.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Nice=-10
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=studiobox
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+[Unit]
+Description=Play the studiobox stream into the desk (receiving box)
+Documentation=file://@APP_DIR@/station/README.md
+After=network-online.target sound.target
+Wants=network-online.target
+# Both want the same sound card.
+Conflicts=studiobox.service
+
+[Service]
+Type=simple
+User=@RUN_USER@
+SupplementaryGroups=audio
+EnvironmentFile=/etc/studiobox/station.env
+# Reconnects by itself while the stream is up; when ffmpeg gives up (the
+# recording machine is off), systemd starts it again 3 s later.
+ExecStart=/usr/bin/ffmpeg -hide_banner -loglevel warning \
+  -reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5 \
+  -i ${RELAY_URL} -vn -ac 2 -ar 48000 -f alsa ${RELAY_DEVICE}
+Restart=always
+RestartSec=3
+Nice=-10
+SyslogIdentifier=stream-relay
+
+[Install]
+WantedBy=multi-user.target
