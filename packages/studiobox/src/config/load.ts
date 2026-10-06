@@ -42,10 +42,15 @@ const DEFAULT_PROCESSING: ChannelProcessing = {
 };
 
 /** Music-channel baseline (merged over DEFAULT before profile/inline overrides).
- *  Music sits a few dB hotter than mics and gets more boost headroom, so a quiet
- *  source still reaches a strong level; ducking still pulls it under speech. */
+ *  Music (measured in stereo) sits 1 LU over the talk, which comes out of the
+ *  mic levelers at their target (-23, one mic) + 3 dB for being on both
+ *  channels = -20; music gets more boost headroom, so a quiet source still
+ *  reaches a strong level; ducking still pulls it under speech. The master
+ *  leveler only follows the talk, so this target *is* the balance between
+ *  music and talk on air (it was ~1 LU in the sessions of 2026-10-04, when the
+ *  master still chased both). */
 const MUSIC_OVERRIDES = {
-  leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 },
+  leveler: { enabled: true, targetLufs: -19, maxGainDb: 24, rangeDb: 12, responseMs: 2000 },
 };
 
 type Dict = Record<string, unknown>;

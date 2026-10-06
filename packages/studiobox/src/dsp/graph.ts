@@ -2,12 +2,13 @@ import { ChannelProcessing, StudioboxConfig } from '../config/schema';
 import { ChannelStrip, StripMeters } from './channel-strip';
 import { Automix } from './automix';
 import { Ducker } from './duck';
-import { Leveler } from './leveler';
 import { Limiter } from './limiter';
+import { MasterLeveler } from './master-leveler';
+import { MusicLeveler } from './music-leveler';
 import { Priority } from './priority';
 import { StereoLoudness } from './loudness';
 import { DelayLine } from './delay-line';
-import { clamp, dbToGain, gainToDb, msToCoef } from './dsp-math';
+import { dbToGain, gainToDb, msToCoef } from './dsp-math';
 import { EnvelopeFollower } from './envelope';
 import { DuckPlanner, FRAME_MS, VoiceDetector } from './voice';
 
@@ -53,6 +54,8 @@ export interface AirStatus {
 export interface MeterSnapshot {
   channels: ChannelMeter[];
   duckDepthDb: number;
+  /** Gain of the talk-keyed master leveler (dB), programme time. */
+  masterGainDb?: number;
   limiterGrDb: number;
   momentaryLufs: number;
   shortTermLufs: number;
@@ -127,7 +130,8 @@ interface MusicNode {
   right: number;
   gain: number;
   ducked: boolean;
-  leveler: Leveler | null; // AGC normalizing music loudness (applied pre-duck)
+  leveler: MusicLeveler | null; // one gain per item, with the look-ahead (pre-duck)
+  itemStart: boolean; // a new file starts with this block
   virtual: boolean; // true for the local file player (fed via setFileBlock)
   meter: EnvelopeFollower; // tracks the channel's post-leveler/gain peak level
   muted: boolean; // per-channel mute
@@ -165,6 +169,8 @@ export interface GraphOptions {
 const DOMINANCE_DB = 10;
 /** … and above this absolute level (linear; -60 dBFS). */
 const ACTIVE_FLOOR = 1e-3;
+/** Loudness of a mono signal sent to both channels, over the signal itself. */
+const MONO_ON_BOTH_DB = 10 * Math.log10(2);
 /** Host-priority key level above which the priority mic counts as acting. */
 const PRIORITY_ACTIVE_DB = -0.5;
 
@@ -209,10 +215,7 @@ export class Graph {
   private muteCoef: number;
   private dominance = dbToGain(-DOMINANCE_DB);
 
-  // master leveler state
-  private masterGainDb = 0;
-  private masterCoef: number;
-  private targetLufs: number;
+  private master: MasterLeveler;
 
   // "music only" mode: mutes the mic bus (set live from the meters page)
   private micsMuted = false;
@@ -368,8 +371,16 @@ export class Graph {
     this.outMeter = new StereoLoudness(sr);
     this.preMeter = new StereoLoudness(sr);
     this.outPeak = new EnvelopeFollower(sr, 1, 200);
-    this.masterCoef = msToCoef(4000, sr);
-    this.targetLufs = cfg.master.targetLufs;
+    // The master learns how loud the talk comes out of the mic levelers and
+    // starts from their target, so the first sentence airs at the right level.
+    // The levelers measure one mic; on air it is on both channels, +3 dB.
+    const targets = cfg.channels
+      .filter((c) => c.role === 'mic' && c.processing.leveler.enabled)
+      .map((c) => c.processing.leveler.targetLufs);
+    const seed = targets.length
+      ? targets.reduce((a, b) => a + b, 0) / targets.length + MONO_ON_BOTH_DB
+      : cfg.master.targetLufs;
+    this.master = new MasterLeveler(cfg.master.targetLufs, seed, sr);
     this.muteCoef = msToCoef(5, sr);
 
     this.snapshot = this.buildSnapshot(null, 0);
@@ -395,7 +406,8 @@ export class Graph {
       right,
       gain: dbToGain(processing.gainDb),
       ducked,
-      leveler: processing.leveler.enabled ? new Leveler(processing.leveler, sr) : null,
+      leveler: processing.leveler.enabled ? new MusicLeveler(processing.leveler, sr, delayN) : null,
+      itemStart: false,
       virtual,
       meter: new EnvelopeFollower(sr, 1, 200),
       muted: false,
@@ -547,18 +559,19 @@ export class Graph {
         }
         let l = rawL * mu.gain;
         let r = rawR * mu.gain;
-        // Auto-level music to a consistent loudness. Drive the AGC from the
-        // mono sum and apply one gain to both sides so the stereo image is
-        // preserved. Runs before ducking, so speech still pulls music down.
+        // Level each item by its stereo loudness, one gain for both sides so
+        // the stereo image stays. The room (return, meter) gets the causal gain
+        // now; the programme gets the look-ahead gain where the music leaves
+        // its delay. Both before ducking, so speech still pulls music down.
+        let rg = 1;
         if (mu.leveler) {
-          mu.leveler.process((l + r) * 0.5);
-          const g = dbToGain(mu.leveler.gainDbValue);
-          l *= g;
-          r *= g;
+          if (mu.itemStart && n === 0) mu.leveler.newItem();
+          mu.leveler.process(l, r);
+          rg = mu.leveler.roomGain;
         }
         // Track this channel's own output level (post-leveler/gain, pre-duck)
         // so the meters page shows a real "out dB" for music/file sources.
-        mu.meter.process(Math.max(Math.abs(l), Math.abs(r)));
+        mu.meter.process(Math.max(Math.abs(l), Math.abs(r)) * rg);
         // Per-channel mute: meter still tracks the source, but it contributes
         // nothing to the mix.
         if (mu.muted) {
@@ -566,15 +579,16 @@ export class Graph {
           r = 0;
         }
         if (mu.ducked) {
-          retTgtL += l;
-          retTgtR += r;
+          retTgtL += l * rg;
+          retTgtR += r * rg;
         } else {
-          retOthL += l;
-          retOthR += r;
+          retOthL += l * rg;
+          retOthR += r * rg;
         }
         // Programme path: the same music, delayed to line up with the mics.
-        const dl = mu.delayL ? mu.delayL.process(l) : l;
-        const dr = mu.delayR ? mu.delayR.process(r) : r;
+        const pg = mu.leveler ? mu.leveler.programmeGain : 1;
+        const dl = (mu.delayL ? mu.delayL.process(l) : l) * pg;
+        const dr = (mu.delayR ? mu.delayR.process(r) : r) * pg;
         mu.progL = dl;
         mu.progR = dr;
         if (mu.ducked) {
@@ -609,18 +623,15 @@ export class Graph {
         }
       }
 
-      // --- master sum + slow leveler ---
-      let mL = micBus + musicL;
-      let mR = micBus + musicR;
-      this.preMeter.process(mL, mR);
-      const stLufs = this.preMeter.shortTermLufs;
-      if (Number.isFinite(stLufs) && stLufs > -50) {
-        const want = clamp(this.targetLufs - stLufs, -12, 12);
-        this.masterGainDb = this.masterCoef * (this.masterGainDb - want) + want;
-      }
-      const mg = dbToGain(this.masterGainDb);
-      mL *= mg;
-      mR *= mg;
+      // --- master sum + talk-keyed master leveler ---
+      // The music gets the master's starting gain, the talk that plus what
+      // the master learned about the talk (see MasterLeveler).
+      this.preMeter.process(micBus + musicL, micBus + musicR);
+      if (frameDone) this.master.frame(this.planner.talking, this.preMeter.momentaryLufs);
+      const tg = this.master.next();
+      const bg = this.master.baseGain;
+      const mL = micBus * tg + musicL * bg;
+      const mR = micBus * tg + musicR * bg;
 
       // --- brick-wall limiter + output metering ---
       this.limiter.process(stereoOut, mL, mR);
@@ -634,6 +645,7 @@ export class Graph {
       this.outPeak.process(Math.max(Math.abs(stereoOut[0]), Math.abs(stereoOut[1])));
     }
 
+    for (const mu of this.music) mu.itemStart = false;
     this.snapshot = this.buildSnapshot(lastAutomixGains, lastDuck);
   }
 
@@ -676,6 +688,7 @@ export class Graph {
     return {
       channels,
       duckDepthDb: duckDepth,
+      masterGainDb: this.master ? this.master.gainDbValue : 0,
       limiterGrDb: this.limiter.gainReductionDb,
       momentaryLufs: this.outMeter.momentaryLufs,
       shortTermLufs: this.outMeter.shortTermLufs,
@@ -818,6 +831,11 @@ export class Graph {
   ): void {
     this.fileL.set(l);
     this.fileR.set(r);
+    // A different file (or the first after a pause) is a new item for the
+    // music leveler.
+    if (playing !== null && playing !== this.filePlaying) {
+      for (const mu of this.music) if (mu.virtual) mu.itemStart = true;
+    }
     this.filePlaying = playing;
     this.filePlayingAt = playing ? at : null;
     this.filePosition = playing ? position : null;

@@ -1,5 +1,4 @@
 import { SpeechLeveler } from '../../src/dsp/speech-leveler';
-import { Leveler } from '../../src/dsp/leveler';
 import { LevelerParams } from '../../src/config/schema';
 import { SR, concat, rmsDb, tone } from '../../test-support/config';
 
@@ -22,15 +21,11 @@ describe('SpeechLeveler (voice-keyed, look-ahead)', () => {
     expect(new SpeechLeveler(params({ enabled: false }), SR).process(0.3)).toBe(0.3);
   });
 
-  it('settles on the same gain as the windowed leveler for a steady signal', () => {
+  it('settles on target minus loudness for a steady signal', () => {
     const a = new SpeechLeveler(params({ responseMs: 50 }), SR);
-    const b = new Leveler(params({ responseMs: 50 }), SR);
-    for (const x of tone(-35, 8)) {
-      a.process(x);
-      b.process(x);
-    }
-    expect(a.gainDbValue).toBeCloseTo(b.gainDbValue, 1);
-    expect(a.gainDbValue).toBeGreaterThan(8);
+    for (const x of tone(-35, 8)) a.process(x);
+    // A 1 kHz tone reads the same in LUFS as in dBFS RMS: +12 dB to -23.
+    expect(a.gainDbValue).toBeCloseTo(12, 0);
   });
 
   it('has the gain in place when the first word leaves the look-ahead', () => {

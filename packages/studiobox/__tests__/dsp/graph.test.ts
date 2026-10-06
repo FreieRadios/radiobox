@@ -255,6 +255,21 @@ describe('Graph ducking with look-ahead', () => {
     expect(early - atOnset).toBeGreaterThan(10);
   });
 
+  it('keeps the master gain where the talk set it while music plays', () => {
+    const lev = { enabled: true, targetLufs: -23, maxGainDb: 24, rangeDb: 24, responseMs: 1500 };
+    const cfg = config([mic(1, 'A', bypass({ leveler: lev }))], {
+      lookahead: { seconds: 1, gateMs: 10, mixMs: 100 },
+      filePlayer: player({ ducked: false }),
+    });
+    const graph = new Graph(cfg);
+    // Seeded from the mic levelers' target, +3 dB for mono on both channels.
+    expect(graph.getMeters().masterGainDb).toBeCloseTo(-16 - (-23 + 3.01), 1);
+    // 3 s of talk, then 5 s of loud music alone.
+    const talk = concat(voice({ rmsDb: -30, seconds: 3 }), silence(5));
+    run(graph, [talk], concat(silence(3), tone(-10, 5, 440)));
+    expect(Math.abs(graph.getMeters().masterGainDb! - 3.99)).toBeLessThan(1.5);
+  });
+
   it('lets a bump or a click during a jingle pass, but ducks real talk', () => {
     // The processed taps show the music as it enters the mix (after the
     // duck, before the master leveler).

@@ -188,6 +188,7 @@ export class DuckPlanner {
   private readonly leadF: number;
   private readonly holdF: number;
   private on = false;
+  private talk = false;
 
   constructor(
     p: DuckPlan,
@@ -244,9 +245,16 @@ export class DuckPlanner {
       }
     }
     this.on = on;
+    this.talk = g >= 0 && g > f - len && this.flags[g % len] === 1;
   }
 
   get ducking(): boolean {
     return this.on;
+  }
+
+  /** The programme frame leaving the look-ahead now is confirmed talk
+   *  (without the lead and hold of `ducking`). */
+  get talking(): boolean {
+    return this.talk;
   }
 }

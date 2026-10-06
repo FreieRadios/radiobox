@@ -98,7 +98,7 @@ duck:
   releaseMs: 600
 
 master:
-  targetLufs: -16 # integrated loudness target for the stream
+  targetLufs: -16 # loudness of the talk on air; music sits 1 LU over it
   truePeakDb: -1.0 # limiter ceiling
   limiterLookaheadMs: 5
   limiterReleaseMs: 100
@@ -264,7 +264,7 @@ filePlayer:
 
   # Optional music-style processing overrides (defaults match music channels):
   # processing:
-  #   leveler: { enabled: true, targetLufs: -18, maxGainDb: 24, rangeDb: 12, responseMs: 2000 }
+  #   leveler: { enabled: true, targetLufs: -19, maxGainDb: 24, rangeDb: 12, responseMs: 2000 }
   #   gainDb: 0
 # Where live settings are kept between restarts: what the setup assistant
 # ("Einmessen") measured and what was trimmed by hand. Never written into this

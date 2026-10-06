@@ -121,9 +121,10 @@ Live meters: `http://localhost:4445`.
 `graph.ts` wires the chain; per-block files: `biquad`, `channel-strip` (two
 halves: `pre()` up to the compressor, `level()` = keyed leveler + gain),
 `gate`, `deesser`, `compressor`, `speech-leveler` (mics: voice-keyed, with
-look-ahead), `leveler` (music: windowed AGC), `automix` (Dugan gain-share by
-power), `priority` (host priority), `voice` (per-mic voice detector and the
-duck planner), `duck` (glide and arming of the duck), `limiter`, `loudness`
+look-ahead), `music-leveler` (one gain per item, with look-ahead),
+`master-leveler` (talk-keyed), `automix` (Dugan gain-share by power),
+`priority` (host priority), `voice` (per-mic voice detector and the duck
+planner), `duck` (glide and arming of the duck), `limiter`, `loudness`
 (BS.1770), `envelope`, `delay-line`, `dsp-math`. Audio I/O in `src/audio/`
 (`capture`, `encoder`, `recorder`, `monitor`, `format`, `file-player`, `bed`,
 `play-queue`, `air-fifo`, `sample-clock`); the setup assistant in `src/setup/`
@@ -517,7 +518,19 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   3 × `attackMs` before the first word reaches the programme and stays down
   `holdMs` after the last. A bump, a click, a breath or a whisper during a
   jingle doesn't duck. The music return keeps the causal ducker on
-  `duck.thresholdDb`. Tuned on the multitrack recordings of 2026-10-04 by
+  `duck.thresholdDb`.
+  **Loudness of the programme**: the music leveler (`MusicLeveler`) gives each
+  item (a file; on a live input whatever follows 1.5 s of silence) one gain,
+  from its stereo BS.1770 loudness (relative gate -10 LU) from the item's start
+  to as far as the look-ahead reaches — a jingle airs at its gain from the
+  first sample, a song is not ridden; the music return gets the same causally.
+  Music targets -19 LUFS (default), 1 LU over the talk, which comes out of
+  the mic levelers at -23 + 3 dB (mono on both channels). The master
+  (`MasterLeveler`) starts at `master.targetLufs` minus that (+4 dB), applies
+  it to everything, and learns only from confirmed talk (the planner's
+  `talking`, 10 s memory, gated against pauses) a correction it applies to
+  the mic bus alone — so talk airs at the target and the music keeps its
+  relation to it. Tuned on the multitrack recordings of 2026-10-04 by
   replaying the dry channels through the graph (the replay matches the
   recorded programme within ~1 dB).
 - **Host priority** (`automix.priority`): listed mics go down by `depthDb`
@@ -612,11 +625,14 @@ The milestone plan toward a stable version (session-ready M1, stable M2) is in
       test feeding signals with known inter-sample overshoot confirms the
       true-peak output never exceeds the ceiling; existing limiter tests stay
       green.
-- [ ] **Fuller music loudness normalization.** Build on the existing music
-      auto-leveling toward proper BS.1770-targeted normalization of music pairs
-      (entry: `src/dsp/leveler.ts`, `src/dsp/loudness.ts`). _Done when:_ music
-      sources converge to the configured target LUFS with tests covering the
-      gain trajectory.
+- [ ] **Pre-scanned file loudness.** The music leveler measures an item as
+      it plays (plus the look-ahead), so a song with a quiet intro gets more
+      gain until its loud part comes into view. Scanning a file's integrated
+      loudness when it is cued/played (ffmpeg ebur128, cached by path + mtime;
+      the look-ahead gives ~6 s for it) and handing it to `MusicLeveler` would
+      make it a true ReplayGain. Entry: `src/audio/file-player.ts`,
+      `src/dsp/music-leveler.ts`. _Done when:_ a file's first aired sample has
+      its whole-file gain, with the progressive estimate as the fallback.
 - [ ] **Per-mic spectral noise suppression.** New DSP block in `src/dsp/`, wired
       into the per-mic strip in `src/dsp/channel-strip.ts` / `src/dsp/graph.ts`,
       config-gated per channel via `config/profiles.yaml`. _Done when:_ a

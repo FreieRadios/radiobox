@@ -186,6 +186,9 @@ export interface DuckConfig {
 }
 
 export interface MasterConfig {
+  /** Loudness of the talk on air (LUFS). The master leveler learns it from
+   *  confirmed talk only; music airs at its own leveler's target relative to
+   *  it (default 1 LU over), see MasterLeveler. */
   targetLufs: number;
   truePeakDb: number;
   limiterLookaheadMs: number;
