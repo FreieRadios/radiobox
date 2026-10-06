@@ -11,6 +11,7 @@ import { DelayLine } from './delay-line';
 import { dbToGain, gainToDb, msToCoef } from './dsp-math';
 import { EnvelopeFollower } from './envelope';
 import { DuckPlanner, FRAME_MS, VoiceDetector } from './voice';
+import type { StreamStatus } from '../audio/stream-player';
 
 export interface ChannelMeter extends StripMeters {
   label: string;
@@ -103,6 +104,8 @@ export interface MeterSnapshot {
   /** Whether the multitrack file is written along with the stereo recording;
    *  null when multitrack is not configured. */
   multitrack?: boolean | null;
+  /** The network stream the file player plays, or null (roadmap M1c.2). */
+  stream?: StreamStatus | null;
 }
 
 interface MicNode {

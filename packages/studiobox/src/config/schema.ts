@@ -358,6 +358,21 @@ export interface BedConfig {
  *  configured `dirs` are decoded to 48 kHz stereo and routed into the music
  *  path so they share the music AGC loudness normalization and sidechain
  *  ducking. */
+/** A network stream the file player can play like a file (roadmap M1c.2):
+ *  another studiobox's `/stream`, or an Icecast mount. */
+export interface StreamSourceConfig {
+  /** Row name in the "Streams" folder. */
+  label: string;
+  /** http(s) URL; for a studiobox `/stream?format=flac&k=<stream token>`. */
+  url: string;
+  /** Jitter buffer, ms (default 2000): played this far behind the sender. */
+  bufferMs: number;
+  /** While the stream is gone: the bed plays (`bed`, default) or nothing. */
+  fallback: 'bed' | 'silence';
+  /** Start playing at boot, so a box at the desk needs no tablet. */
+  autoStart: boolean;
+}
+
 export interface FilePlayerConfig {
   enabled: boolean;
   /** Browsable root directories; only audio files directly inside are exposed. */
@@ -377,6 +392,8 @@ export interface FilePlayerConfig {
   autoPlay: AutoPlayConfig;
   /** Audio bed: a second, looping deck next to the player (see BedConfig). */
   bed: BedConfig;
+  /** Network streams, listed as a folder "Streams" (see StreamSourceConfig). */
+  streams: StreamSourceConfig[];
   /** Music-style processing (leveler/gain) applied to the decoded audio. */
   processing: ChannelProcessing;
 }

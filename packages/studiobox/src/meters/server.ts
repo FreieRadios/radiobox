@@ -944,6 +944,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  .nowplaying .nh{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:pre}
  .nowplaying .nt{flex:0 0 auto;white-space:pre}
  #next{font-size:.875rem;color:var(--warn);overflow-wrap:anywhere}
+ .sstate{font-size:.875rem;color:var(--muted)}
+ .sstate.bad{color:var(--warn);font-weight:600}
  #next .dim{color:var(--muted)}
  /* The remaining time is what the operator acts on: the biggest type here. */
  .nowtime{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end}
@@ -1282,6 +1284,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  <div class="ctl">
   <section class="now idle" id="nowbox" aria-label="Jetzt läuft">
    <div class="nowplaying" id="nowplaying">Keine Datei läuft</div>
+   <div class="sstate" id="streamState" role="status" style="display:none"></div>
    <div id="next" style="display:none"></div>
   </section>
   <div class="nowtime"><div><span class="lbl" id="remlbl"></span><span class="rem" id="rem">–:––</span></div><span class="elapsed" id="ftime"></span></div>
@@ -1331,6 +1334,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     <li>Unten stehen der laufende Titel und groß die Restzeit
     (<span class="k">noch 2:34</span>); in der Liste ist er umrahmt und mit
     „läuft“ markiert.</li>
+    <li>Der Ordner <span class="k">📡 Streams</span> (wenn eingerichtet) hält
+    Streams, z. B. das Programm aus einem anderen Studio. Sie starten mit einem
+    Klick wie eine Datei und laufen, bis sie gestoppt werden. Unter dem Titel
+    steht ihr Zustand: <span class="k">verbunden</span>,
+    <span class="k">verbindet neu …</span> oder
+    <span class="k">weg seit 12 s</span>. Solange ein Stream weg ist, läuft das
+    Bett; kommt er zurück, blendet er sich wieder ein.</li>
    </ul>
 
    <h4>Warteschlange</h4>
@@ -1914,6 +1924,23 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  // the *server's* clock, which is what actually triggers auto-play.
  let clockSkew=0;
  const srvNow=()=>Date.now()+clockSkew;
+ // A network stream playing like a file (a box at the desk playing another
+ // room's studiobox): its state in words under the title. "weg" is said
+ // with how long and, when the sender told us, why.
+ const sstate=$('streamState');
+ const dec1=x=>(Math.round(x*10)/10).toFixed(1).replace('.',',');
+ function streamWords(st,now){
+  const gone=st.goneSinceMs?Math.max(0,Math.round((now-st.goneSinceMs)/1000)):0;
+  const why=st.reason==='off'?' — dort ist der Stream aus':st.reason==='refused'?' — Zugang abgelehnt (Token?)'
+   :st.reason==='missing'?' — Adresse nicht gefunden':'';
+  if(st.state==='connecting')return 'Stream verbindet …'+why;
+  if(st.state==='playing')return st.connected?'Stream verbunden · Puffer '+dec1(st.bufferMs/1000)+' s'
+   :'Stream verbindet neu … · Puffer noch '+dec1(st.bufferMs/1000)+' s'+why;
+  if(st.state==='refilling')return 'Stream verbindet neu … (weg seit '+gone+' s)';
+  return 'Stream weg seit '+gone+' s'+why;}
+ function setStream(st){show(sstate,!!st);if(!st)return;
+  const t=streamWords(st,srvNow());if(sstate.textContent!==t)sstate.textContent=t;
+  sstate.classList.toggle('bad',st.state==='gone'||st.state==='refilling'||(st.state==='playing'&&!st.connected));}
  // With an air delay the programme runs a few seconds behind the room. What
  // is said now airs at "Sendezeit" = server clock + measured delay, and that
  // is the clock filename timestamps mean: a file stamped 13:00:00 airs at
@@ -2293,6 +2320,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    if(s.filePlaying!==playing||atKey!==playingAtKey){
     playing=s.filePlaying;playingAt=s.filePlayingAt||null;playingAtKey=atKey;markPlaying();}
    setNext(s.nextScheduled||null);
+   setStream(s.stream||null);
    playPos=typeof s.filePosition==='number'&&isFinite(s.filePosition)?s.filePosition:null;
    playPosAt=Date.now();
    updateFileTime(s.filePosition,s.fileDuration);

@@ -266,12 +266,28 @@ filePlayer:
   # switched off — the host's fallback when a track fails or a pause needs
   # filling. `dir` is the LABEL of one of the dirs above; its first audio file
   # is the bed until another is chosen. It is leveled and ducked with the
-  # player.
+  # player (in playout mode it goes to the output as it is).
   # bed:
   #   dir: Bed
   #   gainDb: -6
   #   fadeInMs: 1500
   #   fadeOutMs: 2500
+
+  # Network streams, listed as a folder "📡 Streams": a row plays like a file
+  # and runs until stopped. Typical use: a box wired to the desk (e.g. the Pi
+  # in playout mode) playing the programme another room's studiobox serves
+  # (output.serve there). A jitter buffer of `bufferMs` (default 2000) rides
+  # out the network and the two sound cards' clocks (slow resampling, never a
+  # skip). When the stream drops out the output fades and the bed plays
+  # (`fallback: bed`, needs `bed` above; or `silence`); it reconnects by
+  # itself and fades back in. Only http(s) URLs. `autoStart: true` (one
+  # stream at most) starts it at boot, so the box needs no tablet.
+  # streams:
+  #   - label: Studio
+  #     url: 'http://maik.local:4445/stream?format=flac&k=<stream token>'
+  #     # bufferMs: 2000
+  #     # fallback: bed
+  #     # autoStart: true
 
   # Optional music-style processing overrides (defaults match music channels):
   # processing:

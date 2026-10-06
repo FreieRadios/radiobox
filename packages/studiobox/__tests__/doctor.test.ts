@@ -124,6 +124,7 @@ function rig(over: Partial<StudioboxConfig> = {}): StudioboxConfig {
       prebufferMs: 250,
       autoPlay: { enabled: true, scanSeconds: 10, graceSeconds: 30 },
       bed: { enabled: true, dir: 'Bett', gainDb: -6, fadeInMs: 1500, fadeOutMs: 2500 },
+      streams: [],
       processing: bypass(),
     },
     ...over,

@@ -166,6 +166,44 @@ describe('config: buffered-design blocks and their defaults', () => {
     expect(load(fp('{ dir: Nirgends }')).cfg).toThrow(/filePlayer\.bed\.dir/);
   });
 
+  it('streams: http(s) only, unique labels, one autoStart, defaults filled in', () => {
+    const fp = (...streams: string[]) => [
+      'filePlayer:',
+      '  enabled: true',
+      '  streams:',
+      ...streams.map((s) => `    - ${s}`),
+    ];
+    expect(load(['filePlayer:', '  enabled: true']).cfg().filePlayer!.streams).toEqual([]);
+    expect(
+      load(fp('{ label: Studio, url: "http://maik:4445/stream?format=flac&k=S" }')).cfg()
+        .filePlayer!.streams
+    ).toEqual([
+      {
+        label: 'Studio',
+        url: 'http://maik:4445/stream?format=flac&k=S',
+        bufferMs: 2000,
+        fallback: 'bed',
+        autoStart: false,
+      },
+    ]);
+    const s = load(
+      fp('{ label: A, url: "https://x/a", bufferMs: 100, fallback: silence, autoStart: true }')
+    ).cfg().filePlayer!.streams[0];
+    expect(s).toMatchObject({ bufferMs: 500, fallback: 'silence', autoStart: true });
+    expect(load(fp('{ label: A, url: "file:///etc/passwd" }')).cfg).toThrow(/http\(s\) url/);
+    expect(
+      load(fp('{ label: A, url: "http://x/a" }', '{ label: A, url: "http://x/b" }')).cfg
+    ).toThrow(/used twice/);
+    expect(
+      load(
+        fp(
+          '{ label: A, url: "http://x/a", autoStart: true }',
+          '{ label: B, url: "http://x/b", autoStart: true }'
+        )
+      ).cfg
+    ).toThrow(/only one stream/);
+  });
+
   it('keeps the live state next to the config file unless told otherwise', () => {
     const a = load();
     expect(a.cfg().stateFile).toBe(path.join(a.dir, 'session-state.json'));

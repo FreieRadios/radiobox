@@ -12,6 +12,8 @@ import { QueuePlayer } from './audio/play-queue';
 import { BedDeck, BedStatus } from './audio/bed';
 import { ListenEncoder, ListenHub } from './audio/listen';
 import { ProgrammeStream, STREAM_TYPES, StreamStatus } from './audio/serve';
+import { setupStreams } from './audio/stream-fallback';
+import { StreamPlayerOptions } from './audio/stream-player';
 import { AirFifo } from './audio/air-fifo';
 import { SampleClock } from './audio/sample-clock';
 import { BYTES_PER_SAMPLE, interleave, interleaveStereo } from './audio/format';
@@ -96,6 +98,8 @@ export class Pipeline {
   private dry: Float32Array[] = [];
   /** The programme as a stream from the box (`output.serve`). */
   private serve: ProgrammeStream | null = null;
+  /** Starts the stream marked `autoStart` (filePlayer.streams). */
+  private autoStartStream: (() => void) | null = null;
   private filePlayer: FilePlayer | null;
   private fileDirs: FileDirs | null;
   private playQueue: QueuePlayer | null;
@@ -154,7 +158,10 @@ export class Pipeline {
 
   constructor(
     private cfg: StudioboxConfig,
-    opts: { listenSpawn?: (args: string[]) => ListenEncoder } = {}
+    opts: {
+      listenSpawn?: (args: string[]) => ListenEncoder;
+      stream?: StreamPlayerOptions;
+    } = {}
   ) {
     const sr = (this.sr = cfg.capture.sampleRate);
     const frames = cfg.capture.blockSize;
@@ -187,10 +194,22 @@ export class Pipeline {
     this.filePlayer = cfg.filePlayer?.enabled
       ? new FilePlayer(sr, makeLog('fileplayer'), cfg.filePlayer.prebufferMs)
       : null;
-    this.fileDirs = cfg.filePlayer?.enabled ? new FileDirs(cfg.filePlayer.dirs, log) : null;
+    this.fileDirs = cfg.filePlayer?.enabled
+      ? new FileDirs(cfg.filePlayer.dirs, log, cfg.filePlayer.streams)
+      : null;
     if (cfg.filePlayer?.enabled && cfg.filePlayer.bed.enabled && this.fileDirs) {
       this.bedPlayer = new FilePlayer(sr, makeLog('bed'), cfg.filePlayer.prebufferMs);
       this.bed = new BedDeck(this.bedPlayer, this.fileDirs, cfg.filePlayer.bed, makeLog('bed'));
+    }
+    if (this.filePlayer && this.fileDirs && cfg.filePlayer?.streams.length) {
+      this.autoStartStream = setupStreams({
+        player: this.filePlayer,
+        dirs: this.fileDirs,
+        streams: cfg.filePlayer.streams,
+        bed: this.bed,
+        log: makeLog('stream'),
+        opts: opts.stream,
+      }).autoStart;
     }
     this.meters = cfg.meters.enabled
       ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
@@ -692,7 +711,10 @@ export class Pipeline {
       this.bed?.mixInto(this.fileL, this.fileR, frames);
       // Report only the basename: the snapshot field is the file *name* (the
       // meters page shows it and matches it against the file-list rows).
-      const playingName = this.filePlayer.playing ? path.basename(this.filePlayer.playing) : null;
+      const playing = this.filePlayer.playing;
+      const playingName = playing
+        ? (this.fileDirs?.displayName(playing) ?? path.basename(playing))
+        : null;
       this.graph.setFileBlock(
         this.fileL,
         this.fileR,
@@ -820,6 +842,7 @@ export class Pipeline {
       returnGainDb: this.ret ? this.graph.returnLevelDb : null,
       musicGainDb: this.graph.musicLevelDb,
       serve: this.serve ? this.serve.status() : null,
+      stream: this.filePlayer?.streamStatus ?? null,
       monitorFault: !!this.monitor && this.monitorArmed && this.monitor.failing(now),
       multitrack: this.multitrack ? this.multitrack.active : null,
       setup: this.setup.status(),
@@ -933,6 +956,7 @@ export class Pipeline {
     this.capture.start();
 
     this.scheduler?.start();
+    this.autoStartStream?.();
     this.startHealthProbe();
     this.listeners?.start();
 

@@ -1232,6 +1232,48 @@ describe('meters page — music level on air', () => {
   });
 });
 
+describe('meters page — a stream playing like a file', () => {
+  it('says its state in words under the title', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const st = (over: Record<string, unknown>) => ({
+      label: 'Studio',
+      state: 'playing',
+      connected: true,
+      goneSinceMs: null,
+      reason: null,
+      bufferMs: 2040,
+      ppm: 12,
+      ...over,
+    });
+    const say = () => p.byId('streamState').textContent;
+    p.push(liveFrame({ filePlaying: 'Studio', stream: st({}) }));
+    expect(p.byId('streamState').style.display).toBe('');
+    expect(say()).toBe('Stream verbunden · Puffer 2,0 s');
+    expect(p.byId('streamState').has('bad')).toBe(false);
+    p.push(liveFrame({ stream: st({ connected: false, bufferMs: 800 }) }));
+    expect(say()).toBe('Stream verbindet neu … · Puffer noch 0,8 s');
+    p.push(
+      liveFrame({
+        stream: st({
+          state: 'gone',
+          connected: false,
+          goneSinceMs: Date.now() - 12_000,
+          reason: 'off',
+        }),
+      })
+    );
+    expect(say()).toBe('Stream weg seit 12 s — dort ist der Stream aus');
+    expect(p.byId('streamState').has('bad')).toBe(true);
+    p.push(liveFrame({ stream: st({ state: 'refilling', goneSinceMs: Date.now() - 30_000 }) }));
+    expect(say()).toBe('Stream verbindet neu … (weg seit 30 s)');
+    p.push(liveFrame({ stream: st({ state: 'connecting', connected: false, reason: 'refused' }) }));
+    expect(say()).toBe('Stream verbindet … — Zugang abgelehnt (Token?)');
+    p.push(liveFrame({ stream: null }));
+    expect(p.byId('streamState').style.display).toBe('none');
+  });
+});
+
 describe('meters page — Studio-Stream', () => {
   it('says how many pull it, starts with a tap and ends with the hold', async () => {
     const p = boot(LISTINGS);

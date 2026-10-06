@@ -614,6 +614,27 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   moment. `room()`/`air()` return at once while nobody listens. Panel
   `setAbh` (techonly, live mode), source remembered per browser, the delay
   behind the room = look-ahead (or air delay) + the browser's buffer.
+- **Streams that play like files** (`filePlayer.streams`, both modes,
+  roadmap M1c.2): listed as one more folder "📡 Streams" (`FileDirs`;
+  `resolve()` gives a `stream:<n>` token, never the URL, which may carry a
+  token; `displayName()` gives the label for the snapshot).
+  `FilePlayer.play(token)` runs a `StreamPlayer` (`src/audio/stream-player.ts`):
+  ffmpeg decodes the URL, a jitter buffer of `bufferMs` (default 2000) fills
+  before playback, and a `FillServo` (EMA 10 s, 5e-4 per second of error,
+  ±500 ppm) resamples with a 32-tap Kaiser-windowed sinc (512 phases) so
+  the buffer holds against the sender's clock. Nothing is ever dropped or
+  repeated, except a burst beyond target + 3 s, which is skipped with a fade.
+  When the buffer runs dry it fades out (20 ms) and says 'lost'. It
+  reconnects with back-off (1, 2, 3, 5 s), and a watchdog ends a connection
+  that has carried no data for 5 s, measured from the newer of its start
+  and its last data. Once refilled it fades in over 1 s and says 'back'.
+  The reason comes from ffmpeg's stderr (503/5XX → `off`, 401/403 →
+  `refused`, 404 → `missing`). `StreamFallback` (`setupStreams`, shared by
+  both pipelines) switches the bed on at 'lost' and off at 'back' or stop,
+  and only a bed it switched on itself. With `fallback: silence` it does
+  nothing. `autoStart` starts one stream at boot. Snapshot `stream`; the
+  page writes its state under the title (`streamWords`). Playout mode has
+  a bed now (`filePlayer.bed`, mixed after the player, `bed`/`bedSelect`).
 - **Programme stream** (`output.serve`, `src/audio/serve.ts`, roadmap
   M1c.1): `/stream?format=flac|mp3` on the meters port serves what leaves
   the box (fed beside the harbor encoder, after the FIFO), for a Pi at the

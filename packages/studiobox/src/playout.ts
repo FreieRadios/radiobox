@@ -4,6 +4,9 @@ import { Monitor } from './audio/monitor';
 import { FilePlayer } from './audio/file-player';
 import { FileDirs } from './audio/file-dirs';
 import { QueuePlayer } from './audio/play-queue';
+import { BedDeck, BedStatus } from './audio/bed';
+import { setupStreams } from './audio/stream-fallback';
+import { StreamPlayerOptions } from './audio/stream-player';
 import { interleaveStereo } from './audio/format';
 import { MeterSnapshot } from './dsp/graph';
 import { MeterServer } from './meters/server';
@@ -33,6 +36,10 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 export class PlayoutPipeline {
   private monitor: Monitor;
   private filePlayer: FilePlayer;
+  /** The bed: the host's fallback, and what fills a stream's dropout. */
+  private bedPlayer: FilePlayer | null = null;
+  private bed: BedDeck | null = null;
+  private autoStartStream: (() => void) | null = null;
   private fileDirs: FileDirs;
   private playQueue: QueuePlayer;
   private meters: MeterServer | null;
@@ -45,7 +52,10 @@ export class PlayoutPipeline {
   private stopping = false;
   private monitorArmed = false;
 
-  constructor(private cfg: StudioboxConfig) {
+  constructor(
+    private cfg: StudioboxConfig,
+    opts: { stream?: StreamPlayerOptions } = {}
+  ) {
     if (!cfg.filePlayer?.enabled) {
       throw new Error('mode "playout" requires filePlayer.enabled');
     }
@@ -54,7 +64,27 @@ export class PlayoutPipeline {
       makeLog('fileplayer'),
       cfg.filePlayer.prebufferMs
     );
-    this.fileDirs = new FileDirs(cfg.filePlayer.dirs, log);
+    this.fileDirs = new FileDirs(cfg.filePlayer.dirs, log, cfg.filePlayer.streams);
+    if (cfg.filePlayer.bed.enabled) {
+      this.bedPlayer = new FilePlayer(
+        cfg.capture.sampleRate,
+        makeLog('bed'),
+        cfg.filePlayer.prebufferMs
+      );
+      this.bed = new BedDeck(this.bedPlayer, this.fileDirs, cfg.filePlayer.bed, makeLog('bed'));
+    }
+    // Network streams play like files (a Pi at the desk playing another
+    // room's studiobox); while one is gone, the bed plays.
+    if (cfg.filePlayer.streams.length) {
+      this.autoStartStream = setupStreams({
+        player: this.filePlayer,
+        dirs: this.fileDirs,
+        streams: cfg.filePlayer.streams,
+        bed: this.bed,
+        log: makeLog('stream'),
+        opts: opts.stream,
+      }).autoStart;
+    }
     this.monitor = new Monitor(cfg.output.monitor, cfg.capture, makeLog('monitor'));
     this.meters = cfg.meters.enabled
       ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
@@ -127,6 +157,13 @@ export class PlayoutPipeline {
       // Through the queue player: an operator stop must not roll into the
       // next pending item (the list itself is kept).
       this.playQueue.stop(fadeMs);
+    } else if (type === 'bed' && this.bed) {
+      this.bed.set(!!value);
+    } else if (type === 'bedSelect' && this.bed) {
+      const req = isObj(value) ? value : {};
+      if (!this.bed.select(Number(req.folder ?? 0) || 0, String(req.name ?? ''))) {
+        log.warn(`rejected bed file: folder ${req.folder} / ${req.name}`);
+      }
     } else if (this.playQueue.handleCommand(type, value)) {
       // queue* command, handled there.
     }
@@ -137,7 +174,7 @@ export class PlayoutPipeline {
   }
 
   /** UI snapshot: playback + schedule state, no metering (channels: []). */
-  private snapshot(): MeterSnapshot {
+  snapshot(): MeterSnapshot & { bed: BedStatus | null } {
     const playing = this.filePlayer.playing;
     const next = this.scheduler?.next() ?? null;
     return {
@@ -148,7 +185,7 @@ export class PlayoutPipeline {
       shortTermLufs: -Infinity,
       outPeakDb: -Infinity,
       micsMuted: false,
-      filePlaying: playing ? path.basename(playing) : null,
+      filePlaying: playing ? this.fileDirs.displayName(playing) : null,
       filePlayingAt: playing ? this.fileDirs.locate(playing) : null,
       filePosition: playing ? this.filePlayer.position : null,
       fileDuration: playing ? this.filePlayer.duration : null,
@@ -159,6 +196,8 @@ export class PlayoutPipeline {
       monitor: null,
       nextScheduled: next ? { name: next.name, playAtMs: next.playAtMs } : null,
       serverNowMs: Date.now(),
+      stream: this.filePlayer.streamStatus,
+      bed: this.bed ? this.bed.status() : null,
     };
   }
 
@@ -168,6 +207,7 @@ export class PlayoutPipeline {
     if (this.stopping) return;
     const frames = this.cfg.capture.blockSize;
     this.filePlayer.read(this.outL, this.outR, frames);
+    this.bed?.mixInto(this.outL, this.outR, frames);
     this.monitor.write(interleaveStereo(this.outL, this.outR, frames));
     // Watchdog a little above the block duration: long enough to normally be
     // beaten by 'drain', short enough to keep near-real-time consumption when
@@ -193,6 +233,7 @@ export class PlayoutPipeline {
     });
     this.pump();
     this.scheduler?.start();
+    this.autoStartStream?.();
     this.listeners?.start();
 
     if (this.meters) {
@@ -209,6 +250,7 @@ export class PlayoutPipeline {
     this.listeners?.stop();
     this.meters?.stop();
     this.filePlayer.shutdown();
+    this.bedPlayer?.shutdown();
     this.monitor.stop();
     log.info('stopped');
   }

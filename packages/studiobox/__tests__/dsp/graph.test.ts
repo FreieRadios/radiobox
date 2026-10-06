@@ -68,6 +68,7 @@ const player = (over: Partial<NonNullable<StudioboxConfig['filePlayer']>> = {}) 
   prebufferMs: 0,
   autoPlay: { enabled: false, scanSeconds: 10, graceSeconds: 30 },
   bed: { enabled: false, dir: '', gainDb: -6, fadeInMs: 1500, fadeOutMs: 2500 },
+  streams: [],
   processing: bypass(),
   ...over,
 });

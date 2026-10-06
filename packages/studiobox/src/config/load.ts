@@ -18,6 +18,7 @@ import {
   MonitorConfig,
   MultitrackConfig,
   ServeConfig,
+  StreamSourceConfig,
   OutputConfig,
   PriorityConfig,
   StudioboxConfig,
@@ -243,6 +244,34 @@ function resolveBed(raw: unknown): BedConfig {
 }
 
 /** Resolve the optional local file player into a music-style source. */
+/** Network streams. Only http(s): the URL goes to ffmpeg, which would also
+ *  open local files and other protocols. Labels must be unique (they name
+ *  the rows). */
+function resolveStreams(raw: unknown): StreamSourceConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StreamSourceConfig[] = [];
+  for (const e of raw) {
+    if (!isObj(e) || typeof e.url !== 'string' || !/^https?:\/\//i.test(e.url.trim())) {
+      throw new Error('filePlayer.streams: every entry needs an http(s) url');
+    }
+    const label = typeof e.label === 'string' && e.label.trim() ? e.label.trim() : 'Stream';
+    if (out.some((s) => s.label === label)) {
+      throw new Error(`filePlayer.streams: the label "${label}" is used twice`);
+    }
+    out.push({
+      label,
+      url: e.url.trim(),
+      bufferMs: Math.min(30000, Math.max(500, finite(e.bufferMs, 2000))),
+      fallback: e.fallback === 'silence' ? 'silence' : 'bed',
+      autoStart: e.autoStart === true,
+    });
+  }
+  if (out.filter((s) => s.autoStart).length > 1) {
+    throw new Error('filePlayer.streams: only one stream can have autoStart');
+  }
+  return out;
+}
+
 function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
   if (!isObj(raw) || !raw.enabled) return undefined;
   let processing = deepMerge(DEFAULT_PROCESSING, MUSIC_OVERRIDES);
@@ -260,6 +289,7 @@ function resolveFilePlayer(raw: unknown): FilePlayerConfig | undefined {
         : 250,
     autoPlay: resolveAutoPlay(raw.autoPlay),
     bed: resolveBed(raw.bed),
+    streams: resolveStreams(raw.streams),
     processing,
   };
 }

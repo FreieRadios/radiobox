@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { FilePlayerDir } from '../config/schema';
+import { FilePlayerDir, StreamSourceConfig } from '../config/schema';
 import { ScheduleEntry, parsePlayAtMs } from '../schedule';
 import { Log } from '../util/log';
 import { AUDIO_EXTENSIONS } from './file-player';
@@ -19,7 +19,16 @@ export interface FileEntry {
   playAtMs: number | null;
   /** True for a browsable subdirectory row (not playable). */
   dir?: boolean;
+  /** True for a network stream row (the "Streams" folder). */
+  stream?: boolean;
 }
+
+/** What `resolve()` gives for a stream row: a token, never the URL (it may
+ *  carry the sender's stream token, and the page shows what plays). */
+export const STREAM_PREFIX = 'stream:';
+
+/** The folder the streams are listed in, after the configured ones. */
+export const STREAMS_FOLDER: FolderEntry = { label: 'Streams', icon: '📡' };
 
 /** Where a file lives in the browsable folders: which configured dir, and the
  *  folder-relative path inside it (`Musik/x.flac`) — the same form `playFile`,
@@ -89,13 +98,37 @@ export class FileDirs {
 
   constructor(
     private dirs: FilePlayerDir[],
-    private log: Log
+    private log: Log,
+    private streams: StreamSourceConfig[] = []
   ) {}
 
   /** The configured browsable folders (menu order), each with the emoji the
-   *  UI shows for it in the ⋮ menu and on the welcome tiles. */
+   *  UI shows for it in the ⋮ menu and on the welcome tiles; the streams, if
+   *  any, as one more folder at the end. */
   folders(): FolderEntry[] {
-    return this.dirs.map((d) => ({ label: d.label, icon: d.icon || '📁' }));
+    const out = this.dirs.map((d) => ({ label: d.label, icon: d.icon || '📁' }));
+    if (this.streams.length) out.push({ ...STREAMS_FOLDER });
+    return out;
+  }
+
+  /** Index of the "Streams" folder, or -1 without streams. */
+  get streamsFolder(): number {
+    return this.streams.length ? this.dirs.length : -1;
+  }
+
+  private streamRows(): FileEntry[] {
+    return this.streams.map((s) => ({ name: s.label, playAtMs: null, stream: true }));
+  }
+
+  /** The stream a `resolve()` token stands for, or null for a file path. */
+  streamOf(token: string): StreamSourceConfig | null {
+    if (!token.startsWith(STREAM_PREFIX)) return null;
+    return this.streams[Number(token.slice(STREAM_PREFIX.length))] ?? null;
+  }
+
+  /** What the page shows for a playing file or stream. */
+  displayName(playing: string): string {
+    return this.streamOf(playing)?.label ?? path.basename(playing);
   }
 
   /** Memo for `locate()` (input path -> location), see there. */
@@ -125,6 +158,7 @@ export class FileDirs {
    *  parsed auto-play timestamp (when the name carries one). Dotfiles and
    *  dot-directories are hidden. */
   entries(index: number, sub = ''): FileEntry[] {
+    if (index === this.streamsFolder) return sub ? [] : this.streamRows();
     const dir = this.subdir(index, sub);
     if (!dir) return [];
     try {
@@ -153,6 +187,7 @@ export class FileDirs {
    *  fails open (the folder is shown) so a transient error never hides real
    *  content. Sorted subdirectory rows first, then audio files. */
   async list(index: number, sub = ''): Promise<FileEntry[]> {
+    if (index === this.streamsFolder) return sub ? [] : this.streamRows();
     const dir = this.subdir(index, sub);
     if (!dir) return [];
     const prune = this.dirs[index]?.hideEmpty !== false;
@@ -276,6 +311,8 @@ export class FileDirs {
    *  schedule). Single-entry memo: the snapshot asks for the same path many
    *  times per second while one file plays. */
   locate(abs: string): FileLocation | null {
+    const st = this.streamOf(abs);
+    if (st) return { folder: this.streamsFolder, name: st.label };
     if (abs === this.locateKey) return this.locateHit;
     const target = path.resolve(abs);
     let hit: FileLocation | null = null;
@@ -294,6 +331,10 @@ export class FileDirs {
   /** Resolve a requested filename to an absolute path inside the folder at
    *  `index`, rejecting path traversal and disallowed extensions. */
   resolve(index: number, name: string): string | null {
+    if (index === this.streamsFolder) {
+      const i = this.streams.findIndex((s) => s.label === name);
+      return i < 0 ? null : `${STREAM_PREFIX}${i}`;
+    }
     const root = this.root(index);
     if (!root || !name) return null;
     const resolved = path.resolve(root, name);

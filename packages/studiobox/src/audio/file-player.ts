@@ -2,6 +2,7 @@ import { ChildProcessWithoutNullStreams, spawn, execFile } from 'node:child_proc
 import { EventEmitter } from 'node:events';
 import { Log } from '../util/log';
 import { BYTES_PER_SAMPLE } from './format';
+import { StreamPlayer, StreamPlayerOptions, StreamSpec, StreamStatus } from './stream-player';
 
 /** Audio file extensions the player will decode/expose. */
 export const AUDIO_EXTENSIONS = [
@@ -52,6 +53,11 @@ interface Cue {
  * that time — this is what lets a scheduled jingle air on the second instead
  * of "when the decoder got going".
  *
+ * A **network stream** plays the same way (`play()` with a token that
+ * `setStreams` knows, see `StreamPlayer`): it never ends by itself, and it
+ * says 'streamLost' / 'streamBack' when its audio drops out and returns, and
+ * 'streamEnd' when it is stopped.
+ *
  * Events: 'ended' (playback finished and buffer drained).
  */
 export class FilePlayer extends EventEmitter {
@@ -79,6 +85,10 @@ export class FilePlayer extends EventEmitter {
   private readonly cueFadeSamples: number;
   // A file decoding ahead of its start time, or null.
   private pending: Cue | null = null;
+  // Network streams: which `play()` names are streams, and the one playing.
+  private streamLookup: ((file: string) => StreamSpec | null) | null = null;
+  private streamOpts: StreamPlayerOptions = {};
+  private stream: StreamPlayer | null = null;
 
   constructor(
     private sampleRate: number,
@@ -92,6 +102,17 @@ export class FilePlayer extends EventEmitter {
     this.defaultFadeIn = Math.max(1, Math.ceil((sampleRate * FADE_IN_MS) / 1000));
     this.fadeInSamples = this.defaultFadeIn;
     this.cueFadeSamples = Math.max(1, Math.ceil((sampleRate * CUE_FADE_MS) / 1000));
+  }
+
+  /** Let `play()` take stream tokens (see `FileDirs.resolve`). */
+  setStreams(lookup: (file: string) => StreamSpec | null, opts: StreamPlayerOptions = {}): void {
+    this.streamLookup = lookup;
+    this.streamOpts = opts;
+  }
+
+  /** The playing stream's state, or null when no stream plays. */
+  get streamStatus(): StreamStatus | null {
+    return this.stream ? this.stream.status() : null;
   }
 
   /** The file cued for a timed start and its start time, or null. */
@@ -139,6 +160,17 @@ export class FilePlayer extends EventEmitter {
         ? Math.ceil((this.sampleRate * opts.fadeInMs) / 1000)
         : this.defaultFadeIn;
     this.current = file;
+    const spec = this.streamLookup?.(file) ?? null;
+    if (spec) {
+      // The stream buffers and fades by itself.
+      this.buffering = false;
+      const st = new StreamPlayer(spec, this.sampleRate, this.log, this.streamOpts);
+      st.on('lost', () => this.emit('streamLost'));
+      st.on('back', () => this.emit('streamBack'));
+      this.stream = st;
+      st.start();
+      return;
+    }
     this.probeDuration(file);
     this.proc = this.spawnDecoder(file, !!opts.loop);
   }
@@ -261,6 +293,12 @@ export class FilePlayer extends EventEmitter {
   }
 
   private readCurrent(outL: Float32Array, outR: Float32Array, frames: number): void {
+    if (this.stream) {
+      this.stream.read(outL, outR, frames);
+      this.playedFrames += frames;
+      this.applyFadeOut(outL, outR, frames);
+      return;
+    }
     if (this.queue.length) {
       this.leftover = this.leftover.length
         ? Buffer.concat([this.leftover, ...this.queue])
@@ -312,25 +350,7 @@ export class FilePlayer extends EventEmitter {
       }
     }
 
-    // Apply the smooth fade-out gain ramp (linear to silence) when stopping.
-    if (this.fadeTotal > 0) {
-      for (let n = 0; n < frames; n++) {
-        const g = this.fadeRemaining > 0 ? this.fadeRemaining / this.fadeTotal : 0;
-        outL[n] *= g;
-        outR[n] *= g;
-        if (this.fadeRemaining > 0) this.fadeRemaining--;
-      }
-      // Ramp complete: hard-stop and report end of playback.
-      if (this.fadeRemaining <= 0) {
-        const finished = this.current;
-        this.stop();
-        if (finished) {
-          this.log.info('file player: faded out', finished);
-          this.emit('ended');
-        }
-        return;
-      }
-    }
+    if (this.applyFadeOut(outL, outR, frames)) return;
 
     // End-of-playback: decoder gone and nothing left to play.
     if (
@@ -345,6 +365,27 @@ export class FilePlayer extends EventEmitter {
       this.log.info('file player: finished', finished);
       this.emit('ended');
     }
+  }
+
+  /** Apply the smooth fade-out ramp (linear to silence) while stopping.
+   *  True once it has completed: playback is stopped and 'ended' said. */
+  private applyFadeOut(outL: Float32Array, outR: Float32Array, frames: number): boolean {
+    if (this.fadeTotal <= 0) return false;
+    for (let n = 0; n < frames; n++) {
+      const g = this.fadeRemaining > 0 ? this.fadeRemaining / this.fadeTotal : 0;
+      outL[n] *= g;
+      outR[n] *= g;
+      if (this.fadeRemaining > 0) this.fadeRemaining--;
+    }
+    if (this.fadeRemaining > 0) return false;
+    // Ramp complete: hard-stop and report end of playback.
+    const finished = this.current;
+    this.stop();
+    if (finished) {
+      this.log.info('file player: faded out', finished);
+      this.emit('ended');
+    }
+    return true;
   }
 
   /**
@@ -372,6 +413,11 @@ export class FilePlayer extends EventEmitter {
     if (this.proc) {
       this.proc.kill('SIGKILL');
       this.proc = null;
+    }
+    if (this.stream) {
+      this.stream.stop();
+      this.stream = null;
+      this.emit('streamEnd');
     }
     this.queue = [];
     this.leftover = Buffer.alloc(0);

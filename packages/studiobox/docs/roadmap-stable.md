@@ -614,7 +614,18 @@ Items:
    _Done when:_ the Pi plays `http://<maik>:4445/stream?k=…&format=flac` for
    three hours without a gap, and stopping maik's output is said on both
    sides.
-2. **Play a stream on every studiobox** (playout and live mode). Streams as
+2. **Play a stream on every studiobox** (playout and live mode).
+   **Built 2026-10-06**: `filePlayer.streams` (folder "📡 Streams"),
+   `src/audio/stream-player.ts`, `stream-fallback.ts`; playout mode gained
+   the bed. Deviation: the clock difference is held by slow resampling only
+   (windowed sinc, ±500 ppm, a ~2000 s servo loop), never by dropping or
+   repeating, because the programme often has no silence (music under the
+   talk). Tested: a 10 s dropout with the bed in between and no click, a
+   0.01 % clock difference over 3 h within ±0.5 s of the target (servo
+   model), an interpolation SNR above 70 dB. End to end over HTTP with
+   ffmpeg: the sender switched off for 6 s → "weg … dort ist der Stream
+   aus", reconnect, fade back in. Still to do: three hours on the Pi.
+   Streams as
    a source next to the file folders (`filePlayer.streams: [{label, url}]`),
    shown as a row that plays like a file, with its state in words
    ("verbunden", "verbindet neu …", "weg seit 12 s"). Reconnects with
