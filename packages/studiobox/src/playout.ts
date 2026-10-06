@@ -87,7 +87,10 @@ export class PlayoutPipeline {
     }
     this.monitor = new Monitor(cfg.output.monitor, cfg.capture, makeLog('monitor'));
     this.meters = cfg.meters.enabled
-      ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
+      ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles, {
+          logo: cfg.meters.logo,
+          logoAlt: cfg.meters.logoAlt ?? 'studiobox',
+        })
       : null;
     // Pending play list: chains the next file when one ends by itself. Never
     // starts audio on its own (see QueuePlayer).

@@ -428,7 +428,26 @@ function resolvePriority(raw: unknown): PriorityConfig {
   };
 }
 
-function resolveMeters(raw: unknown): MetersConfig {
+/** Image types the header logo may be. */
+export const LOGO_TYPES: Record<string, string> = {
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+};
+
+function resolveLogo(raw: unknown, baseDir: string): string | undefined {
+  if (typeof raw !== 'string' || !raw.trim()) return undefined;
+  const file = path.resolve(baseDir, raw.trim());
+  if (!LOGO_TYPES[path.extname(file).toLowerCase()]) {
+    throw new Error(`meters.logo: ${raw} is not an .svg, .png, .webp or .jpg`);
+  }
+  if (!fs.existsSync(file)) throw new Error(`meters.logo: ${file} does not exist`);
+  return file;
+}
+
+function resolveMeters(raw: unknown, baseDir = process.cwd()): MetersConfig {
   const r = isObj(raw) ? raw : {};
   const roles = isObj(r.roles) ? r.roles : {};
   const t = isObj(roles.tokens) ? roles.tokens : {};
@@ -438,6 +457,8 @@ function resolveMeters(raw: unknown): MetersConfig {
     enabled: !!r.enabled,
     port: finite(r.port, 4445),
     fps: Math.max(1, finite(r.fps, 20)),
+    logo: resolveLogo(r.logo, baseDir),
+    logoAlt: typeof r.logoAlt === 'string' && r.logoAlt.trim() ? r.logoAlt.trim() : 'studiobox',
     roles: {
       enabled: !!roles.enabled,
       tokens: { tech: tok(t.tech), host: tok(t.host), guest: tok(t.guest), stream: tok(t.stream) },
@@ -540,7 +561,7 @@ export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
     automix: resolveAutomix(root.automix),
     lookahead: resolveLookahead(root.lookahead),
     airDelay: resolveAirDelay(root.airDelay),
-    meters: resolveMeters(root.meters),
+    meters: resolveMeters(root.meters, path.dirname(configPath)),
     listeners: resolveListeners(root.listeners),
     stateFile:
       typeof root.stateFile === 'string' && root.stateFile.trim()

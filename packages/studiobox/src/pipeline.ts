@@ -212,7 +212,10 @@ export class Pipeline {
       }).autoStart;
     }
     this.meters = cfg.meters.enabled
-      ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
+      ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles, {
+          logo: cfg.meters.logo,
+          logoAlt: cfg.meters.logoAlt ?? 'studiobox',
+        })
       : null;
     this.meters?.setMics(cfg.channels.filter((c) => c.role === 'mic').map((c) => c.label));
     if (this.meters) {

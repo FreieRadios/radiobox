@@ -1,4 +1,5 @@
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import { MeterSnapshot } from '../../src/dsp/graph';
@@ -177,6 +178,35 @@ describe('MeterServer — views and what each role gets', () => {
     expect(viaLocal).toMatch(new RegExp(`:${port}/tech\\?k=T$`));
     // Nothing odd from the header makes it into a link.
     expect((await linksVia('evil"/x'))[0]).not.toContain('evil');
+  });
+
+  it('shows the configured logo in the headers, or the word without one', async () => {
+    await boot(false);
+    expect((await get(port, '/logo')).status).toBe(404);
+    expect((await get(port, '/')).body).toContain('title="Quellen anzeigen">studiobox</button>');
+    server.stop();
+    const logo = path.join(__dirname, '../../config/logo-z.svg');
+    server = new MeterServer(
+      0,
+      makeLog(),
+      { enabled: true, tokens: { tech: 'T' } },
+      {
+        logo,
+        logoAlt: 'Radio Z <live>',
+      }
+    );
+    server.start();
+    const s = (server as unknown as { server: http.Server }).server;
+    await new Promise<void>((r) => (s.listening ? r() : s.once('listening', () => r())));
+    port = (s.address() as AddressInfo).port;
+    const img = '<img class="brand" src="logo" alt="Radio Z &#60;live&#62;">';
+    expect((await get(port, '/tech?k=T')).body).toContain(img);
+    expect((await get(port, '/')).body).toContain(`<h1 id="brand">${img}</h1>`); // spectator
+    // Every view shows it, so nobody needs a token for it.
+    const res = await get(port, '/logo');
+    expect(res.status).toBe(200);
+    expect(res.type).toBe('image/svg+xml');
+    expect(res.body).toContain('<svg');
   });
 
   it('streams "Abhören" to the technician only', async () => {

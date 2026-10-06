@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Z">
+  <!-- A small red Z for the header (meters.logo). Replace with the station's
+       own logo file if it has one. -->
+  <path fill="#e2001a" d="M12 8h40v9L27 47h25v9H12v-9l25-30H12z"/>
+</svg>

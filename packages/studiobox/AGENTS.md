@@ -323,6 +323,13 @@ questions are ticked in eve. Covered by `episode.test.ts`, `markdown.test.ts`,
 the guide block in `feed.test.ts` and the Sendung block in
 `page-queue.test.ts`.
 
+**Logo**: `meters.logo` (svg/png/webp/jpg next to the config, checked at
+load) replaces the word "studiobox" in the header of the page and the
+spectator view (`brandHtml`, `__BRAND__` in `PAGE`, `<h1 id="brand">` in
+`spectator.html`); `/logo` serves it to everybody (no token), with a CSP so
+an SVG can't run script. `meters.logoAlt` is its alt text. `config/logo-z.svg`
+is a small red Z.
+
 **Look and layout** of the page follow `docs/design-guidelines.md` and the
 Claude Design mock-ups in `docs/design/studiobox.html` (a bundled artifact —
 open it in a browser). What is implemented: the colour tokens as CSS variables

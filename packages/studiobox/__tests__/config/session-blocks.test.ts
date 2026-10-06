@@ -138,6 +138,20 @@ describe('config: buffered-design blocks and their defaults', () => {
     expect(t.meters.roles.tokens.stream).toBe('pi');
   });
 
+  it('the header logo is a picture next to the config, checked at load', () => {
+    const m = (logo: string) => ({
+      meters: `meters: { enabled: true, logo: "${logo}", logoAlt: Radio Z }`,
+    });
+    const none = load().cfg().meters;
+    expect(none.logo).toBeUndefined();
+    expect(none.logoAlt).toBe('studiobox');
+    const ok = load([], m('z.svg'));
+    fs.writeFileSync(path.join(ok.dir, 'z.svg'), '<svg/>');
+    expect(ok.cfg().meters).toMatchObject({ logo: path.join(ok.dir, 'z.svg'), logoAlt: 'Radio Z' });
+    expect(load([], m('nowhere.svg')).cfg).toThrow(/does not exist/);
+    expect(load([], m('z.gif')).cfg).toThrow(/not an \.svg/);
+  });
+
   it('roles are off by default; tokens can be fixed', () => {
     expect(load().cfg().meters.roles).toEqual({ enabled: false, tokens: {} });
     const c = load([], {

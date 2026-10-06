@@ -9,6 +9,7 @@ import { QueueItem } from '../audio/play-queue';
 import { ListenerStatus } from '../listeners/feed';
 import { ScheduleEntry } from '../schedule';
 import { RolesConfig } from '../config/schema';
+import { LOGO_TYPES } from '../config/load';
 import { pickLanAddress } from '../util/lan';
 import { Log } from '../util/log';
 import { RoleLink, Roles, ViewRole } from './roles';
@@ -23,6 +24,22 @@ const DATA_ROUTES = new Set(['/folders', '/files', '/scheduled', '/preview']);
 /** The role links with their QR codes ("Geräte verbinden"): the keys to the
  *  session, so the technician's alone. */
 const CONNECT_ROUTE = '/connect';
+
+/** The station's logo (`meters.logo`): public, every view shows it. */
+const LOGO_ROUTE = '/logo';
+
+/** The header's brand: the logo if one is configured, else the word. */
+export interface Brand {
+  logo?: string;
+  logoAlt: string;
+}
+
+const escHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** What sits in the header where "studiobox" used to be. */
+export function brandHtml(b: Brand): string {
+  return b.logo ? `<img class="brand" src="logo" alt="${escHtml(b.logoAlt)}">` : escHtml(b.logoAlt);
+}
 
 /** "Abhören": the technician's MP3 stream of what is recorded or aired. */
 const LISTEN_ROUTE = '/listen';
@@ -172,7 +189,8 @@ export class MeterServer {
   constructor(
     private port: number,
     private log: Log,
-    roles: RolesConfig = { enabled: false, tokens: {} }
+    roles: RolesConfig = { enabled: false, tokens: {} },
+    private brand: Brand = { logoAlt: 'studiobox' }
   ) {
     this.roles = new Roles(roles);
     this.server = http.createServer((req, res) => {
@@ -182,6 +200,8 @@ export class MeterServer {
         this.serveView(url, role, res);
       } else if (url in PUBLIC_FILES && !url.endsWith('.html')) {
         this.servePublic(url, res);
+      } else if (url === LOGO_ROUTE) {
+        this.serveLogo(res);
       } else if (url === CONNECT_ROUTE) {
         this.serveConnect(req, role, res);
       } else if (url === LISTEN_ROUTE) {
@@ -409,7 +429,34 @@ export class MeterServer {
       return;
     }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(PAGE.replace('__SERVER_TZ__', SERVER_TZ));
+    res.end(PAGE.replace('__SERVER_TZ__', SERVER_TZ).replace('__BRAND__', brandHtml(this.brand)));
+  }
+
+  /** `/logo`: the configured image, or 404. */
+  private serveLogo(res: http.ServerResponse): void {
+    const file = this.brand.logo;
+    const type = file ? LOGO_TYPES[path.extname(file).toLowerCase()] : undefined;
+    if (!file || !type) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    fs.readFile(file, (err, body) => {
+      if (err) {
+        this.log.warn(`logo missing: ${file} (${err.message})`);
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      // An SVG may carry script: never let it run as a page of its own.
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': 'max-age=300',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+        'x-content-type-options': 'nosniff',
+      });
+      res.end(body);
+    });
   }
 
   /** One of the `PUBLIC_FILES`, read per request: they are a few kB, asked
@@ -423,7 +470,16 @@ export class MeterServer {
         return;
       }
       res.writeHead(200, { 'content-type': PUBLIC_FILES[name], 'cache-control': 'no-store' });
-      res.end(body);
+      res.end(
+        name.endsWith('.html')
+          ? body
+              .toString('utf8')
+              .replace(
+                '<h1 id="brand">studiobox</h1>',
+                `<h1 id="brand">${brandHtml(this.brand)}</h1>`
+              )
+          : body
+      );
     });
   }
 
@@ -659,6 +715,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  /* Clickable title -> welcome screen. */
  .logo{min-height:44px;padding:0 4px;border:0;background:transparent;color:var(--muted);font-size:1rem}
  .logo:hover,.logo:active{background:transparent;color:var(--text)}
+ .logo .brand{display:block;height:32px;width:auto}
  /* Not a box of its own: a hidden toggle must not leave a gap in the bar. */
  .toggles{display:contents}
  /* The connection/clock/tools cluster: an auto left margin keeps it hard
@@ -1126,7 +1183,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  }
 </style></head><body>
 <header class="topbar">
- <h1><button id="logo" class="logo" title="Quellen anzeigen">studiobox</button></h1>
+ <h1><button id="logo" class="logo" title="Quellen anzeigen">__BRAND__</button></h1>
  <span id="air" class="chip" role="status" style="display:none"><span class="dot"></span><span id="airText"></span></span>
  <span id="setupChip" class="chip info" style="display:none">Einmessen läuft</span>
  <span id="toneChip" class="chip warn" style="display:none">Testton</span>
@@ -1325,7 +1382,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <h4>Dateien und Ordner</h4>
    <ul>
     <li>Ordner wechseln: über die Ordner-Leiste über der Dateiliste, oder oben
-    links auf <span class="k">studiobox</span> klicken (Kachelübersicht der
+    links auf <span class="k">studiobox</span> (oder das Logo) klicken (Kachelübersicht der
     Quellen).</li>
     <li>Zeilen mit <span class="k">📁</span> sind Unterordner — Klick öffnet
     sie, die Pfadzeile darüber führt wieder zurück.</li>

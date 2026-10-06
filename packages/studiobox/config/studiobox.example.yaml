@@ -188,6 +188,11 @@ meters:
   # with that mic chosen). Pin the tokens so a printed code survives a
   # restart. Turn this on whenever the network is shared. Off = every
   # connection may do everything.
+  # The station's logo in the header instead of the word "studiobox" (page
+  # and spectator view): .svg, .png, .webp or .jpg, next to this file.
+  # logoAlt is what a screen reader says for it.
+  # logo: logo-z.svg
+  # logoAlt: Radio Z
   roles:
     enabled: false
     # tokens: { tech: '…', host: '…', guest: '…' } # fixed; else new per start

@@ -297,6 +297,11 @@ export interface MetersConfig {
   port: number;
   fps: number;
   roles: RolesConfig;
+  /** The station's logo in the header instead of the word "studiobox":
+   *  an .svg, .png, .webp or .jpg, resolved next to the config file. */
+  logo?: string;
+  /** What the logo says to a screen reader (default "studiobox"). */
+  logoAlt?: string;
 }
 
 /** One browsable folder exposed by the file player. The meters page shows a
