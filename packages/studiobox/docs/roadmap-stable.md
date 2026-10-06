@@ -1,6 +1,8 @@
 # studiobox — roadmap to a stable version
 
-**Written:** 2026-09-30 · **Updated:** 2026-10-02 (audit, see section 3) ·
+**Written:** 2026-09-30 · **Updated:** 2026-10-02 (audit, see section 3),
+2026-10-06 (beginner-friendly, M1b; remote output and listening, M1c;
+internal mic, M2.13) ·
 **First target:** the live session in the week of
 2026-10-05 · **Basis:** `docs/analysis/studiobox-audit-2026-09-29.md`, the
 code on branch `studiobox`, a first run on the test rig and the Radio Z
@@ -465,6 +467,184 @@ Sendung and Hörer:innen on the host tablet with the show pinned (M1.16);
 restart studiobox once and see the tablets come back (M1.17); a guest scans
 their code (M1.18).
 
+### M1b — Beginner-friendly (field tests from 2026-10-07)
+
+studiobox is tested in several live situations from 2026-10-07, by people
+who get no long explanation. The page grew one control at a time: live
+sliders sit in different places (Musik im Kopfhörer under ⋮, Vorrang as a
+panel, trims in the Kanäle grid), setup steps are spread over ⋮, Einmessen
+and the terminal, and much that matters lives only in the YAML. 1 is small
+enough to land before the tests; 2 and 3 take what the tests show (4) into
+account.
+
+1. **Music level on air ("Musik-Lautstärke").** Today there is no live
+   control for how loud music sits against the voices: music is auto-levelled
+   to `leveler.targetLufs` (−22 LUFS by default, `MUSIC_OVERRIDES` in
+   `src/config/load.ts`; per music channel or `filePlayer.processing` in the
+   YAML), the bed sits `filePlayer.bed.gainDb` under it, speech ducks it by
+   `duck.depthDb`, and the master levels the sum to `master.targetLufs`. The
+   only live music slider, `returnGain`, changes the headphones, not the air.
+   Add one gain for the whole music path (file player, bed, music pairs),
+   after the leveler and before the duck, −12…+6 dB, default 0; `musicGain`
+   command, `musicGainDb` in the snapshot, kept in `session-state.json` like
+   `returnGainDb`. Allowed for tech and host (the host runs the music).
+   _Done when:_ a graph test shows the programme's music moving by the set
+   dB while the mics stay put, the change is click-free, and it survives a
+   restart within 12 h.
+2. **One settings view for the technician ("Einstellungen").** Its own view
+   (a file in `src/meters/public/` like `guest.html`, building on M2.1),
+   reached from the header, that bundles everything that is set rather than
+   operated during a show. The main page keeps only what is operated live.
+   Structure, each section with its state in words:
+
+   - **Vor der Sendung**, a checklist in the order of a setup, every step
+     with its state and the next one marked (JETZT): devices found (the
+     `doctor` checks, live), the Flow 8 gains (the Einmessen advice),
+     Einmessen, test tone to the desk, Geräte verbinden (QR codes), eve
+     connected, recording armed. A beginner works down the list and is done.
+   - **Pegel**: music on air (1), music in the headphones (`returnGain`),
+     bed level, host priority (`priorityDepth`), duck depth; each with a
+     one-line explanation in plain German, its default and "Zurücksetzen".
+   - **Mikros**: per mic label, colour, trim, profile, mute, internal
+     (M2.13), host priority yes/no.
+   - **Ausgänge**: stream, local output, recording, music return, with their
+     faults.
+   - **Konfiguration** (read-only): what comes from the YAML and needs a
+     restart to change (devices, air delay, look-ahead, folders, roles,
+     eve), with the file's path, so nobody searches for why a value cannot
+     be changed here.
+
+   The difference between a live setting (kept in `session-state.json`,
+   gone after 12 h) and a configuration (YAML) is visible on every value.
+   Same allowlist as today: only the tech token gets the view and its
+   commands. ⋮ shrinks to what is not a setting (Sendung beenden).
+   _Done when:_ someone who has never seen studiobox sets up a session from
+   the checklist alone, without the terminal except for the start; every
+   live slider of the main page and ⋮ is reachable here; the design
+   checklist passes.
+
+3. **Switch down to a lower role ("Ansicht").** One person often takes all
+   three roles in a live situation: a distraction-free music player one
+   moment, a technician outside the show who surveys every signal the next.
+   A tech connection can switch its view to host, guest (with a mic chosen)
+   or spectator and back; a host connection to guest or spectator and back;
+   guest and spectator get no switch at all.
+
+   - **Never upward.** The token stays the authority: a connection can take
+     any role at or below its token's role, never above it. The server
+     checks every switch against the token (`Roles.roleOf`) and refuses the
+     rest; a `?view=` in a guest's or host's URL can lower but not raise.
+   - **The lower role is real, not cosmetic.** While switched down, the
+     server applies the lower role's allowlist and snapshot cut
+     (`guestSnapshot` / `spectatorSnapshot`), so a stray tap in the player
+     view cannot stop the stream. Going back up needs only the switch (the
+     token is still the connection's), no new link.
+   - The chosen view is remembered per browser; the switch sits in the same
+     place on every view and names the role in words ("Ansicht: Host").
+   - Open: is the host layout the distraction-free music player, or does
+     it need a "Musik" view of its own (browser, queue, transport, music
+     level, nothing else)? Decide after the field tests.
+
+   _Done when:_ server tests show a tech connection switched to host is
+   refused a tech-only command and gets it again after switching back; a
+   host token asking for tech, and a guest token asking for anything, are
+   refused; the guest view shows no switch.
+
+4. **Field tests: write down where people stumble.** For every test: who
+   ran it (beginner or not), which roles one person held, what they looked
+   for and did not find, what they asked, which setting they wanted live
+   that is only in the YAML. The list decides the details of 2 and 3 and
+   which help texts are missing (the "?" modal included).
+
+### M1c — Record in one room, air from another; listen from anywhere
+
+The recording session of 2026-10-07 runs on a strong machine (maik). Where
+it stands is open until the day:
+
+- **a) Separate room.** maik records and streams over the LAN; the Pi
+  studiobox in the studio, wired to a channel of the legacy desk, plays that
+  stream.
+- **b) The studio itself.** maik plays the programme out over USB (sound
+  card) straight into the desk.
+
+In both cases the technician sits in the tech room behind the glass, not
+hearing the room, with a tablet in the tech role and Bluetooth headphones,
+and wants to hear what is being recorded right now, processed and
+unprocessed, with a small delay.
+
+Today: the programme goes to an Icecast-protocol server
+(`output.harbor`, ffmpeg `icecast://`, Ogg/FLAC or MP3 320; never verified,
+see M3) and/or a local sound card (`output.monitor`); both are switched live
+on the page (Stream / lokale Ausgabe) and can run at the same time. No
+studiobox can play a stream, and nobody can listen on a tablet.
+
+**For 2026-10-07 without new code** (to try on 2026-10-06):
+
+- a) Run an Icecast on maik (`docker compose up icecast` at the repo root,
+  or the `icecast2` package), `output.harbor.enabled: true` with
+  `url: icecast://source:<pw>@localhost:8000/live`, `format: mp3`,
+  `contentType: audio/mpeg` (MP3 because Safari on the iPad plays it; Ogg/FLAC
+  it may not). On the Pi stop `studiobox.service` and play the URL straight
+  into the card: `ffmpeg -i http://<maik>:8000/live -f alsa plughw:<card>`
+  (or `mpv --no-video`). Check that the Pi's playback does not underrun
+  over an hour.
+- b) `output.monitor` to the USB card, as in the session preset.
+- Listening: the tablet opens `http://<maik>:8000/live` in Safari — the
+  processed programme, one air delay (10 s) plus Safari's buffer behind the
+  room. There is no way to hear the unprocessed signal remotely yet.
+
+Items:
+
+1. **The programme as a stream from studiobox itself** (`/stream`). maik
+   serves the on-air programme (behind the air-delay FIFO, like the harbor
+   encoder) over HTTP, so a Pi or any player on the LAN pulls it without an
+   Icecast in between. Ogg/FLAC for a box, MP3 for a browser, one encoder
+   per format however many listen, started only while someone does. A
+   `stream` role token (or the tech/host token), never open.
+   _Done when:_ the Pi plays `http://<maik>:4445/stream?k=…&format=flac` for
+   three hours without a gap, and stopping maik's output is said on both
+   sides.
+2. **Play a stream on every studiobox** (playout and live mode). Streams as
+   a source next to the file folders (`filePlayer.streams: [{label, url}]`),
+   shown as a row that plays like a file, with its state in words
+   ("verbunden", "verbindet neu …", "weg seit 12 s"). Reconnects with
+   back-off; while the stream is gone the bed plays (or silence, by config),
+   and when it is back it fades in. A jitter buffer (`bufferMs`, default 2 s)
+   that holds its fill against the drift between maik's clock and the Pi's
+   sound card by slow resampling or by dropping/repeating a block in silence
+   (as `AirFifo` does). An option to start the stream at boot, so a Pi wired
+   to the desk needs no tablet.
+   _Done when:_ in a test the stream drops for 10 s and comes back, and the
+   output has the bed in between and no click; a 0.01 % clock difference
+   over three hours keeps the buffer within its tolerance.
+3. **Output target on the screen and in the config.** `output.target`:
+   `usb` | `stream` | `both` (the default from the YAML; the session
+   presets get one each for a) and b)), switched in Einstellungen →
+   Ausgänge (M1b.2) with a press-and-hold, like any end of output. Each path
+   keeps its own `latencyMs`, and Sendezeit is computed for the one that
+   goes to the desk. The page says which path is on air.
+   _Done when:_ switching from USB to stream during a show changes the
+   output without a restart and the Sendezeit follows the path's latency.
+4. **Listen on the tablet ("Abhören")**, for the tech role (and host?).
+   A panel with a play button and a source picker:
+   - **Aufnahme** (processed): the programme as it goes into the recording,
+     i.e. the look-ahead (6 s) behind the room, not the air delay.
+   - **Roh** (unprocessed): the dry sum of the mics, or one mic alone,
+     taken from the dry taps at the same point, so switching between the two
+     compares the same moment (A/B). The dry taps then run whether or not
+     the multitrack is armed.
+   - **Auf Sendung**: what leaves the box (= item 1).
+     Served as HTTP MP3 (or AAC) from the box: Safari on iOS plays it in an
+     `<audio>` element, and it keeps playing with the screen locked. Expected
+     delay: the source point + ~1–3 s of browser buffer + Bluetooth (~0.2 s);
+     the panel says how far behind the room the listener is. Encoders run
+     only while someone listens, one per source. Later, if the delay matters:
+     PCM over the WebSocket into Web Audio (well under a second).
+     _Done when:_ on an iPad in the tech role with Bluetooth headphones,
+     Aufnahme and Roh switch without a gap at the same moment of the show,
+     a guest or spectator token gets 403 on the listen URLs, and an idle box
+     runs no listen encoder.
+
 ### M2 — Stable 1.0 (after the session, target end of 2026-10)
 
 1. **Move the existing page out of `server.ts`** into real files (audit,
@@ -516,7 +696,47 @@ their code (M1.18).
     `src/config/load.ts`.
     _Done when:_ a config with a misspelt key produces a warning that names
     it.
-13. **Definition of stable**: three real sessions in a row without a restart;
+13. **Internal mic ("Intern")**: a channel that is heard in the room but not
+    on air, so the technician can talk to host and guests without being
+    broadcast. The headphones hang on the Flow 8 (direct mics), so the room
+    already hears every mic; studiobox only has to keep the channel off the
+    programme. Set per channel in the YAML (`internal: true`, default
+    `false`; the session preset sets it on `Technik`). Host and technician
+    views get a toggle per mic, "Intern" ↔ "Auf Sendung", so the technician
+    can go on air spontaneously (a poem, a song with the guests) and back.
+
+    - **Separate from mute.** Its own flag next to `muted`, so "Mikros zu" /
+      unmute and the per-row mute never flip it. It reuses the mute path in
+      `graph.ts` `process()` (room time, `muteGain` slew, `off` excludes the
+      mic from talker, voice detector, ducking, host priority and the
+      return's `roomKey`), i.e.
+      `off = m.muted || m.internal || this.micsMuted`.
+    - **Bleed check.** `loudest` is taken over all mics before the mute, so
+      a loud internal mic raises the dominance threshold and can cost
+      another mic its talker status (leveler key, ducking). Decide whether
+      internal mics are left out of `loudest` and test it with the
+      technician talking over the host.
+    - **Recordings.** The processed stereo FLAC follows the air (internal
+      talk is not in it). The dry multitrack taps before the mute, so the
+      internal talk lands on the Technik track. Open: keep it (useful for
+      the edit) or silence the track while internal? Default proposal: keep,
+      and write the internal on/off times as markers beside the recording.
+    - **UI.** The state is shown on every mic row in all operator views
+      (clearly distinct from "muted", e.g. its own colour and label, see
+      design-guidelines.md); the guest view shows a guest whose mic is
+      internal that they are not on air. Commands `channelInternal`
+      (`{ label, internal }`) for the `tech` and `host` roles in
+      `src/meters/roles.ts`; the state goes out in the meters snapshot.
+    - **Persistence:** the live toggle survives a restart with item 2;
+      without it the YAML default comes back.
+
+    _Done when:_ in a graph test a channel with `internal: true` contributes
+    nothing to the programme, does not duck the music and does not take the
+    automix share or host priority; toggling it off brings it on air
+    click-free in room time; a mute/unmute of all mics leaves the flag as it
+    was; the config loader accepts and validates `internal`.
+
+14. **Definition of stable**: three real sessions in a row without a restart;
     a 4-hour soak without underrun; all four views pass the design checklist;
     tests green; a README that describes the product as it is.
 
