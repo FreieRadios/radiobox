@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { IntervalHistogram, monitorEventLoopDelay } from 'node:perf_hooks';
-import { StudioboxConfig } from './config/schema';
+import { OutputTarget, StudioboxConfig } from './config/schema';
 import { Capture } from './audio/capture';
 import { Encoder } from './audio/encoder';
 import { Recorder, stamp } from './audio/recorder';
@@ -57,6 +57,9 @@ export interface LiveStatus {
   musicGainDb: number;
   /** The programme as a stream (`/stream`); null when not configured. */
   serve: StreamStatus | null;
+  /** Which outputs feed the desk now (roadmap M1c.3); null unless both a
+   *  USB card and the stream are configured. `none`: both switched off. */
+  outputTarget: OutputTarget | 'none' | null;
   /** The same for the local output (`monitor`). */
   monitorFault: boolean;
   multitrack: boolean | null;
@@ -253,8 +256,13 @@ export class Pipeline {
       ? outputLatencyMs(cfg.output.monitor, sr, 'pull') +
         (cfg.output.monitor.latencyMs === undefined ? this.blockMs : 0)
       : 0;
-    // D can't be shorter than what the chain needs anyway.
-    const floorMs = this.graphLatencyMs + this.captureLatencyMs + this.monitorLatencyMs;
+    // D can't be shorter than what the chain needs anyway, on the longest
+    // path to the desk (the output target can switch between them).
+    const streamLatencyMs = cfg.output.serve.enabled ? cfg.output.serve.latencyMs : 0;
+    const floorMs =
+      this.graphLatencyMs +
+      this.captureLatencyMs +
+      Math.max(this.monitorLatencyMs, streamLatencyMs);
     this.delayMs = Math.max(cfg.airDelay.seconds * 1000, floorMs + this.blockMs);
     this.clock = new SampleClock(sr);
     this.fifo = new AirFifo({
@@ -348,10 +356,40 @@ export class Pipeline {
     return this.airDelayMs() - this.captureLatencyMs + extra;
   }
 
+  /** The output that feeds the desk, which Sendezeit is computed for: the
+   *  USB card while it is switched on (with both running it is the
+   *  reference), else the box's stream, else none. */
+  private deskPath(): 'usb' | 'stream' | null {
+    if (this.monitor && this.monitorArmed) return 'usb';
+    if (this.serve?.on) return 'stream';
+    return null;
+  }
+
+  /** Both outputs exist: which of them run, as one word. */
+  private outputTarget(): OutputTarget | 'none' | null {
+    if (!this.monitor || !this.serve) return null;
+    const usb = this.monitorArmed;
+    const stream = this.serve.on;
+    return usb && stream ? 'both' : usb ? 'usb' : stream ? 'stream' : 'none';
+  }
+
+  /** Switch the outputs that feed the desk (USB card, stream, both). The
+   *  air FIFO takes the new path's latency on its next block, so Sendezeit
+   *  follows; nothing restarts. */
+  private setOutputTarget(t: OutputTarget): void {
+    if (!this.monitor || !this.serve) return;
+    const usb = t !== 'stream';
+    if (usb !== this.monitorArmed) this.onCommand('monitor', usb);
+    const stream = t !== 'usb';
+    if (stream !== this.serve.on) this.serve.set(stream);
+    log.info(`output target: ${t} (Sendezeit follows ${this.deskPath() ?? 'nothing'})`);
+  }
+
   private airStatus(): AirStatus {
     const now = Date.now();
     const measured = this.fifo.measuredDelayMs;
     return {
+      path: this.deskPath(),
       targetMs: Math.round(this.delayMs),
       delayMs: measured === null ? null : Math.round(measured + this.captureLatencyMs),
       nowMs: Math.round(now + this.airDelayMs()),
@@ -451,6 +489,8 @@ export class Pipeline {
         this.state.musicGainDb = this.graph.musicLevelDb;
         this.persist();
       }
+    } else if (type === 'outputTarget') {
+      if (value === 'usb' || value === 'stream' || value === 'both') this.setOutputTarget(value);
     } else if (type === 'serve' && this.serve) {
       this.serve.set(!!value);
     } else if (type === 'listen' && this.listen) {
@@ -777,7 +817,12 @@ export class Pipeline {
     // Without a sound card pulling, release what has fallen due (the FIFO is
     // then a plain delay line in front of the harbor encoder).
     if (!this.monitor?.active) {
-      this.fifo.setOutputLatency(0);
+      // Released here, the blocks go to the stream (and the harbor): when
+      // the stream feeds the desk they leave early by its latency, so they
+      // air at Sendezeit there.
+      this.fifo.setOutputLatency(
+        this.deskPath() === 'stream' ? this.cfg.output.serve.latencyMs : 0
+      );
       for (const b of this.fifo.drain(now)) {
         this.encoder.write(b.buf);
         this.serve?.write(b.buf);
@@ -845,6 +890,7 @@ export class Pipeline {
       returnGainDb: this.ret ? this.graph.returnLevelDb : null,
       musicGainDb: this.graph.musicLevelDb,
       serve: this.serve ? this.serve.status() : null,
+      outputTarget: this.outputTarget(),
       stream: this.filePlayer?.streamStatus ?? null,
       monitorFault: !!this.monitor && this.monitorArmed && this.monitor.failing(now),
       multitrack: this.multitrack ? this.multitrack.active : null,
@@ -915,11 +961,14 @@ export class Pipeline {
     // Local hardware playout starts automatically when configured (it is a
     // primary output, like the harbor), but can be toggled live from the meters
     // page. It is a no-op / hidden control (null state) when not configured.
-    this.monitorArmed = this.monitor !== null;
+    // With both a card and the stream, `output.target` says which run.
+    const target = this.monitor && this.serve ? (c.output.target ?? 'both') : null;
+    this.monitorArmed = this.monitor !== null && target !== 'stream';
+    if (this.serve && target === 'usb') this.serve.set(false);
     this.graph.setMonitor(this.monitor ? false : null);
     if (this.monitor) {
       const mon = this.monitor;
-      mon.start();
+      if (this.monitorArmed) mon.start();
       this.graph.setMonitor(mon.active);
       // The page's state follows `up()` in snapshot(), not these restarts.
       mon.on('exit', (code) => {

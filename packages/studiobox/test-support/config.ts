@@ -77,7 +77,7 @@ export function config(
     master: { targetLufs: -16, truePeakDb: 0, limiterLookaheadMs: 5, limiterReleaseMs: 100 },
     output: {
       harbor: { enabled: false, url: '', format: 'ogg-flac', contentType: '' },
-      serve: { enabled: false, mp3Kbps: 320 },
+      serve: { enabled: false, mp3Kbps: 320, latencyMs: 2600 },
       backup: { enabled: false, dir: './recordings', segmentSeconds: 0 },
       multitrack: { enabled: false, source: 'dry' },
       monitor: { enabled: false, backend: 'alsa', device: '' },

@@ -120,6 +120,14 @@ output:
   serve:
     enabled: false
     # mp3Kbps: 320
+    # latencyMs: 2600 # block handed to the stream -> heard at the desk (the
+    #   desk box's bufferMs + network + its sound card). Calibration, like
+    #   monitor.latencyMs: Sendezeit uses it while the stream feeds the desk.
+  # With both a monitor (USB card) and serve: which feeds the desk at start,
+  # usb | stream | both (default both; with both, Sendezeit follows USB).
+  # Switched live under ⋮ → Ausgang ans Pult; a switch that ends a path is
+  # held. The air delay is kept long enough for the slower path.
+  # target: both
   backup:
     enabled: true
     dir: './recordings' # rolling local FLAC safety copy

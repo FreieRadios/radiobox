@@ -856,6 +856,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  .hintline .act{color:var(--warn);font-weight:600}
  /* Host priority: how far the other mics lean back, as a plain slider. */
  .prio{display:flex;align-items:center;gap:12px}
+ #tgtBox{display:flex;flex-direction:column;gap:4px;padding:4px 0}
+ .tgtl{font-size:.8125rem;color:var(--muted)}
  .abh{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px}
  .abh select{min-height:44px;max-width:100%}
  .prio input{flex:1 1 auto;min-width:0;height:44px;margin:0;accent-color:var(--accent)}
@@ -1203,6 +1205,10 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <button id="menuBtn" class="icon" title="Mehr" aria-label="Mehr" aria-haspopup="true">⋮</button>
    <div id="menu" class="menu" style="display:none">
     <button id="mon" class="mon hold techonly" style="display:none">Lokale Ausgabe aus</button>
+    <div id="tgtBox" class="techonly" style="display:none">
+     <span class="tgtl" id="tgtLbl">Ausgang ans Pult</span>
+     <div class="segc" role="group" aria-labelledby="tgtLbl"><button id="tgtUsb" class="hold" aria-pressed="false">USB</button><button id="tgtStream" class="hold" aria-pressed="false">Stream</button><button id="tgtBoth" class="hold" aria-pressed="false">beides</button></div>
+    </div>
     <button id="srv" class="mon hold techonly" style="display:none">Studio-Stream aus</button>
     <button id="ret" class="mon techonly" style="display:none">Musik-Rückweg aus</button>
     <div id="retLvlBox" class="techonly" style="display:none">
@@ -1526,6 +1532,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      damit man sie im Kopfhörer hört. Der Regler <span class="k">Musik im
      Kopfhörer</span> darunter stellt ein, wie laut sie dort neben den
      Mikrofonen ist — die Sendung bleibt davon unberührt.</li>
+     <li class="techonly"><span class="k">⋮ → Ausgang ans Pult</span>: USB
+     (Soundkarte direkt ins Pult), Stream (das Pult hängt an einem anderen
+     Gerät, das den Studio-Stream abspielt) oder beides. Was einen laufenden
+     Weg beendet, will gedrückt gehalten werden. Die Sendezeit gilt für den
+     Weg zum Pult; unter der Uhr steht, welcher („über USB“ / „über
+     Stream“).</li>
      <li class="techonly"><span class="k">⋮ → Studio-Stream</span> stellt das
      Programm (wie es das Gerät verlässt) als Stream bereit, z. B. für den
      Raspberry Pi am Pult in einem anderen Raum; daneben steht, wie viele
@@ -1878,6 +1890,19 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   setTog(srvBtn,'mon hold techonly',on,'Studio-Stream läuft · '+(serve&&serve.clients===1?'1 Gerät':(serve?serve.clients:0)+' Geräte'),'Studio-Stream aus','Der Programm-Stream für das Studio',true);}
  holdBtn(srvBtn,()=>!!serve&&serve.on,()=>{if(!serve||!tech())return;
   serve={on:!serve.on,clients:serve.on?0:serve.clients};setSrv();send({type:'serve',value:serve.on});},setSrv,'Studio-Stream beenden?');
+ // Which output feeds the desk: the USB card, the box's stream, or both. A
+ // choice that ends a running path is held like any end of output; one that
+ // only adds a path is a tap. The box answers with the state.
+ let target=null;
+ const TGT={usb:$('tgtUsb'),stream:$('tgtStream'),both:$('tgtBoth')};
+ const TGT_TEXT={usb:'USB',stream:'Stream',both:'beides'};
+ const runs=(t,p)=>t==='both'||t===p;
+ const dropsPath=k=>(runs(target,'usb')&&!runs(k,'usb'))||(runs(target,'stream')&&!runs(k,'stream'));
+ function setTgt(){show($('tgtBox'),target!==null);
+  for(const k in TGT){TGT[k].textContent=TGT_TEXT[k];setPressed(TGT[k],k===target);}}
+ for(const k in TGT)holdBtn(TGT[k],()=>target!==k&&dropsPath(k),()=>{if(target===null||target===k||!tech())return;
+  target=k;setTgt();send({type:'outputTarget',value:k});},setTgt,
+  k==='usb'?'Stream ans Pult beenden?':k==='stream'?'USB ans Pult beenden?':'Beides?');
  // Music return to the room (the mixer's USB playback): no programme hangs on
  // it, so it is a plain switch.
  const retBtn=$('ret');let musicReturn=null,retFault=false;
@@ -2026,7 +2051,9 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   tzEl.className='tz'+(off?' warn':'');
   tzEl.textContent=air.state==='draining'&&air.drainEndsMs
    ?'Sendezeit · Puffer läuft aus, noch '+mmss((air.drainEndsMs-srvNow())/1000)
-   :'Sendezeit · Studio '+timeFmt.format(srvNow())+(off?' · Verzögerung '+fmt(d/1000)+' s':' · +'+fmt(d/1000)+' s');};
+   :'Sendezeit · Studio '+timeFmt.format(srvNow())+(off?' · Verzögerung '+fmt(d/1000)+' s':' · +'+fmt(d/1000)+' s')
+    // Which path the on-air time is for, where there is a choice.
+    +(target!==null&&air.path?(air.path==='stream'?' · über Stream':' · über USB'):'');};
  tickClock();setInterval(tickClock,1000);
  // Re-apply schedule marks to the existing rows (which timestamps are still in
  // the future changes as time passes, without any new fetch).
@@ -2146,12 +2173,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  // "Auf Sendung", as far as the box can know it: the server derives it as
  // "programme is leaving the box" (onAir) — the desk's fader is out of its
  // sight. The chip says the state in words; only on air is it filled red.
- const airEl=$('air');let airKey='',hadAir=false;
+ const airEl=$('air');let airKey='',hadAir=false,airPath=null;
  function setAir(s){
   air=s.air||null;
   airDelayMs=air?air.nowMs-s.serverNowMs:0;
   // The clock's label depends on it: repaint at once, not at the next second.
-  if(!!air!==hadAir){hadAir=!!air;tickClock();}
+  if(!!air!==hadAir||(air&&air.path)!==airPath){hadAir=!!air;airPath=air&&air.path;tickClock();}
   let text='',on=false;
   if(air){const st=air.state;
    if(st==='filling')text='Puffer füllt';
@@ -2351,6 +2378,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    setAir(s);
    const ek=air?air.state:'';
    if(ek!==endKey){endKey=ek;setEnd();}
+   const tg=s.outputTarget===undefined?null:s.outputTarget;
+   if(tg!==target){target=tg;setTgt();tickClock();}
    const sv=s.serve||null;
    if(JSON.stringify(sv)!==JSON.stringify(serve)){serve=sv;setSrv();}
    const mr=typeof s.musicReturn==='boolean'?s.musicReturn:null;

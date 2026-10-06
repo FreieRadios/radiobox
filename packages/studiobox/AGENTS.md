@@ -645,6 +645,19 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   nothing. `autoStart` starts one stream at boot. Snapshot `stream`; the
   page writes its state under the title (`streamWords`). Playout mode has
   a bed now (`filePlayer.bed`, mixed after the player, `bed`/`bedSelect`).
+- **Output target** (`output.target`, roadmap M1c.3), with both a monitor
+  (USB card) and `serve`: `usb` | `stream` | `both` (default `both`) decide
+  which of the two run at start. The `outputTarget` command switches them
+  live (`setOutputTarget` arms or stops the monitor and switches
+  `serve`). The snapshot carries `outputTarget` (derived from what runs;
+  `none` = both off; null without a choice) and `air.path`: the path
+  Sendezeit is for, USB while the card runs, else the stream. Released
+  through the drain path, blocks leave `serve.latencyMs` (default 2600)
+  early while the stream feeds the desk, so they air at Sendezeit there.
+  The air delay's floor and `doctor` count the slower of the two paths.
+  Page: ⋮ → "Ausgang ans Pult" (USB | Stream | beides). A choice that ends
+  a running path is held (`holdBtn`); one that only adds a path is a tap.
+  The clock line says "über USB" / "über Stream".
 - **Programme stream** (`output.serve`, `src/audio/serve.ts`, roadmap
   M1c.1): `/stream?format=flac|mp3` on the meters port serves what leaves
   the box (fed beside the harbor encoder, after the FIFO), for a Pi at the

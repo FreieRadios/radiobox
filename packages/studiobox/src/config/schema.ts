@@ -267,11 +267,23 @@ export interface ServeConfig {
   enabled: boolean;
   /** MP3 bitrate for browsers (default 320). */
   mp3Kbps: number;
+  /** Block handed to the stream -> heard at the desk, ms: the box at the
+   *  desk's jitter buffer (2000 by default), the network and its sound card.
+   *  Calibration, like `output.monitor.latencyMs`; default 2600. Sendezeit
+   *  uses it while the stream alone feeds the desk. */
+  latencyMs: number;
 }
+
+/** Which output feeds the desk (roadmap M1c.3): the USB sound card
+ *  (`monitor`), the box's own stream (`serve`), or both. */
+export type OutputTarget = 'usb' | 'stream' | 'both';
 
 export interface OutputConfig {
   harbor: HarborConfig;
   serve: ServeConfig;
+  /** With both a monitor and `serve` configured: which runs at start
+   *  (default `both`); switched live on the page. Ignored otherwise. */
+  target?: OutputTarget;
   backup: BackupConfig;
   multitrack: MultitrackConfig;
   monitor: MonitorConfig;

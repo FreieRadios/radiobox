@@ -367,7 +367,11 @@ function resolveBackup(raw: unknown): BackupConfig {
 
 function resolveServe(raw: unknown): ServeConfig {
   const r = isObj(raw) ? raw : {};
-  return { enabled: !!r.enabled, mp3Kbps: Math.min(320, Math.max(64, finite(r.mp3Kbps, 320))) };
+  return {
+    enabled: !!r.enabled,
+    mp3Kbps: Math.min(320, Math.max(64, finite(r.mp3Kbps, 320))),
+    latencyMs: Math.min(30000, Math.max(0, finite(r.latencyMs, 2600))),
+  };
 }
 
 function resolveMultitrack(raw: unknown): MultitrackConfig {
@@ -384,6 +388,7 @@ function resolveOutput(raw: unknown): OutputConfig {
     ...out,
     harbor: out.harbor ?? { enabled: false, url: '', format: 'ogg-flac', contentType: '' },
     serve: resolveServe(r.serve),
+    target: r.target === 'usb' || r.target === 'stream' ? r.target : 'both',
     backup: resolveBackup(r.backup),
     multitrack: resolveMultitrack(r.multitrack),
     monitor: resolveMonitor(r.monitor),

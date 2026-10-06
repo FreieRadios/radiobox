@@ -93,6 +93,11 @@ output:
   # http://<this box>:4445/stream?format=flac&k=<meters.roles.tokens.stream>.
   serve:
     enabled: false
+  # ADAPT: a) recording in a separate room: target: stream (the Pi at the
+  # desk plays this box's /stream). b) in the studio itself: target: usb
+  # (this box's sound card into the desk). Switched live under ⋮ → Ausgang
+  # ans Pult; only used when both monitor and serve are enabled.
+  # target: usb
   # The session recording. Does not start by itself — arm it on the web page.
   # One continuous FLAC (24 bit) per recording, named by its on-air time.
   backup:

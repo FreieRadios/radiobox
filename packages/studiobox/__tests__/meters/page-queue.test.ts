@@ -1169,6 +1169,40 @@ describe('meters page — Sendezeit', () => {
   });
 });
 
+describe('meters page — output to the desk', () => {
+  it('switches USB / Stream / beides, holding what ends a path, and names the path', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const frame = (outputTarget: unknown, path: string | null) =>
+      liveFrame({ air: { ...air('live'), path }, onAir: true, outputTarget });
+    p.push(frame(null, 'usb'));
+    p.tick(1000);
+    expect(p.byId('tz').textContent).not.toContain('über'); // no choice, no word
+    p.push(frame('usb', 'usb'));
+    expect(p.byId('tgtBox').style.display).toBe('');
+    expect(p.byId('tgtUsb').attrs['aria-pressed']).toBe('true');
+    p.tick(1000);
+    expect(p.byId('tz').textContent).toContain('· über USB');
+    // Adding the stream ends nothing: one tap.
+    p.press('tgtBoth', 50);
+    expect(p.sent).toEqual([{ type: 'outputTarget', value: 'both' }]);
+    p.push(frame('both', 'usb'));
+    // Leaving only the stream ends the USB path: a tap only asks.
+    p.press('tgtStream', 50);
+    expect(p.sent).toHaveLength(1);
+    expect(p.byId('tgtStream').textContent).toBe('USB ans Pult beenden? Nochmal tippen');
+    p.tick(4000);
+    expect(p.byId('tgtStream').textContent).toBe('Stream');
+    p.press('tgtStream', 800);
+    expect(p.sent[1]).toEqual({ type: 'outputTarget', value: 'stream' });
+    p.push(frame('stream', 'stream'));
+    p.tick(1000);
+    expect(p.byId('tz').textContent).toContain('· über Stream');
+    p.push(frame(null, null)); // a box with one output only
+    expect(p.byId('tgtBox').style.display).toBe('none');
+  });
+});
+
 describe('meters page — music return level', () => {
   const lvl = (p: ReturnType<typeof boot>) =>
     p.byId('retLvl') as unknown as { value: string; oninput: () => void; onchange: () => void };

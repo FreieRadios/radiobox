@@ -50,6 +50,10 @@ export interface AirStatus {
   underruns: number;
   /** One-step re-centrings of the buffer (audible; after a device stall). */
   resyncs: number;
+  /** The output Sendezeit is computed for (the one feeding the desk):
+   *  `usb` (the local sound card) or `stream` (the box's /stream); null when
+   *  neither runs. */
+  path?: 'usb' | 'stream' | null;
 }
 
 export interface MeterSnapshot {

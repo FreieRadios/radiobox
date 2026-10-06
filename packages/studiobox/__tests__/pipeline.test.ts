@@ -447,6 +447,98 @@ describe('Pipeline: Abhören (roadmap M1c.4)', () => {
   });
 });
 
+describe('Pipeline: output target (roadmap M1c.3)', () => {
+  function build(target?: 'usb' | 'stream' | 'both') {
+    const dir = tmp();
+    const base = config([mic(1, 'Host')], {
+      lookahead: { seconds: 0.5, gateMs: 10, mixMs: 100 },
+      airDelay: { seconds: 6, toleranceSeconds: 1 },
+      stateFile: path.join(dir, 'session-state.json'),
+    });
+    const cfg: StudioboxConfig = {
+      ...base,
+      meters: { ...base.meters, enabled: true },
+      output: {
+        ...base.output,
+        monitor: { enabled: true, backend: 'alsa', device: 'null', latencyMs: 2000 },
+        serve: { enabled: true, mp3Kbps: 320, latencyMs: 2600 },
+        target,
+      },
+    };
+    const spawn = () => ({
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      kill: () => {},
+      on: () => {},
+    });
+    const pipeline = new Pipeline(cfg, { listenSpawn: spawn });
+    const p = pipeline as unknown as Internals & {
+      monitor: { start(): void; stop(): void; proc: unknown };
+      monitorArmed: boolean;
+    };
+    // A sound card that "runs" without aplay.
+    p.monitor.start = () => {
+      p.monitor.proc = {};
+    };
+    p.monitor.stop = () => {
+      p.monitor.proc = null;
+    };
+    p.monitorArmed = target !== 'stream'; // as start() arms it
+    if (p.monitorArmed) p.monitor.start();
+    if (target === 'usb') p.onCommand('serve', false);
+    const sent: number[] = [];
+    p.encoder.write = (buf: Buffer) => {
+      let peak = 0;
+      for (let i = 0; i < buf.length; i += 4) peak = Math.max(peak, Math.abs(buf.readFloatLE(i)));
+      if (peak > 0.01) sent.push(now);
+      return true;
+    };
+    return { pipeline, p, sent };
+  }
+
+  it('switches between USB, stream and both without a restart', () => {
+    const { pipeline, p } = build('usb');
+    expect(pipeline.snapshot().outputTarget).toBe('usb');
+    expect(pipeline.snapshot().air.path).toBe('usb');
+    p.onCommand('outputTarget', 'stream');
+    expect(pipeline.snapshot()).toMatchObject({ outputTarget: 'stream', monitor: false });
+    expect(pipeline.snapshot().serve).toMatchObject({ on: true });
+    expect(pipeline.snapshot().air.path).toBe('stream');
+    p.onCommand('outputTarget', 'both');
+    expect(pipeline.snapshot().outputTarget).toBe('both');
+    expect(pipeline.snapshot().air.path).toBe('usb'); // the card is the reference
+    p.onCommand('outputTarget', 'nonsense');
+    expect(pipeline.snapshot().outputTarget).toBe('both');
+    p.onCommand('serve', false);
+    p.onCommand('monitor', false);
+    expect(pipeline.snapshot().outputTarget).toBe('none');
+    expect(pipeline.snapshot().air.path).toBeNull();
+    pipeline.stop();
+  });
+
+  it('hands the stream its blocks early by its latency, so they air at Sendezeit', () => {
+    const { pipeline, p, sent } = build('stream');
+    // Talk starts in the room at t0; the stream should get it at
+    // t0 + D - 2.6 s, so the desk plays it at t0 + D.
+    const talk = tone(-20, 1);
+    const t0 = now;
+    for (let i = 0; i < Math.round((8 * SR) / FRAMES); i++) {
+      now += BLOCK_MS;
+      const o = i * FRAMES;
+      p.onBlock([o < talk.length ? talk.slice(o, o + FRAMES) : new Float32Array(FRAMES)]);
+    }
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent[0] - t0).toBeGreaterThan(6000 - 2600 - 2 * BLOCK_MS);
+    expect(sent[0] - t0).toBeLessThan(6000 - 2600 + 2 * BLOCK_MS + 650);
+    expect(pipeline.snapshot().outputTarget).toBe('stream');
+    pipeline.stop();
+  });
+
+  it('is null unless both a sound card and the stream are configured', () => {
+    expect(make().pipeline.snapshot().outputTarget).toBeNull();
+  });
+});
+
 describe('Pipeline: programme stream (roadmap M1c.1)', () => {
   it('is null unless configured', () => {
     expect(make().pipeline.snapshot().serve).toBeNull();
@@ -470,7 +562,7 @@ describe('Pipeline: programme stream (roadmap M1c.1)', () => {
     const cfg = {
       ...base,
       meters: { ...base.meters, enabled: true },
-      output: { ...base.output, serve: { enabled: true, mp3Kbps: 320 } },
+      output: { ...base.output, serve: { enabled: true, mp3Kbps: 320, latencyMs: 2600 } },
     };
     const pipeline = new Pipeline(cfg, { listenSpawn: spawn });
     const p = pipeline as unknown as Internals & {
@@ -492,10 +584,14 @@ describe('Pipeline: programme stream (roadmap M1c.1)', () => {
       p.onBlock([new Float32Array(FRAMES)]);
     }
     await new Promise((r) => setImmediate(r));
-    // Behind the air delay: ~2 s of 4.3 s fed have left the box.
+    // The stream alone feeds the desk: blocks leave its latency (2.6 s)
+    // ahead of their Sendezeit. D is raised to just fit it (look-ahead +
+    // capture + 2.6 s), so a block leaves about as soon as the graph has
+    // it: nearly all of the 4.3 s fed.
     const seconds = encoders[0].bytes / 8 / SR;
-    expect(seconds).toBeGreaterThan(1.5);
-    expect(seconds).toBeLessThan(3);
+    expect(seconds).toBeGreaterThan(3.9);
+    expect(seconds).toBeLessThan(4.3);
+    expect(pipeline.snapshot().air.targetMs).toBeGreaterThan(3100);
     p.onCommand('serve', false);
     expect(pipeline.snapshot().serve).toEqual({ on: false, clients: 0 });
     expect(encoders[0].killed).toBe(true);

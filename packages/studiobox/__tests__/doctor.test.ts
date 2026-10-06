@@ -179,6 +179,20 @@ describe('doctor: checks', () => {
     expect(find(checks, 'disk')!.detail).toMatch(/300 GB free/);
   });
 
+  it('counts the stream to the desk inside the air delay', () => {
+    const base = rig();
+    const withStream = (seconds: number) =>
+      rig({
+        airDelay: { seconds, toleranceSeconds: 1 },
+        output: { ...base.output, serve: { enabled: true, mp3Kbps: 320, latencyMs: 5000 } },
+      });
+    // 3.17 s look-ahead + 5 s to the desk + 1 s margin > 9 s.
+    const tight = find(runDoctor(withStream(9), env()), 'air delay')!;
+    expect(tight.status).toBe('warn');
+    expect(tight.detail).toMatch(/stream's 5\.0 s to the desk/);
+    expect(find(runDoctor(withStream(10), env()), 'air delay')!.status).toBe('ok');
+  });
+
   it('names the cards that are there when the configured one is not', () => {
     const c = runDoctor(rig({ capture: { ...rig().capture, device: 'plughw:CARD=FLOW8' } }), env());
     const cap = find(c, 'capture')!;

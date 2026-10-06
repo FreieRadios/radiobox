@@ -127,11 +127,11 @@ describe('config: buffered-design blocks and their defaults', () => {
   });
 
   it('the programme stream is off by default; the MP3 bitrate is kept sane', () => {
-    expect(load().cfg().output.serve).toEqual({ enabled: false, mp3Kbps: 320 });
+    expect(load().cfg().output.serve).toEqual({ enabled: false, mp3Kbps: 320, latencyMs: 2600 });
     const c = load([], {
       output: 'output:\n  serve: { enabled: true, mp3Kbps: 32 }',
     }).cfg();
-    expect(c.output.serve).toEqual({ enabled: true, mp3Kbps: 64 });
+    expect(c.output.serve).toEqual({ enabled: true, mp3Kbps: 64, latencyMs: 2600 });
     const t = load([], {
       meters: 'meters: { enabled: true, roles: { enabled: true, tokens: { stream: pi } } }',
     }).cfg();

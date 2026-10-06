@@ -346,7 +346,12 @@ function timingChecks(cfg: StudioboxConfig): Check[] {
   // The output card's buffer is part of the delay too: what is left over is
   // the FIFO that absorbs the two cards' drift and a stalled machine.
   const mon = cfg.output.monitor;
-  const outS = mon?.enabled ? outputLatencyMs(mon, cfg.capture.sampleRate, 'pull') / 1000 : 0;
+  const cardS = mon?.enabled ? outputLatencyMs(mon, cfg.capture.sampleRate, 'pull') / 1000 : 0;
+  // The stream to the desk (output.serve) counts the same way: its latency
+  // is spent inside the air delay. The longer path decides.
+  const serve = cfg.output.serve;
+  const streamS = serve?.enabled ? serve.latencyMs / 1000 : 0;
+  const outS = Math.max(cardS, streamS);
   const out: Check[] = [];
   if (cfg.airDelay.seconds < look + outS + 1) {
     out.push({
@@ -355,7 +360,11 @@ function timingChecks(cfg: StudioboxConfig): Check[] {
       detail:
         `airDelay.seconds (${cfg.airDelay.seconds}) leaves less than 1 s over the ` +
         `${look.toFixed(2)} s look-ahead` +
-        (outS > 0 ? ` and the ${outS.toFixed(1)} s output buffer` : ''),
+        (outS > 0
+          ? streamS > cardS
+            ? ` and the stream's ${outS.toFixed(1)} s to the desk`
+            : ` and the ${outS.toFixed(1)} s output buffer`
+          : ''),
       fix: 'raise airDelay.seconds or lower lookahead.seconds (10 s / 6 s is the default pair)',
     });
   } else {

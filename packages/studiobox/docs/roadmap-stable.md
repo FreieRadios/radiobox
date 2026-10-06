@@ -638,7 +638,13 @@ Items:
    _Done when:_ in a test the stream drops for 10 s and comes back, and the
    output has the bed in between and no click; a 0.01 % clock difference
    over three hours keeps the buffer within its tolerance.
-3. **Output target on the screen and in the config.** `output.target`:
+3. **Output target on the screen and in the config.** **Built
+   2026-10-06**: in the ⋮ menu for now (until Einstellungen, M1b.2, exists).
+   `output.serve.latencyMs` (default 2600) is the stream path's latency.
+   With `both`, Sendezeit follows USB. A switch that moves Sendezeit
+   between paths makes the FIFO release up to their latency difference at
+   once (≈0.4 s with the defaults). After `both` → `stream`, the desk box's
+   buffer holds that much extra until its servo works it off. `output.target`:
    `usb` | `stream` | `both` (the default from the YAML; the session
    presets get one each for a) and b)), switched in Einstellungen →
    Ausgänge (M1b.2) with a press-and-hold, like any end of output. Each path
