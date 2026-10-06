@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadConfig } from '../../src/config/load';
+import { loadConfig, streamFormat } from '../../src/config/load';
 
 /** A minimal live config; `extra` lines are appended, `over` replaces blocks. */
 function load(extra: string[] = [], over: Record<string, string> = {}) {
@@ -184,6 +184,7 @@ describe('config: buffered-design blocks and their defaults', () => {
         bufferMs: 2000,
         fallback: 'bed',
         autoStart: false,
+        format: 'ogg', // a studiobox /stream?format=flac is Ogg/FLAC
       },
     ]);
     const s = load(
@@ -202,6 +203,17 @@ describe('config: buffered-design blocks and their defaults', () => {
         )
       ).cfg
     ).toThrow(/only one stream/);
+  });
+
+  it('streams: the container is named, or taken from the URL', () => {
+    expect(streamFormat(undefined, 'http://maik:4445/stream?format=flac&k=S')).toBe('ogg');
+    expect(streamFormat(undefined, 'http://maik:4445/stream?k=S')).toBe('ogg');
+    expect(streamFormat(undefined, 'http://maik:4445/stream?format=mp3&k=S')).toBe('mp3');
+    expect(streamFormat(undefined, 'https://streaming.fueralle.org/corax_192.mp3')).toBe('mp3');
+    expect(streamFormat(undefined, 'https://x/live.ogg')).toBe('ogg');
+    expect(streamFormat(undefined, 'https://stream.rdl.de/rdl')).toBeUndefined(); // ffmpeg probes
+    expect(streamFormat('mp3', 'https://stream.rdl.de/rdl')).toBe('mp3');
+    expect(() => streamFormat('wav', 'http://x/y', 'A')).toThrow(/format must be one of/);
   });
 
   it('keeps the live state next to the config file unless told otherwise', () => {

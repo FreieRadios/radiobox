@@ -54,7 +54,9 @@ export class StreamFallback {
 export interface StreamWiring {
   player: StreamEvents & {
     setStreams(
-      lookup: (file: string) => { label: string; url: string; bufferMs: number } | null,
+      lookup: (
+        file: string
+      ) => { label: string; url: string; bufferMs: number; format?: string } | null,
       opts?: StreamPlayerOptions
     ): void;
     play(file: string): void;
@@ -79,7 +81,7 @@ export interface StreamWiring {
 export function setupStreams(w: StreamWiring): { autoStart(): void } {
   w.player.setStreams((file) => {
     const s = w.dirs.streamOf(file);
-    return s ? { label: s.label, url: s.url, bufferMs: s.bufferMs } : null;
+    return s ? { label: s.label, url: s.url, bufferMs: s.bufferMs, format: s.format } : null;
   }, w.opts);
   const fallback = new StreamFallback(w.bed, w.log);
   fallback.attach(w.player, () => {

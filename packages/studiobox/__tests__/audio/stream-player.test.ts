@@ -215,10 +215,49 @@ describe('StreamPlayer', () => {
     advance(2000); // 6 s since the last data, 2 s into the new attempt
     jest.advanceTimersByTime(1000);
     expect(decoders[1].killed).toBe(false);
-    advance(4000); // the new attempt itself hangs
+    advance(10000); // still within the 15 s a first connect may take
+    jest.advanceTimersByTime(1000);
+    expect(decoders[1].killed).toBe(false);
+    advance(4000); // the new attempt never delivers: it hangs
     jest.advanceTimersByTime(1000);
     expect(decoders[1].killed).toBe(true);
     sp.stop();
+  });
+
+  it('gives a slow first sample time (an Icecast MP3 on a Pi: 5-7 s)', () => {
+    jest.useFakeTimers();
+    const { sp, decoders, advance } = setup(500);
+    sp.start();
+    advance(7400);
+    jest.advanceTimersByTime(1000);
+    expect(decoders[0].killed).toBe(false);
+    decoders[0].sine(1000, { v: 0 }); // then real time
+    advance(3000);
+    jest.advanceTimersByTime(1000);
+    expect(decoders[0].killed).toBe(false);
+    advance(3000); // flowing, then 6 s of nothing: that one hangs
+    jest.advanceTimersByTime(1000);
+    expect(decoders[0].killed).toBe(true);
+    sp.stop();
+  });
+
+  it('names the input format when it is known, so ffmpeg skips its probe', () => {
+    const decoders: string[][] = [];
+    const sp = new StreamPlayer(
+      { label: 'x', url: 'http://x/a', bufferMs: 500, format: 'mp3' },
+      SR,
+      quiet,
+      { spawn: (args) => (decoders.push(args), new FakeDecoder(args)) }
+    );
+    sp.start();
+    expect(decoders[0].join(' ')).toContain('-f mp3 -i http://x/a');
+    sp.stop();
+    const sp2 = new StreamPlayer({ label: 'x', url: 'http://x/a', bufferMs: 500 }, SR, quiet, {
+      spawn: (args) => (decoders.push(args), new FakeDecoder(args)),
+    });
+    sp2.start();
+    expect(decoders[1].join(' ')).toContain('-loglevel error -i http://x/a');
+    sp2.stop();
   });
 
   it('skips a burst that would push it far behind, without a click', () => {

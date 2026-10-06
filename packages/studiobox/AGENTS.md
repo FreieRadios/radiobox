@@ -626,8 +626,11 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   repeated, except a burst beyond target + 3 s, which is skipped with a fade.
   When the buffer runs dry it fades out (20 ms) and says 'lost'. It
   reconnects with back-off (1, 2, 3, 5 s), and a watchdog ends a connection
-  that has carried no data for 5 s, measured from the newer of its start
-  and its last data. Once refilled it fades in over 1 s and says 'back'.
+  that has carried no data for 5 s once audio flowed, or none at all 15 s
+  after it started (an Icecast MP3 takes 5–7 s to its first sample on a Pi
+  while ffmpeg probes). The input format (`-f`) comes from the stream's
+  `format` or its URL (`streamFormat` in `config/load.ts`), which spares
+  ffmpeg the probe. Once refilled it fades in over 1 s and says 'back'.
   The reason comes from ffmpeg's stderr (503/5XX → `off`, 401/403 →
   `refused`, 404 → `missing`). `StreamFallback` (`setupStreams`, shared by
   both pipelines) switches the bed on at 'lost' and off at 'back' or stop,

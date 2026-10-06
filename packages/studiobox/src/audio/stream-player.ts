@@ -23,6 +23,8 @@ export interface StreamSpec {
   label: string;
   url: string;
   bufferMs: number;
+  /** ffmpeg input format (`-f`), when known: skips the slow probe. */
+  format?: string;
 }
 
 /** What `spawn` gives back (structural, so tests can drive a fake decoder). */
@@ -67,8 +69,10 @@ const FADE_OUT_MS = 20;
 const SKIP_FADE_MS = 20;
 /** Queued audio beyond target + this is skipped (a burst after a stall). */
 const OVERFLOW_MS = 3000;
-/** No data for this long on an open connection: it hangs, reconnect. */
+/** No data for this long once audio has flowed: it hangs, reconnect. */
 const STALL_MS = 5000;
+/** The first data may take longer (connect, server burst, a format probe). */
+const FIRST_DATA_MS = 15000;
 const BACKOFF_MS = [1000, 2000, 3000, 5000];
 
 /** The resampling servo: from the buffer's fill to a playback ratio. Slow on
@@ -151,6 +155,7 @@ export class StreamPlayer extends EventEmitter {
   private proc: StreamDecoder | null = null;
   private lastData = 0;
   private spawnedAt = 0;
+  private flowing = false; // this connection has delivered audio
   private stopped = false;
   private attempt = 0;
   private retry: NodeJS.Timeout | null = null;
@@ -225,6 +230,7 @@ export class StreamPlayer extends EventEmitter {
       '-hide_banner',
       '-loglevel',
       'error',
+      ...(this.spec.format ? ['-f', this.spec.format] : []),
       '-i',
       this.spec.url,
       '-map',
@@ -241,11 +247,13 @@ export class StreamPlayer extends EventEmitter {
     ]);
     this.proc = proc;
     this.spawnedAt = this.now();
+    this.flowing = false;
     let flowedAt = 0;
     proc.stdout.on('data', (chunk: Buffer) => {
       if (this.proc !== proc) return;
       if (!flowedAt) {
         flowedAt = this.now();
+        this.flowing = true;
         this.log.info(`stream ${this.spec.label}: connected`);
       }
       this.lastData = this.now();
@@ -279,13 +287,15 @@ export class StreamPlayer extends EventEmitter {
     });
   }
 
-  /** No data for STALL_MS since the last data or since this connection
-   *  started (a hung connect counts too): end it, which reconnects. */
+  /** No data for STALL_MS since the last data, or none at all FIRST_DATA_MS
+   *  after this connection started (a hung connect): end it, which
+   *  reconnects. */
   private checkStall(): void {
     if (!this.proc) return;
-    const since = Math.max(this.lastData, this.spawnedAt);
-    if (this.now() - since > STALL_MS) {
-      this.log.warn(`stream ${this.spec.label}: no data for ${STALL_MS / 1000} s, reconnecting`);
+    const limit = this.flowing ? STALL_MS : FIRST_DATA_MS;
+    const since = this.flowing ? this.lastData : this.spawnedAt;
+    if (this.now() - since > limit) {
+      this.log.warn(`stream ${this.spec.label}: no data for ${limit / 1000} s, reconnecting`);
       this.reason = 'unreachable';
       this.proc.kill(); // 'close' schedules the reconnect
     }

@@ -18,6 +18,7 @@ import {
   MonitorConfig,
   MultitrackConfig,
   ServeConfig,
+  StreamFormatName,
   StreamSourceConfig,
   OutputConfig,
   PriorityConfig,
@@ -244,6 +245,37 @@ function resolveBed(raw: unknown): BedConfig {
 }
 
 /** Resolve the optional local file player into a music-style source. */
+const STREAM_FORMATS: readonly StreamFormatName[] = ['mp3', 'ogg', 'flac', 'aac'];
+
+/** The stream's container: as configured, else from the URL (a studiobox
+ *  `/stream?format=…`, or the file extension). Naming it spares ffmpeg its
+ *  probe (~128 KB read in real time: 5–7 s on a Pi for a 192 kbit/s MP3). */
+export function streamFormat(raw: unknown, url: string, label = ''): StreamFormatName | undefined {
+  if (raw !== undefined && raw !== null && raw !== '') {
+    if (!STREAM_FORMATS.includes(raw as StreamFormatName)) {
+      throw new Error(
+        `filePlayer.streams "${label}": format must be one of ${STREAM_FORMATS.join(', ')}`
+      );
+    }
+    return raw as StreamFormatName;
+  }
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return undefined;
+  }
+  const q = u.searchParams.get('format');
+  if (u.pathname.endsWith('/stream') && (q === 'flac' || q === null)) return 'ogg';
+  if (u.pathname.endsWith('/stream') && q === 'mp3') return 'mp3';
+  const ext = path.extname(u.pathname).toLowerCase();
+  if (ext === '.mp3') return 'mp3';
+  if (ext === '.ogg' || ext === '.oga' || ext === '.opus') return 'ogg';
+  if (ext === '.flac') return 'flac';
+  if (ext === '.aac') return 'aac';
+  return undefined;
+}
+
 /** Network streams. Only http(s): the URL goes to ffmpeg, which would also
  *  open local files and other protocols. Labels must be unique (they name
  *  the rows). */
@@ -264,6 +296,7 @@ function resolveStreams(raw: unknown): StreamSourceConfig[] {
       bufferMs: Math.min(30000, Math.max(500, finite(e.bufferMs, 2000))),
       fallback: e.fallback === 'silence' ? 'silence' : 'bed',
       autoStart: e.autoStart === true,
+      format: streamFormat(e.format, e.url.trim(), label),
     });
   }
   if (out.filter((s) => s.autoStart).length > 1) {

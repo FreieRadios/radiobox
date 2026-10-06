@@ -371,7 +371,13 @@ export interface StreamSourceConfig {
   fallback: 'bed' | 'silence';
   /** Start playing at boot, so a box at the desk needs no tablet. */
   autoStart: boolean;
+  /** The container (ffmpeg input format): `mp3`, `ogg`, `flac` or `aac`.
+   *  Unset: taken from the URL (`/stream?format=flac` → ogg, `.mp3` → mp3,
+   *  …), else ffmpeg probes, which on a Pi takes several seconds. */
+  format?: StreamFormatName;
 }
+
+export type StreamFormatName = 'mp3' | 'ogg' | 'flac' | 'aac';
 
 export interface FilePlayerConfig {
   enabled: boolean;

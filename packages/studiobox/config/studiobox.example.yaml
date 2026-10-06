@@ -288,6 +288,9 @@ filePlayer:
   #     # bufferMs: 2000
   #     # fallback: bed
   #     # autoStart: true
+  #     # format: mp3 # mp3 | ogg | flac | aac. Unset: from the URL (a
+  #     # studiobox /stream, .mp3, .ogg, …), else ffmpeg probes, which takes
+  #     # 5–7 s on a Pi. Set it for a URL without an extension.
 
   # Optional music-style processing overrides (defaults match music channels):
   # processing:
