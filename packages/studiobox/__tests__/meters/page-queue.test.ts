@@ -1205,6 +1205,33 @@ describe('meters page — music return level', () => {
   });
 });
 
+describe('meters page — music level on air', () => {
+  const lvl = (p: ReturnType<typeof boot>) =>
+    p.byId('musLvl') as unknown as { value: string; oninput: () => void; onchange: () => void };
+
+  it('shows the level, sends a change and resets to 0 dB', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame()); // a box that does not report it (playout)
+    expect(p.byId('musLvlBox').style.display).toBe('none');
+    p.push(liveFrame({ musicGainDb: -3 }));
+    expect(p.byId('musLvlBox').style.display).toBe('');
+    expect(lvl(p).value).toBe('-3');
+    expect(p.byId('musLvlVal').textContent).toBe('−3 dB');
+    expect(p.byId('musLvlReset').style.display).toBe('');
+    lvl(p).value = '2';
+    lvl(p).oninput();
+    expect(p.sent).toEqual([{ type: 'musicGain', value: 2 }]);
+    expect(p.byId('musLvlVal').textContent).toBe('+2 dB');
+    p.push(liveFrame({ musicGainDb: -3 })); // a stale echo does not pull the thumb back
+    expect(lvl(p).value).toBe('2');
+    p.tick(200);
+    (p.byId('musLvlReset') as unknown as { onclick: () => void }).onclick();
+    expect(p.sent[1]).toEqual({ type: 'musicGain', value: 0 });
+    expect(p.byId('musLvlReset').style.display).toBe('none');
+  });
+});
+
 describe('meters page — host priority', () => {
   const prio = (p: ReturnType<typeof boot>) =>
     p.byId('prio') as unknown as { value: string; oninput: () => void; onchange: () => void };

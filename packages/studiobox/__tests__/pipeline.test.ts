@@ -390,6 +390,19 @@ describe('Pipeline: music return level', () => {
   });
 });
 
+describe('Pipeline: music level on air', () => {
+  it('starts at 0 dB, changes live and comes back after a restart', () => {
+    const { pipeline, p, cfg } = make();
+    expect(pipeline.snapshot().musicGainDb).toBe(0);
+    p.onCommand('musicGain', -4);
+    expect(pipeline.snapshot().musicGainDb).toBe(-4);
+    p.onCommand('musicGain', 'loud'); // ignored
+    expect(pipeline.snapshot().musicGainDb).toBe(-4);
+    expect(JSON.parse(fs.readFileSync(cfg.stateFile, 'utf8')).musicGainDb).toBe(-4);
+    expect(new Pipeline(cfg).snapshot().musicGainDb).toBe(-4);
+  });
+});
+
 describe('Pipeline: live status', () => {
   it('reports queue mode, tone, return, bed and priority state', () => {
     const { pipeline, p } = make();

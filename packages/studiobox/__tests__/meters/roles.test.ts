@@ -25,13 +25,21 @@ describe('Roles', () => {
   it('lets a guest and a spectator send nothing at all', () => {
     const r = on();
     for (const role of ['guest', 'spectator'] as const) {
-      for (const cmd of ['micsMuted', 'playFile', 'stopFile', 'recording', 'queueAdd', 'endShow']) {
+      for (const cmd of [
+        'micsMuted',
+        'playFile',
+        'stopFile',
+        'recording',
+        'queueAdd',
+        'endShow',
+        'musicGain',
+      ]) {
         expect(r.allows(role, cmd)).toBe(false);
       }
     }
   });
 
-  it('gives the host playout, the queue, the bed and the mics as a whole — not the rest', () => {
+  it('gives the host playout, the queue, the bed, the music level and the mics as a whole — not the rest', () => {
     const r = on();
     for (const cmd of [
       'playFile',
@@ -41,6 +49,7 @@ describe('Roles', () => {
       'queueMode',
       'micsMuted',
       'bed',
+      'musicGain',
     ]) {
       expect(r.allows('host', cmd)).toBe(true);
     }
@@ -53,6 +62,8 @@ describe('Roles', () => {
       'setupStart',
       'endShow',
       'testTone',
+      'returnGain',
+      'priorityDepth',
     ]) {
       expect(r.allows('host', cmd)).toBe(false);
     }

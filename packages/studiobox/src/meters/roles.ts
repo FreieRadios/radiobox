@@ -12,7 +12,8 @@ import { RolesConfig } from '../config/schema';
  */
 export type ViewRole = 'tech' | 'host' | 'guest' | 'spectator';
 
-/** What the host may do: playout, the queue, the bed, and the mics as a whole. */
+/** What the host may do: playout, the queue, the bed, the music level on air,
+ *  and the mics as a whole. */
 const HOST_COMMANDS = [
   'playFile',
   'stopFile',
@@ -26,6 +27,7 @@ const HOST_COMMANDS = [
   'micsMuted',
   'bed',
   'bedSelect',
+  'musicGain',
 ];
 
 const ALLOW: Record<ViewRole, ReadonlySet<string> | 'all'> = {

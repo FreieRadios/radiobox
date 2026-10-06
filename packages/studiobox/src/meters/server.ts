@@ -104,6 +104,7 @@ export function isPreviewable(name: string): boolean {
  *  Live mode only:
  *   - { type: 'musicReturn', value: boolean } start/stop the music return output
  *   - { type: 'returnGain', value: dB }       level of the music return
+ *   - { type: 'musicGain', value: dB }        level of the music on air
  *   - { type: 'endShow', value?: false }      "Sendung beenden" (false cancels)
  *   - { type: 'testTone', value: boolean }    1 kHz alignment tone on the monitor
  *   - { type: 'priorityDepth', value: dB }    host-priority depth
@@ -1104,6 +1105,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   <p class="hintline">So viel leiser werden die anderen Mikrofone, solange <b id="prioWho">die Moderation</b> spricht.
   <span class="act" id="prioAct" style="display:none">wirkt gerade</span></p>
  </section>
+ <section class="panel" id="musLvlBox" style="display:none">
+  <h2><label for="musLvl">Musik-Lautstärke</label></h2>
+  <div class="prio"><input id="musLvl" type="range" min="-12" max="6" step="1" value="0"><output id="musLvlVal" for="musLvl"></output><button id="musLvlReset" style="display:none">Zurücksetzen</button></div>
+  <p class="hintline">Wie laut Musik, Jingles und Bett auf Sendung neben den Stimmen stehen. 0 dB = automatisch eingepegelt.</p>
+ </section>
 </div>
 <div class="col2">
  <section class="panel guide" id="guidebox" style="display:none" aria-labelledby="gdTitle">
@@ -1362,6 +1368,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      Schritt-Tasten (±1, ±3 dB) für die Eingangsverstärkung dieses Mikros.</li>
      <li class="techonly"><b>Moderations-Vorrang</b>: so viel leiser werden die
      anderen Mikros, solange die Moderation spricht — sanft, nie stumm.</li>
+     <li><b>Musik-Lautstärke</b>: wie laut Musik, Jingles und Bett auf Sendung
+     neben den Stimmen stehen (−12 bis +6 dB). Die Musik wird ohnehin
+     automatisch eingepegelt; der Regler verschiebt sie nur gegenüber den
+     Stimmen. Der Kopfhörer im Studio bleibt davon unberührt
+     (<span class="k">Musik im Kopfhörer</span>).</li>
      <li><b>Programm</b>: Lautheit kurz und momentan (LUFS), <b>Spitze</b>,
      <b>Limiter</b> und <b>Duck</b> — die Absenkung der Musik, sobald jemand
      ins Mikro spricht (nicht bei Klopfen, Räuspern, Atmen oder Flüstern).</li>
@@ -1975,6 +1986,19 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   const v=String(Math.round(db));
   if(retLvl.value!==v)retLvl.value=v;
   const t=retLvlText(v);if(retLvlVal.textContent!==t)retLvlVal.textContent=t;}
+ // Music on air ("Musik-Lautstärke"): every music source next to the voices.
+ // Same drag rules as the sliders above.
+ const musLvl=$('musLvl'),musLvlVal=$('musLvlVal'),musLvlReset=$('musLvlReset');let musLvlAt=0,musLvlSentAt=0;
+ function showMusLvl(v){musLvlVal.textContent=retLvlText(v);show(musLvlReset,Number(v)!==0);}
+ function sendMusLvl(){musLvlSentAt=Date.now();send({type:'musicGain',value:Number(musLvl.value)});}
+ musLvl.oninput=()=>{musLvlAt=Date.now();showMusLvl(musLvl.value);if(musLvlAt-musLvlSentAt>=150)sendMusLvl();};
+ musLvl.onchange=()=>{musLvlAt=Date.now();sendMusLvl();};
+ musLvlReset.onclick=()=>{musLvl.value='0';musLvlAt=Date.now();showMusLvl('0');sendMusLvl();};
+ function setMusLvl(db){show($('musLvlBox'),typeof db==='number');if(typeof db!=='number')return;
+  if(Date.now()-musLvlAt<1500)return;
+  const v=String(Math.round(db));
+  if(musLvl.value!==v)musLvl.value=v;
+  if(musLvlVal.textContent!==retLvlText(v))showMusLvl(v);}
  // ---- Einmessen (setup assistant) ----------------------------------------
  // The box listens and measures; the page only shows where it is. The buttons
  // are fixed elements switched by phase, and the step tiles are built once per
@@ -2118,6 +2142,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    setSetup(s);
    setPrio(playoutOnly?null:s.priority||null);
    setRetLvl(playoutOnly?null:s.returnGainDb);
+   setMusLvl(playoutOnly?null:s.musicGainDb);
    // Two files in different folders can share a basename, so the location is
    // part of what makes the now-playing line stale, not just the name.
    const atKey=s.filePlayingAt?s.filePlayingAt.folder+':'+s.filePlayingAt.name:'';

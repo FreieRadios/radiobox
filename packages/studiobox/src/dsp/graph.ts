@@ -173,6 +173,10 @@ const ACTIVE_FLOOR = 1e-3;
 const MONO_ON_BOTH_DB = 10 * Math.log10(2);
 /** Host-priority key level above which the priority mic counts as acting. */
 const PRIORITY_ACTIVE_DB = -0.5;
+/** Range of the live music level on air (dB) and how fast a change glides. */
+const MUSIC_GAIN_MIN_DB = -12;
+const MUSIC_GAIN_MAX_DB = 6;
+const MUSIC_GAIN_SLEW_MS = 50;
 
 /**
  * The full studiobox processing graph. Stateful; one instance per run.
@@ -208,6 +212,10 @@ export class Graph {
   private returnDucker: Ducker;
   private returnGainDb: number; // output.return.gainDb, live from the page
   private returnGain: number;
+  private musicGainDb = 0; // "Musik-Lautstärke": music on air, live from the page
+  private musicGainTarget = 1;
+  private musicGainNow = 1; // slewed toward the target (click-free)
+  private musicGainCoef: number;
   private limiter: Limiter;
   private outMeter: StereoLoudness;
   private preMeter: StereoLoudness;
@@ -382,6 +390,7 @@ export class Graph {
       : cfg.master.targetLufs;
     this.master = new MasterLeveler(cfg.master.targetLufs, seed, sr);
     this.muteCoef = msToCoef(5, sr);
+    this.musicGainCoef = msToCoef(MUSIC_GAIN_SLEW_MS, sr);
 
     this.snapshot = this.buildSnapshot(null, 0);
   }
@@ -550,6 +559,11 @@ export class Graph {
         othL = 0,
         othR = 0;
       let tapIdx = nMics;
+      // Music on air: one gain for every music source, after its leveler and
+      // before the duck (the room's return keeps its own level).
+      const mt = this.musicGainTarget;
+      this.musicGainNow = this.musicGainCoef * (this.musicGainNow - mt) + mt;
+      const mg = this.musicGainNow;
       for (const mu of this.music) {
         const rawL = mu.virtual ? this.fileL[n] : input[mu.left][n];
         const rawR = mu.virtual ? this.fileR[n] : input[mu.right][n];
@@ -586,7 +600,7 @@ export class Graph {
           retOthR += r * rg;
         }
         // Programme path: the same music, delayed to line up with the mics.
-        const pg = mu.leveler ? mu.leveler.programmeGain : 1;
+        const pg = (mu.leveler ? mu.leveler.programmeGain : 1) * mg;
         const dl = (mu.delayL ? mu.delayL.process(l) : l) * pg;
         const dr = (mu.delayR ? mu.delayR.process(r) : r) * pg;
         mu.progL = dl;
@@ -784,6 +798,18 @@ export class Graph {
 
   get returnLevelDb(): number {
     return this.returnGainDb;
+  }
+
+  /** Level of the music on air (dB, clamped to -12..+6): every music source
+   *  after its leveler, before the duck. The mics and the return stay put. */
+  setMusicGain(db: number): void {
+    if (!Number.isFinite(db)) return;
+    this.musicGainDb = Math.min(MUSIC_GAIN_MAX_DB, Math.max(MUSIC_GAIN_MIN_DB, db));
+    this.musicGainTarget = dbToGain(this.musicGainDb);
+  }
+
+  get musicLevelDb(): number {
+    return this.musicGainDb;
   }
 
   /** Change the host-priority depth live. No-op when priority is not configured. */

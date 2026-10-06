@@ -384,6 +384,11 @@ hidden where the box does not report it, so a playout box shows none of it):
   set): a 0…24 slider sent as `priorityDepth` (negative dB, throttled while
   dragging); a mic held back by it reads **LEISER** (`priorityDb < -1`,
   `--duck`). **Trim** column: the value opens a ±1/±3 dB stepper (`trim`).
+- **Musik-Lautstärke** panel (`setMusLvl`, on `snapshot.musicGainDb`; tech
+  and host): −12…+6 dB sent as `musicGain`, one gain on every music source
+  after its leveler and before the duck (`Graph.setMusicGain`, slewed over
+  50 ms). Programme only: the return keeps its own `returnGain`. Kept in the
+  state file; "Zurücksetzen" goes back to 0 dB.
 - **Einmessen** panel (`setSetup`) on `snapshot.setup`: step tiles with their
   state as a word (ERLEDIGT / JETZT / OFFEN), who is up and the sentence to
   read, then one card per mic (verdict, "vorher → nachher" per setting, the

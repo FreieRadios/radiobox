@@ -477,7 +477,10 @@ and the terminal, and much that matters lives only in the YAML. 1 is small
 enough to land before the tests; 2 and 3 take what the tests show (4) into
 account.
 
-1. **Music level on air ("Musik-Lautstärke").** Today there is no live
+1. **Music level on air ("Musik-Lautstärke").** **Done 2026-10-06**: a
+   "Musik-Lautstärke" panel under the meters (tech and host), `musicGain` in
+   `Graph` (slewed over 50 ms), tests in `graph.test.ts`, `pipeline.test.ts`,
+   `roles.test.ts`, `page-queue.test.ts`; still to hear on the rig. Before: no
    control for how loud music sits against the voices: music is auto-levelled
    to `leveler.targetLufs` (−22 LUFS by default, `MUSIC_OVERRIDES` in
    `src/config/load.ts`; per music channel or `filePlayer.processing` in the

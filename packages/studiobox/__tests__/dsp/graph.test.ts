@@ -224,6 +224,66 @@ describe('Graph music return (roadmap M1.7)', () => {
   });
 });
 
+describe('Graph music level on air (roadmap M1b.1)', () => {
+  const build = () =>
+    new Graph(
+      config([mic(1, 'A'), music(3, 4, 'Deck')], {
+        lookahead: LOOK,
+        filePlayer: player({ ducked: false }),
+      })
+    );
+  // 1 s of talk, then 1 s of file player and music pair.
+  const talk = concat(tone(-20, 1), silence(1));
+  const tune = concat(silence(1), tone(-26, 1, 440));
+  const inputs = () => [talk, silence(2), tune, tune];
+
+  it('moves every music source on air by the set dB and leaves the mics and the return alone', () => {
+    const plain = run(build(), inputs(), tune);
+    const graph = build();
+    graph.setMusicGain(-6);
+    expect(graph.musicLevelDb).toBe(-6);
+    const lower = run(graph, inputs(), tune);
+    const lat = graph.latencySamples;
+    const micPart = (x: Float32Array) => rmsDb(x, lat + SR / 4, lat + SR - 2048);
+    const musicPart = (x: Float32Array) => rmsDb(x, lat + SR + SR / 4, 2 * SR - 2048);
+    expect(micPart(lower.l)).toBeCloseTo(micPart(plain.l), 1);
+    expect(musicPart(plain.l) - musicPart(lower.l)).toBeCloseTo(6, 1);
+    expect(rmsDb(lower.retL, SR + SR / 4)).toBeCloseTo(rmsDb(plain.retL, SR + SR / 4), 1);
+  });
+
+  it('glides to a new level without a click', () => {
+    const graph = new Graph(
+      config([mic(1, 'A')], { lookahead: LOOK, filePlayer: player({ ducked: false }) })
+    );
+    graph.setMicsMuted(true);
+    const half = 47 * FRAMES; // ~1 s, on a block boundary
+    const x = tone(-20, 2, 440);
+    const a = run(graph, [new Float32Array(half)], x.subarray(0, half));
+    graph.setMusicGain(6);
+    const b = run(graph, [new Float32Array(half)], x.subarray(half, 2 * half));
+    const out = concat(a.l, b.l);
+    // A 440 Hz tone at -20 dBFS moves at most ~0.008 per sample, ~0.016 at
+    // +6 dB; a step in the gain would show as a jump of up to ~0.14.
+    let jump = 0;
+    for (let i = graph.latencySamples + 1; i < out.length; i++)
+      jump = Math.max(jump, Math.abs(out[i] - out[i - 1]));
+    expect(jump).toBeLessThan(0.02);
+    expect(
+      rmsDb(out, out.length - SR / 4) - rmsDb(out, graph.latencySamples + 2048, half)
+    ).toBeCloseTo(6, 1);
+  });
+
+  it('clamps to -12..+6 dB and ignores a non-number', () => {
+    const graph = build();
+    graph.setMusicGain(-40);
+    expect(graph.musicLevelDb).toBe(-12);
+    graph.setMusicGain(20);
+    expect(graph.musicLevelDb).toBe(6);
+    graph.setMusicGain(NaN);
+    expect(graph.musicLevelDb).toBe(6);
+  });
+});
+
 describe('Graph ducking with look-ahead', () => {
   const duck = {
     enabled: true,

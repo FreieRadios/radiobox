@@ -22,6 +22,7 @@ const state = (savedAt: number): SessionState => ({
   automixFloorDb: -55,
   priorityDepthDb: -6,
   returnGainDb: -12,
+  musicGainDb: -3,
   queueMode: 'single',
 });
 
