@@ -598,7 +598,14 @@ studiobox can play a stream, and nobody can listen on a tablet.
 
 Items:
 
-1. **The programme as a stream from studiobox itself** (`/stream`). maik
+1. **The programme as a stream from studiobox itself** (`/stream`).
+   **Built 2026-10-06**: `output.serve` (off by default), `src/audio/serve.ts`,
+   the token `meters.roles.tokens.stream` (or an operator's), ⋮ →
+   Studio-Stream with the number of connected devices, held to end. A late
+   Ogg/FLAC client gets the cached header pages and then the stream. Checked
+   over HTTP with ffmpeg as the client; the three-hour run on the Pi waits
+   for M1c.2. On maik's side, switching it off ends every connection and
+   later requests get 503 "stream off". The Pi's side is M1c.2. maik
    serves the on-air programme (behind the air-delay FIFO, like the harbor
    encoder) over HTTP, so a Pi or any player on the LAN pulls it without an
    Icecast in between. Ogg/FLAC for a box, MP3 for a browser, one encoder

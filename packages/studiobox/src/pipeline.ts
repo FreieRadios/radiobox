@@ -11,6 +11,7 @@ import { FileDirs } from './audio/file-dirs';
 import { QueuePlayer } from './audio/play-queue';
 import { BedDeck, BedStatus } from './audio/bed';
 import { ListenEncoder, ListenHub } from './audio/listen';
+import { ProgrammeStream, STREAM_TYPES, StreamStatus } from './audio/serve';
 import { AirFifo } from './audio/air-fifo';
 import { SampleClock } from './audio/sample-clock';
 import { BYTES_PER_SAMPLE, interleave, interleaveStereo } from './audio/format';
@@ -52,6 +53,8 @@ export interface LiveStatus {
   returnGainDb: number | null;
   /** Level of the music on air ("Musik-Lautstärke", dB). */
   musicGainDb: number;
+  /** The programme as a stream (`/stream`); null when not configured. */
+  serve: StreamStatus | null;
   /** The same for the local output (`monitor`). */
   monitorFault: boolean;
   multitrack: boolean | null;
@@ -91,6 +94,8 @@ export class Pipeline {
   /** "Abhören" on the technician's tablet (with the meters page only). */
   private listen: ListenHub | null = null;
   private dry: Float32Array[] = [];
+  /** The programme as a stream from the box (`output.serve`). */
+  private serve: ProgrammeStream | null = null;
   private filePlayer: FilePlayer | null;
   private fileDirs: FileDirs | null;
   private playQueue: QueuePlayer | null;
@@ -200,6 +205,21 @@ export class Pipeline {
       });
       this.listen = hub;
       this.meters.onListen((id, src, res) => hub.attach(id, src, res));
+    }
+    if (cfg.output.serve.enabled && !this.meters) {
+      log.warn('output.serve needs meters.enabled (the stream is served on the meters port)');
+    } else if (cfg.output.serve.enabled && this.meters) {
+      const serve = new ProgrammeStream({
+        sampleRate: sr,
+        log: makeLog('stream'),
+        mp3Kbps: cfg.output.serve.mp3Kbps,
+        spawn: opts.listenSpawn,
+      });
+      this.serve = serve;
+      this.meters.onStream(
+        (format, res) => serve.attach(format, res),
+        (format) => STREAM_TYPES[serve.parse(format) ?? 'flac']
+      );
     }
 
     // --- air delay ---
@@ -409,6 +429,8 @@ export class Pipeline {
         this.state.musicGainDb = this.graph.musicLevelDb;
         this.persist();
       }
+    } else if (type === 'serve' && this.serve) {
+      this.serve.set(!!value);
     } else if (type === 'listen' && this.listen) {
       const req = isObj(value) ? value : {};
       this.listen.select(String(req.id ?? ''), req.src);
@@ -733,6 +755,7 @@ export class Pipeline {
       this.fifo.setOutputLatency(0);
       for (const b of this.fifo.drain(now)) {
         this.encoder.write(b.buf);
+        this.serve?.write(b.buf);
         this.listen?.air(b.buf);
       }
     }
@@ -761,6 +784,7 @@ export class Pipeline {
     const b = this.fifo.pop(Date.now());
     const buf = b ? b.buf : this.silence;
     this.encoder.write(buf);
+    this.serve?.write(buf);
     this.listen?.air(buf);
     this.monitor.writeThen(this.testTone ? this.toneBlock(frames) : buf, this.pump, watchdog);
   };
@@ -795,6 +819,7 @@ export class Pipeline {
       musicReturnFault: !!this.ret && this.returnArmed && this.ret.failing(now),
       returnGainDb: this.ret ? this.graph.returnLevelDb : null,
       musicGainDb: this.graph.musicLevelDb,
+      serve: this.serve ? this.serve.status() : null,
       monitorFault: !!this.monitor && this.monitorArmed && this.monitor.failing(now),
       multitrack: this.multitrack ? this.multitrack.active : null,
       setup: this.setup.status(),
@@ -950,6 +975,7 @@ export class Pipeline {
     this.scheduler?.stop();
     this.listeners?.stop();
     this.listen?.stopAll();
+    this.serve?.stopAll();
     this.meters?.stop();
     this.filePlayer?.shutdown();
     this.bedPlayer?.shutdown();

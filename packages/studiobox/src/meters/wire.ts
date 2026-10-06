@@ -14,6 +14,7 @@ import { SetupStatus } from '../setup/session';
 export type Snapshot = MeterSnapshot & {
   setup?: SetupStatus;
   testTone?: boolean;
+  serve?: { on: boolean; clients: number } | null;
 };
 
 /**
@@ -26,14 +27,16 @@ export type Snapshot = MeterSnapshot & {
  *  - `false` while the buffer is still filling (the output is silent) and
  *    once a show has ended; `true` while it is live and while "Sendung
  *    beenden" lets the buffer play out — that is still going out.
- *  - An output has to be running: the harbor stream, or the local output
- *    unless the alignment tone has taken the programme's place on it.
+ *  - An output has to be running: the harbor stream, the local output
+ *    unless the alignment tone has taken the programme's place on it, or
+ *    the box's own stream (`/stream`) with somebody pulling it.
  */
 export function onAirOf(s: Snapshot): boolean | null {
   if (!s.air) return null;
   if (s.air.state !== 'live' && s.air.state !== 'draining') return false;
   const local = s.monitor === true && !s.testTone;
-  return local || s.streaming === true;
+  const served = !!s.serve && s.serve.on && s.serve.clients > 0;
+  return local || s.streaming === true || served;
 }
 
 const pick = <T extends object>(o: T, keys: readonly string[]): Partial<T> => {

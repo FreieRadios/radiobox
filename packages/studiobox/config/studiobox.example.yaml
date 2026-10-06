@@ -110,6 +110,16 @@ output:
     url: 'icecast://source:hackme@stream.radio-z.net:4444/studio-lossless'
     format: ogg-flac # ogg-flac (lossless) | mp3 (fallback)
     contentType: application/ogg
+  # The programme as a stream from studiobox itself, on the meters port:
+  # http://<box>:4445/stream?format=flac&k=<stream token> (Ogg/FLAC 24 bit,
+  # for a Pi at the desk in another room) or format=mp3 (for a browser). What
+  # leaves the box, behind the air delay, like the harbor. One encoder per
+  # format, only while somebody pulls. Needs meters.enabled; with roles on it
+  # takes the stream token (meters.roles.tokens.stream) or an operator's.
+  # Switched live under ⋮ → Studio-Stream.
+  serve:
+    enabled: false
+    # mp3Kbps: 320
   backup:
     enabled: true
     dir: './recordings' # rolling local FLAC safety copy
@@ -181,6 +191,7 @@ meters:
   roles:
     enabled: false
     # tokens: { tech: '…', host: '…', guest: '…' } # fixed; else new per start
+    # stream: '…' # for /stream only (a box at the desk); pin it, the box keeps the URL
 
 # Optional: listener feedback from eve. Listeners send comments and hearts to
 # the show on air from eve's public page; a comment shows up here only after

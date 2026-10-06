@@ -27,6 +27,9 @@ const CONNECT_ROUTE = '/connect';
 /** "Abhören": the technician's MP3 stream of what is recorded or aired. */
 const LISTEN_ROUTE = '/listen';
 
+/** The programme as a stream (`?format=flac|mp3`), for a box at the desk. */
+const STREAM_ROUTE = '/stream';
+
 /** The guest and spectator views and what they share, as real files (no
  *  build step; the technician/host page still lives in `PAGE` below until it
  *  moves out too). Only these names are ever read — nothing from the request
@@ -108,6 +111,7 @@ export function isPreviewable(name: string): boolean {
  *   - { type: 'musicReturn', value: boolean } start/stop the music return output
  *   - { type: 'returnGain', value: dB }       level of the music return
  *   - { type: 'musicGain', value: dB }        level of the music on air
+ *   - { type: 'serve', value: boolean }      programme stream (/stream) on/off
  *   - { type: 'listen', value: { id, src } }  "Abhören": switch a listener's
  *                                             source (rec | raw | mic:<label> | air)
  *   - { type: 'endShow', value?: false }      "Sendung beenden" (false cancels)
@@ -154,6 +158,10 @@ export class MeterServer {
   private onListenReq:
     | ((id: string, src: string, res: http.ServerResponse) => 'ok' | 'bad' | 'full')
     | null = null;
+  private onStreamReq:
+    | ((format: string, res: http.ServerResponse) => 'ok' | 'bad' | 'off' | 'full')
+    | null = null;
+  private streamType: (format: string) => string = () => 'application/octet-stream';
   /** Role tokens and the links to hand out (see `Roles`). */
   readonly roles: Roles;
   /** The role each open connection was given when it connected. */
@@ -178,6 +186,8 @@ export class MeterServer {
         this.serveConnect(req, role, res);
       } else if (url === LISTEN_ROUTE) {
         this.serveListen(req, role, res);
+      } else if (url === STREAM_ROUTE) {
+        this.serveStream(req, res);
       } else if (DATA_ROUTES.has(url) && !isOperator(role)) {
         // Hiding the file browser is not the protection — this is.
         res.writeHead(403);
@@ -278,6 +288,45 @@ export class MeterServer {
     // the stream too, as from an Icecast), never cached.
     res.writeHead(200, {
       'content-type': 'audio/mpeg',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    });
+  }
+
+  /** The programme as a stream: hand `/stream?format=…` to the pipeline.
+   *  `type` names the content type of a format. */
+  onStream(
+    fn: (format: string, res: http.ServerResponse) => 'ok' | 'bad' | 'off' | 'full',
+    type: (format: string) => string
+  ): void {
+    this.onStreamReq = fn;
+    this.streamType = type;
+  }
+
+  /** `/stream`: the stream token or an operator's, never open. */
+  private serveStream(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.roles.mayStream(req.url)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    if (!this.onStreamReq) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    const format = new URL(req.url ?? '/', 'http://localhost').searchParams.get('format') ?? '';
+    const ok = this.onStreamReq(format, res);
+    if (ok !== 'ok') {
+      // 'off': the technician switched it off — said as such to the box.
+      res.writeHead(ok === 'bad' ? 400 : 503, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end(
+        ok === 'off' ? 'stream off\n' : ok === 'full' ? 'too many clients\n' : 'bad format\n'
+      );
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': this.streamType(format),
       'cache-control': 'no-store',
       'x-content-type-options': 'nosniff',
     });
@@ -503,6 +552,15 @@ export class MeterServer {
   start(): void {
     this.server.listen(this.port, () => {
       this.log.info(`meters on http://localhost:${this.port}`);
+      if (this.onStreamReq) {
+        const base = `http://${lanAddress()}:${this.listenPort()}`;
+        this.log.info(
+          `programme stream: ${this.roles.enabled ? this.roles.streamUrl(base) : `${base}/stream?format=flac`}` +
+            (this.roles.enabled && !this.roles.streamPinned
+              ? ' (new at every start: pin meters.roles.tokens.stream for the box at the desk)'
+              : '')
+        );
+      }
       if (!this.roles.enabled) return;
       // Role links for the tablets. Anything opened without a token is
       // read-only, so these lines are the keys to the session.
@@ -1086,6 +1144,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <button id="menuBtn" class="icon" title="Mehr" aria-label="Mehr" aria-haspopup="true">⋮</button>
    <div id="menu" class="menu" style="display:none">
     <button id="mon" class="mon hold techonly" style="display:none">Lokale Ausgabe aus</button>
+    <button id="srv" class="mon hold techonly" style="display:none">Studio-Stream aus</button>
     <button id="ret" class="mon techonly" style="display:none">Musik-Rückweg aus</button>
     <div id="retLvlBox" class="techonly" style="display:none">
      <label for="retLvl">Musik im Kopfhörer</label>
@@ -1400,6 +1459,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      damit man sie im Kopfhörer hört. Der Regler <span class="k">Musik im
      Kopfhörer</span> darunter stellt ein, wie laut sie dort neben den
      Mikrofonen ist — die Sendung bleibt davon unberührt.</li>
+     <li class="techonly"><span class="k">⋮ → Studio-Stream</span> stellt das
+     Programm (wie es das Gerät verlässt) als Stream bereit, z. B. für den
+     Raspberry Pi am Pult in einem anderen Raum; daneben steht, wie viele
+     Geräte gerade zuhören. Beenden: gedrückt halten — das Programm dort
+     verstummt.</li>
      <li class="techonly"><span class="k">⋮ → Testton</span> (gedrückt halten)
      legt 1 kHz bei −18 dBFS auf die lokale Ausgabe, um den Eingang am Pult
      einzupegeln. Er <b>ersetzt dort das Programm</b>; oben steht so lange
@@ -1739,6 +1803,14 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   if(monFault&&monitor===false)mbtn2.title='Die Soundkarte antwortet nicht — studiobox versucht es jede Sekunde neu';}
  holdBtn(mbtn2,()=>monitor===true,()=>{if(monitor===null||!tech())return;
   monitor=!monitor;setMon();send({type:'monitor',value:monitor});},setMon,'Ausgabe beenden?');
+ // The box's own stream (/stream) for a box at the desk: ending it ends the
+ // programme there, so it is held like the other outputs. It says how many
+ // pull it, so "läuft" with nobody connected is not mistaken for on air.
+ const srvBtn=$('srv');let serve=null;
+ function setSrv(){const on=serve?serve.on:null;
+  setTog(srvBtn,'mon hold techonly',on,'Studio-Stream läuft · '+(serve&&serve.clients===1?'1 Gerät':(serve?serve.clients:0)+' Geräte'),'Studio-Stream aus','Der Programm-Stream für das Studio',true);}
+ holdBtn(srvBtn,()=>!!serve&&serve.on,()=>{if(!serve||!tech())return;
+  serve={on:!serve.on,clients:serve.on?0:serve.clients};setSrv();send({type:'serve',value:serve.on});},setSrv,'Studio-Stream beenden?');
  // Music return to the room (the mixer's USB playback): no programme hangs on
  // it, so it is a plain switch.
  const retBtn=$('ret');let musicReturn=null,retFault=false;
@@ -2195,6 +2267,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    setAir(s);
    const ek=air?air.state:'';
    if(ek!==endKey){endKey=ek;setEnd();}
+   const sv=s.serve||null;
+   if(JSON.stringify(sv)!==JSON.stringify(serve)){serve=sv;setSrv();}
    const mr=typeof s.musicReturn==='boolean'?s.musicReturn:null;
    const rf=s.musicReturnFault===true;
    if(mr!==musicReturn||rf!==retFault){musicReturn=mr;retFault=rf;setRet();}

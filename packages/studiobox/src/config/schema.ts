@@ -259,8 +259,19 @@ export interface MonitorConfig {
   gainDb?: number;
 }
 
+/** The programme as a stream from studiobox itself (`/stream` on the meters
+ *  port): what leaves the box, behind the air delay, as Ogg/FLAC or MP3, for
+ *  a Pi at the desk or a player on the LAN. Off by default; when enabled it
+ *  starts with the box and is switched live from the page. */
+export interface ServeConfig {
+  enabled: boolean;
+  /** MP3 bitrate for browsers (default 320). */
+  mp3Kbps: number;
+}
+
 export interface OutputConfig {
   harbor: HarborConfig;
+  serve: ServeConfig;
   backup: BackupConfig;
   multitrack: MultitrackConfig;
   monitor: MonitorConfig;
@@ -278,7 +289,7 @@ export interface OutputConfig {
 export interface RolesConfig {
   enabled: boolean;
   /** Fixed tokens; any left out is generated at start and printed. */
-  tokens: { tech?: string; host?: string; guest?: string };
+  tokens: { tech?: string; host?: string; guest?: string; stream?: string };
 }
 
 export interface MetersConfig {

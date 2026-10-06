@@ -64,6 +64,13 @@ describe('onAirOf — "programme is leaving the box"', () => {
     expect(onAirOf(snapshot({ monitor: null, streaming: null }))).toBe(false);
   });
 
+  it("counts the box's own stream only while somebody pulls it", () => {
+    const off = { monitor: false, streaming: false };
+    expect(onAirOf(snapshot({ ...off, serve: { on: true, clients: 1 } }))).toBe(true);
+    expect(onAirOf(snapshot({ ...off, serve: { on: true, clients: 0 } }))).toBe(false);
+    expect(onAirOf(snapshot({ ...off, serve: { on: false, clients: 0 } }))).toBe(false);
+  });
+
   it('is off while the buffer fills and once the show has ended', () => {
     expect(onAirOf(snapshot({ air: air('filling') }))).toBe(false);
     expect(onAirOf(snapshot({ air: air('ended') }))).toBe(false);

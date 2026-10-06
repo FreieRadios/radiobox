@@ -88,6 +88,11 @@ output:
     url: 'icecast://source:CHANGEME@stream.example.org:4444/studio-lossless'
     format: ogg-flac
     contentType: application/ogg
+  # ADAPT: recording in one room and airing from another (roadmap M1c a):
+  # switch this on and let the Pi at the desk play
+  # http://<this box>:4445/stream?format=flac&k=<meters.roles.tokens.stream>.
+  serve:
+    enabled: false
   # The session recording. Does not start by itself — arm it on the web page.
   # One continuous FLAC (24 bit) per recording, named by its on-air time.
   backup:

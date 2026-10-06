@@ -69,6 +69,22 @@ describe('Roles', () => {
     }
   });
 
+  it('lets the stream token and the operators pull /stream, nobody else', () => {
+    const r = on({ tech: 'T', host: 'H', guest: 'G', stream: 'S' });
+    expect(r.mayStream('/stream?k=S')).toBe(true);
+    expect(r.mayStream('/stream?format=mp3&k=T')).toBe(true);
+    expect(r.mayStream('/stream?k=H')).toBe(true);
+    expect(r.mayStream('/stream?k=G')).toBe(false);
+    expect(r.mayStream('/stream')).toBe(false);
+    expect(r.mayStream('/stream?k=nope')).toBe(false);
+    // The stream token is no role: it opens no view and sends nothing.
+    expect(r.roleOf('/?k=S')).toBe('spectator');
+    expect(r.streamUrl('http://maik:4445/')).toBe('http://maik:4445/stream?format=flac&k=S');
+    expect(r.streamPinned).toBe(true);
+    expect(on().streamPinned).toBe(false);
+    expect(new Roles({ enabled: false, tokens: {} }).mayStream('/stream')).toBe(true);
+  });
+
   it('gives the technician everything', () => {
     const r = on();
     for (const cmd of ['recording', 'trim', 'setupApply', 'endShow', 'anythingNew']) {

@@ -31,6 +31,7 @@ music pairs ────────► gain ───┤                       
               stereo FLAC + multitrack FLAC (same blocks, sample-aligned) ◄───────────┤
                                                                                       ▼
                                   air-delay FIFO ─► output card pulls (aplay) / harbor (ffmpeg)
+                                                    └─► /stream (Ogg/FLAC, MP3) · Abhören „Auf Sendung“
 ```
 
 ## Commands
@@ -613,6 +614,19 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   moment. `room()`/`air()` return at once while nobody listens. Panel
   `setAbh` (techonly, live mode), source remembered per browser, the delay
   behind the room = look-ahead (or air delay) + the browser's buffer.
+- **Programme stream** (`output.serve`, `src/audio/serve.ts`, roadmap
+  M1c.1): `/stream?format=flac|mp3` on the meters port serves what leaves
+  the box (fed beside the harbor encoder, after the FIFO), for a Pi at the
+  desk in another room. Ogg/FLAC 24 bit with 100 ms pages, or MP3
+  (`mp3Kbps`, default 320). One encoder per format, started by the first
+  client and ended 3 s after the last one. A late Ogg client gets the
+  cached header pages (granule 0) and then whole pages from then on
+  (`OggPager`); MP3 clients start at a frame header. Access: the stream
+  token `meters.roles.tokens.stream` (no view, no commands;
+  `Roles.mayStream`) or a tech/host token; the URL is printed at start.
+  On when enabled; `serve` command (tech) switches it, and off ends every
+  client and answers 503 "stream off". Snapshot `serve: {on, clients}`;
+  `onAirOf` counts it only with a client. ⋮ → Studio-Stream on the page.
 - **Roles** (`meters.roles`, `src/meters/roles.ts`): per-connection role from
   the `?k=` token, command allowlist enforced in `MeterServer`; off by default
   (playout boxes), role links (incl. one guest link per mic) printed at start

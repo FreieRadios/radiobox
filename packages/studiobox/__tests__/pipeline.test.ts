@@ -447,6 +447,62 @@ describe('Pipeline: Abhören (roadmap M1c.4)', () => {
   });
 });
 
+describe('Pipeline: programme stream (roadmap M1c.1)', () => {
+  it('is null unless configured', () => {
+    expect(make().pipeline.snapshot().serve).toBeNull();
+  });
+
+  it('serves what leaves the box, and the technician switches it', async () => {
+    const encoders: { bytes: number; killed: boolean }[] = [];
+    const spawn = () => {
+      const e = { bytes: 0, killed: false };
+      encoders.push(e);
+      const stdin = new PassThrough();
+      stdin.on('data', (b: Buffer) => (e.bytes += b.length));
+      return { stdin, stdout: new PassThrough(), kill: () => (e.killed = true), on: () => {} };
+    };
+    const dir = tmp();
+    const base = config([mic(1, 'Host')], {
+      lookahead: { seconds: 0.5, gateMs: 10, mixMs: 100 },
+      airDelay: { seconds: 2, toleranceSeconds: 1 },
+      stateFile: path.join(dir, 'session-state.json'),
+    });
+    const cfg = {
+      ...base,
+      meters: { ...base.meters, enabled: true },
+      output: { ...base.output, serve: { enabled: true, mp3Kbps: 320 } },
+    };
+    const pipeline = new Pipeline(cfg, { listenSpawn: spawn });
+    const p = pipeline as unknown as Internals & {
+      serve: { attach(f: string, c: unknown): string };
+    };
+    p.encoder.write = () => true;
+    expect(pipeline.snapshot().serve).toEqual({ on: true, clients: 0 });
+    const client = Object.assign(new EventEmitter(), {
+      write: () => true,
+      writableLength: 0,
+      destroy() {
+        this.emit('close');
+      },
+    });
+    expect(p.serve.attach('flac', client)).toBe('ok');
+    expect(pipeline.snapshot().serve).toEqual({ on: true, clients: 1 });
+    for (let i = 0; i < 200; i++) {
+      now += BLOCK_MS;
+      p.onBlock([new Float32Array(FRAMES)]);
+    }
+    await new Promise((r) => setImmediate(r));
+    // Behind the air delay: ~2 s of 4.3 s fed have left the box.
+    const seconds = encoders[0].bytes / 8 / SR;
+    expect(seconds).toBeGreaterThan(1.5);
+    expect(seconds).toBeLessThan(3);
+    p.onCommand('serve', false);
+    expect(pipeline.snapshot().serve).toEqual({ on: false, clients: 0 });
+    expect(encoders[0].killed).toBe(true);
+    pipeline.stop();
+  });
+});
+
 describe('Pipeline: music level on air', () => {
   it('starts at 0 dB, changes live and comes back after a restart', () => {
     const { pipeline, p, cfg } = make();

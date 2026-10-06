@@ -203,6 +203,43 @@ describe('MeterServer — views and what each role gets', () => {
     expect(asked).toEqual(['tab-1 rec', 'tab-1 nope', 'tab-1 air']);
   });
 
+  it('serves the programme stream to the stream token and operators, never open', async () => {
+    server = new MeterServer(0, makeLog(), {
+      enabled: true,
+      tokens: { tech: 'T', host: 'H', guest: 'G', stream: 'S' },
+    });
+    server.start();
+    const s = (server as unknown as { server: http.Server }).server;
+    await new Promise<void>((r) => (s.listening ? r() : s.once('listening', () => r())));
+    port = (s.address() as AddressInfo).port;
+    expect((await get(port, '/stream?k=S')).status).toBe(404); // not configured
+    let on = true;
+    server.onStream(
+      (format, res) => {
+        if (format === 'wav') return 'bad';
+        if (!on) return 'off';
+        setImmediate(() => res.end('OggS'));
+        return 'ok';
+      },
+      (format) => (format === 'mp3' ? 'audio/mpeg' : 'audio/ogg')
+    );
+    for (const q of ['', '?k=nope', '?k=G']) {
+      expect((await get(port, `/stream${q}`)).status).toBe(403);
+    }
+    for (const k of ['S', 'T', 'H']) {
+      const r = await get(port, `/stream?format=flac&k=${k}`);
+      expect(r.status).toBe(200);
+      expect(r.type).toBe('audio/ogg');
+      expect(r.body).toBe('OggS');
+    }
+    expect((await get(port, '/stream?format=mp3&k=S')).type).toBe('audio/mpeg');
+    expect((await get(port, '/stream?format=wav&k=S')).status).toBe(400);
+    on = false;
+    const off = await get(port, '/stream?k=S');
+    expect(off.status).toBe(503);
+    expect(off.body).toBe('stream off\n');
+  });
+
   it('answers 403 on the file tree without an operator token', async () => {
     await boot(true);
     for (const url of [

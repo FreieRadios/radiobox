@@ -126,6 +126,18 @@ describe('config: buffered-design blocks and their defaults', () => {
     expect(deep.automix.priority.depthDb).toBe(-24); // never a mute
   });
 
+  it('the programme stream is off by default; the MP3 bitrate is kept sane', () => {
+    expect(load().cfg().output.serve).toEqual({ enabled: false, mp3Kbps: 320 });
+    const c = load([], {
+      output: 'output:\n  serve: { enabled: true, mp3Kbps: 32 }',
+    }).cfg();
+    expect(c.output.serve).toEqual({ enabled: true, mp3Kbps: 64 });
+    const t = load([], {
+      meters: 'meters: { enabled: true, roles: { enabled: true, tokens: { stream: pi } } }',
+    }).cfg();
+    expect(t.meters.roles.tokens.stream).toBe('pi');
+  });
+
   it('roles are off by default; tokens can be fixed', () => {
     expect(load().cfg().meters.roles).toEqual({ enabled: false, tokens: {} });
     const c = load([], {

@@ -1232,6 +1232,30 @@ describe('meters page — music level on air', () => {
   });
 });
 
+describe('meters page — Studio-Stream', () => {
+  it('says how many pull it, starts with a tap and ends with the hold', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame({ serve: { on: true, clients: 0 } }));
+    expect(p.byId('srv').style.display).toBe('');
+    expect(p.byId('srv').textContent).toBe('Studio-Stream läuft · 0 Geräte');
+    p.push(liveFrame({ serve: { on: true, clients: 1 } }));
+    expect(p.byId('srv').textContent).toBe('Studio-Stream läuft · 1 Gerät');
+    expect(p.byId('srv').attrs['aria-pressed']).toBe('true');
+    p.press('srv', 50); // a tap only asks
+    expect(p.sent).toEqual([]);
+    p.tick(4000);
+    p.press('srv', 800);
+    expect(p.sent).toEqual([{ type: 'serve', value: false }]);
+    expect(p.byId('srv').textContent).toBe('Studio-Stream aus');
+    p.push(liveFrame({ serve: { on: false, clients: 0 } }));
+    p.press('srv', 50); // starting is one tap
+    expect(p.sent[1]).toEqual({ type: 'serve', value: true });
+    p.push(liveFrame({ serve: null })); // a box without it
+    expect(p.byId('srv').style.display).toBe('none');
+  });
+});
+
 describe('meters page — Abhören', () => {
   const air = { targetMs: 10000, delayMs: 10020, nowMs: Date.now(), state: 'live' };
   const frame = () => liveFrame({ air, lookaheadMs: 6200 });

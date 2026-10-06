@@ -17,6 +17,7 @@ import {
   Mode,
   MonitorConfig,
   MultitrackConfig,
+  ServeConfig,
   OutputConfig,
   PriorityConfig,
   StudioboxConfig,
@@ -301,6 +302,11 @@ function resolveBackup(raw: unknown): BackupConfig {
   return out;
 }
 
+function resolveServe(raw: unknown): ServeConfig {
+  const r = isObj(raw) ? raw : {};
+  return { enabled: !!r.enabled, mp3Kbps: Math.min(320, Math.max(64, finite(r.mp3Kbps, 320))) };
+}
+
 function resolveMultitrack(raw: unknown): MultitrackConfig {
   const r = isObj(raw) ? raw : {};
   return { enabled: !!r.enabled, source: r.source === 'processed' ? 'processed' : 'dry' };
@@ -314,6 +320,7 @@ function resolveOutput(raw: unknown): OutputConfig {
   return {
     ...out,
     harbor: out.harbor ?? { enabled: false, url: '', format: 'ogg-flac', contentType: '' },
+    serve: resolveServe(r.serve),
     backup: resolveBackup(r.backup),
     multitrack: resolveMultitrack(r.multitrack),
     monitor: resolveMonitor(r.monitor),
@@ -370,7 +377,7 @@ function resolveMeters(raw: unknown): MetersConfig {
     fps: Math.max(1, finite(r.fps, 20)),
     roles: {
       enabled: !!roles.enabled,
-      tokens: { tech: tok(t.tech), host: tok(t.host), guest: tok(t.guest) },
+      tokens: { tech: tok(t.tech), host: tok(t.host), guest: tok(t.guest), stream: tok(t.stream) },
     },
   };
 }

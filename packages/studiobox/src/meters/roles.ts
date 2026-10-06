@@ -41,6 +41,8 @@ export interface RoleTokens {
   tech: string;
   host: string;
   guest: string;
+  /** Only for `/stream` (a Pi at the desk): no view, no commands. */
+  stream: string;
 }
 
 /** 96 random bits, URL-safe: short enough for a QR code, long enough that
@@ -70,14 +72,18 @@ export class Roles {
   /** Every token comes from the config: the links survive a restart, so a
    *  printed QR code stays good. Otherwise they change at every start. */
   readonly pinned: boolean;
+  /** The stream token comes from the config (the Pi's URL stays good). */
+  readonly streamPinned: boolean;
 
   constructor(cfg: RolesConfig) {
     this.enabled = cfg.enabled;
     this.pinned = !!(cfg.tokens.tech && cfg.tokens.host && cfg.tokens.guest);
+    this.streamPinned = !!cfg.tokens.stream;
     this.tokens = {
       tech: cfg.tokens.tech ?? newToken(),
       host: cfg.tokens.host ?? newToken(),
       guest: cfg.tokens.guest ?? newToken(),
+      stream: cfg.tokens.stream ?? newToken(),
     };
   }
 
@@ -96,6 +102,26 @@ export class Roles {
       if (safeEqual(k, this.tokens[role])) return role;
     }
     return 'spectator';
+  }
+
+  /** May this request pull the programme (`/stream`)? The stream token, or
+   *  an operator's; never without one (it is the whole programme). With
+   *  roles disabled everybody may, like everything else. */
+  mayStream(url: string | undefined): boolean {
+    if (!this.enabled) return true;
+    const role = this.roleOf(url);
+    if (role === 'tech' || role === 'host') return true;
+    try {
+      const k = new URL(url ?? '/', 'http://localhost').searchParams.get('k');
+      return !!k && safeEqual(k, this.tokens.stream);
+    } catch {
+      return false;
+    }
+  }
+
+  /** The stream URL for a box at the desk (Ogg/FLAC). */
+  streamUrl(base: string): string {
+    return `${base.replace(/\/+$/, '')}/stream?format=flac&k=${this.tokens.stream}`;
   }
 
   /** May a connection with this role send a command of this type? */
