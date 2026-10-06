@@ -176,8 +176,11 @@ c.meters = c.meters || { enabled: true, port: 4445 };
 const r = (c.meters.roles = c.meters.roles || {});
 r.enabled = true;
 r.tokens = r.tokens || {};
+// The programme for a box at the desk (/stream), with a pinned token so the
+// URL in the config of that box survives a restart here.
+c.output.serve = { ...(c.output.serve || {}), enabled: true };
 // Guests share the WLAN: a token they can guess is a technician they become.
-for (const k of ["tech", "host", "guest"])
+for (const k of ["tech", "host", "guest", "stream"])
   if (!r.tokens[k] || String(r.tokens[k]).length < 12) r.tokens[k] = crypto.randomBytes(12).toString("base64url");
 fs.writeFileSync(TPL, yaml.dump(c, { lineWidth: 120 }), { mode: 0o600 });
 ' "$APP_DIR"
