@@ -629,6 +629,15 @@ Items:
    _Done when:_ switching from USB to stream during a show changes the
    output without a restart and the Sendezeit follows the path's latency.
 4. **Listen on the tablet ("Abhören")**, for the tech role (and host?).
+   **Built 2026-10-06, not yet tried on an iPad**: `src/audio/listen.ts`
+   (`ListenHub`), `/listen` (tech only), panel "Abhören" under the meters.
+   One deviation: **one encoder per listener**, not per source. The box
+   switches the source inside the running stream (20 ms fade out and in,
+   command `listen {id, src}`), because an `<audio>` element that changes
+   its URL reconnects and rebuffers. That would be a gap and a jump in time
+   for A/B. At most 4 listeners. Roh is the dry mics after their input trim,
+   so A/B compares the processing and not the gain staging. Host access is
+   still open (today tech only).
    A panel with a play button and a source picker:
    - **Aufnahme** (processed): the programme as it goes into the recording,
      i.e. the look-ahead (6 s) behind the room, not the air delay.

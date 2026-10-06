@@ -24,6 +24,9 @@ const DATA_ROUTES = new Set(['/folders', '/files', '/scheduled', '/preview']);
  *  session, so the technician's alone. */
 const CONNECT_ROUTE = '/connect';
 
+/** "Abhören": the technician's MP3 stream of what is recorded or aired. */
+const LISTEN_ROUTE = '/listen';
+
 /** The guest and spectator views and what they share, as real files (no
  *  build step; the technician/host page still lives in `PAGE` below until it
  *  moves out too). Only these names are ever read — nothing from the request
@@ -105,6 +108,8 @@ export function isPreviewable(name: string): boolean {
  *   - { type: 'musicReturn', value: boolean } start/stop the music return output
  *   - { type: 'returnGain', value: dB }       level of the music return
  *   - { type: 'musicGain', value: dB }        level of the music on air
+ *   - { type: 'listen', value: { id, src } }  "Abhören": switch a listener's
+ *                                             source (rec | raw | mic:<label> | air)
  *   - { type: 'endShow', value?: false }      "Sendung beenden" (false cancels)
  *   - { type: 'testTone', value: boolean }    1 kHz alignment tone on the monitor
  *   - { type: 'priorityDepth', value: dB }    host-priority depth
@@ -146,6 +151,9 @@ export class MeterServer {
   private onResolve: ((folder: number, name: string) => string | null) | null = null;
   private onQueue: (() => QueueItem[]) | null = null;
   private onListeners: (() => ListenerStatus) | null = null;
+  private onListenReq:
+    | ((id: string, src: string, res: http.ServerResponse) => 'ok' | 'bad' | 'full')
+    | null = null;
   /** Role tokens and the links to hand out (see `Roles`). */
   readonly roles: Roles;
   /** The role each open connection was given when it connected. */
@@ -168,6 +176,8 @@ export class MeterServer {
         this.servePublic(url, res);
       } else if (url === CONNECT_ROUTE) {
         this.serveConnect(req, role, res);
+      } else if (url === LISTEN_ROUTE) {
+        this.serveListen(req, role, res);
       } else if (DATA_ROUTES.has(url) && !isOperator(role)) {
         // Hiding the file browser is not the protection — this is.
         res.writeHead(403);
@@ -230,6 +240,46 @@ export class MeterServer {
         }
         this.onCmd?.(cmd);
       });
+    });
+  }
+
+  /** "Abhören": hand a listening request (`/listen?id=…&src=…`) to the
+   *  pipeline, which streams MP3 into the response. */
+  onListen(fn: (id: string, src: string, res: http.ServerResponse) => 'ok' | 'bad' | 'full'): void {
+    this.onListenReq = fn;
+  }
+
+  /** `/listen`: the technician's alone — it carries the room, unprocessed. */
+  private serveListen(req: http.IncomingMessage, role: ViewRole, res: http.ServerResponse): void {
+    if (role !== 'tech') {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    if (!this.onListenReq) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    const q = new URL(req.url ?? '/', 'http://localhost');
+    // The hub only writes once the encoder has output, so the head can
+    // follow the decision.
+    const ok = this.onListenReq(
+      q.searchParams.get('id') ?? '',
+      q.searchParams.get('src') ?? '',
+      res
+    );
+    if (ok !== 'ok') {
+      res.writeHead(ok === 'full' ? 503 : 400);
+      res.end();
+      return;
+    }
+    // A live stream: no length, no ranges (Safari's `bytes=0-1` probe gets
+    // the stream too, as from an Icecast), never cached.
+    res.writeHead(200, {
+      'content-type': 'audio/mpeg',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
     });
   }
 
@@ -691,6 +741,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  .hintline .act{color:var(--warn);font-weight:600}
  /* Host priority: how far the other mics lean back, as a plain slider. */
  .prio{display:flex;align-items:center;gap:12px}
+ .abh{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px}
+ .abh select{min-height:44px;max-width:100%}
  .prio input{flex:1 1 auto;min-width:0;height:44px;margin:0;accent-color:var(--accent)}
  .prio output{flex:0 0 auto;min-width:5ch;text-align:right;font-size:1.125rem;font-weight:700}
  /* Setup assistant ("Einmessen"): the steps as tiles, each with its state as
@@ -1110,6 +1162,16 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   <div class="prio"><input id="musLvl" type="range" min="-12" max="6" step="1" value="0"><output id="musLvlVal" for="musLvl"></output><button id="musLvlReset" style="display:none">Zurücksetzen</button></div>
   <p class="hintline">Wie laut Musik, Jingles und Bett auf Sendung neben den Stimmen stehen. 0 dB = automatisch eingepegelt.</p>
  </section>
+ <section class="panel techonly" id="abhBox" style="display:none" aria-labelledby="abhTitle">
+  <h2 id="abhTitle">Abhören</h2>
+  <div class="abh">
+   <button id="abhPlay" aria-pressed="false">▶ Abhören</button>
+   <div class="segc" role="group" aria-label="Was hören"><button id="abhRec" aria-pressed="true">Aufnahme</button><button id="abhRaw" aria-pressed="false">Roh</button><button id="abhAir" aria-pressed="false">Auf Sendung</button></div>
+   <select id="abhMic" aria-label="Rohsignal von" style="display:none"><option value="raw">alle Mikros</option></select>
+  </div>
+  <p class="hintline" id="abhState" aria-live="polite"></p>
+  <audio id="abhAudio" preload="none"></audio>
+ </section>
 </div>
 <div class="col2">
  <section class="panel guide" id="guidebox" style="display:none" aria-labelledby="gdTitle">
@@ -1373,6 +1435,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      automatisch eingepegelt; der Regler verschiebt sie nur gegenüber den
      Stimmen. Der Kopfhörer im Studio bleibt davon unberührt
      (<span class="k">Musik im Kopfhörer</span>).</li>
+     <li class="techonly"><b>Abhören</b>: hört auf diesem Gerät (Kopfhörer, auch
+     Bluetooth) mit, was gerade aufgenommen wird — <span class="k">Aufnahme</span>
+     verarbeitet, <span class="k">Roh</span> unverarbeitet (alle Mikros oder
+     eins) — oder was das Gerät verlässt (<span class="k">Auf Sendung</span>).
+     Umschalten zwischen Aufnahme und Roh springt nicht in der Zeit, so lässt
+     sich die Bearbeitung direkt vergleichen. Wie weit das hinter dem Raum
+     liegt, steht darunter.</li>
      <li><b>Programm</b>: Lautheit kurz und momentan (LUFS), <b>Spitze</b>,
      <b>Limiter</b> und <b>Duck</b> — die Absenkung der Musik, sobald jemand
      ins Mikro spricht (nicht bei Klopfen, Räuspern, Atmen oder Flüstern).</li>
@@ -2143,6 +2212,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    setPrio(playoutOnly?null:s.priority||null);
    setRetLvl(playoutOnly?null:s.returnGainDb);
    setMusLvl(playoutOnly?null:s.musicGainDb);
+   setAbh(s);
    // Two files in different folders can share a basename, so the location is
    // part of what makes the now-playing line stale, not just the name.
    const atKey=s.filePlayingAt?s.filePlayingAt.folder+':'+s.filePlayingAt.name:'';
@@ -2235,6 +2305,52 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  const store=(()=>{try{return window.localStorage||null;}catch(e){return null;}})();
  const sget=k=>{try{return store?store.getItem(k):null;}catch(e){return null;}};
  const sset=(k,v)=>{try{if(store)store.setItem(k,v);}catch(e){}};
+ // ---- Abhören: the technician listens on this device ----------------------
+ // One MP3 stream per device from the box. The source is switched inside the
+ // running stream (the box fades out and in), so Aufnahme ↔ Roh compares the
+ // same moment of the show without a reconnect. Which source is remembered
+ // per browser; playing starts only from a tap (browsers want a gesture).
+ const abh={box:$('abhBox'),play:$('abhPlay'),mic:$('abhMic'),state:$('abhState'),audio:$('abhAudio'),
+  seg:{rec:$('abhRec'),raw:$('abhRaw'),air:$('abhAir')}};
+ let abhKind=(()=>{const v=sget('sb.abhSrc');return v==='raw'||v==='air'?v:'rec';})();
+ let abhMic=sget('sb.abhMic')||'raw'; // 'raw' = all mics, or 'mic:<label>'
+ let abhId=null,abhErr=false,abhMics=null,abhLook=null,abhAirMs=null;
+ const abhSrc=()=>abhKind==='raw'?abhMic:abhKind;
+ function abhLine(){let t;
+  if(!abhId)t='Hört auf diesem Gerät mit: Aufnahme = verarbeitet, Roh = die Mikros unverarbeitet, Auf Sendung = was das Gerät verlässt.';
+  else if(abhErr)t='Verbindung unterbrochen — ▶ Abhören startet neu.';
+  else{const base=abhKind==='air'?abhAirMs:abhLook;let buf=0;
+   // What the browser holds on top of the box's own delay.
+   try{const b=abh.audio.buffered;if(b&&b.length)buf=Math.max(0,b.end(b.length-1)-abh.audio.currentTime);}catch(e){}
+   t=typeof base==='number'?'Etwa '+Math.round(base/1000+buf)+' s hinter dem Raum':'Verbindet …';}
+  if(abh.state.textContent!==t)abh.state.textContent=t;}
+ function abhRender(){for(const k in abh.seg)setPressed(abh.seg[k],k===abhKind);
+  show(abh.mic,abhKind==='raw');
+  abh.play.textContent=abhId?'■ Abhören stoppen':'▶ Abhören';setPressed(abh.play,!!abhId);abhLine();}
+ function abhStart(){abhId=Math.random().toString(36).slice(2,10)+Date.now().toString(36);abhErr=false;
+  abh.audio.src=withK('listen?id='+abhId+'&src='+encodeURIComponent(abhSrc()));
+  const pr=abh.audio.play();if(pr&&pr.catch)pr.catch(()=>{abhErr=true;abhLine();});abhRender();}
+ function abhStop(){abhId=null;abh.audio.pause();abh.audio.removeAttribute('src');abh.audio.load();abhRender();}
+ abh.play.onclick=()=>{if(abhId)abhStop();else abhStart();};
+ function abhPick(){sset('sb.abhSrc',abhKind);sset('sb.abhMic',abhMic);
+  if(abhId)send({type:'listen',value:{id:abhId,src:abhSrc()}});abhRender();}
+ for(const k in abh.seg)abh.seg[k].onclick=()=>{if(abhKind!==k){abhKind=k;abhPick();}};
+ abh.mic.onchange=()=>{abhMic=abh.mic.value;abhPick();};
+ abh.audio.onerror=()=>{if(abhId){abhErr=true;abhLine();}};
+ // Live mode and the technician only: the box refuses everybody else anyway.
+ function setAbh(s){const on=tech()&&!!s.air;show(abh.box,on);
+  if(!on){if(abhId)abhStop();return;}
+  abhLook=typeof s.lookaheadMs==='number'?s.lookaheadMs:null;
+  abhAirMs=s.air&&typeof s.air.delayMs==='number'?s.air.delayMs:null;
+  const mics=(s.channels||[]).filter(c=>c.role==='mic').map(c=>c.label);
+  const key=JSON.stringify(mics);
+  if(key!==abhMics){abhMics=key;abh.mic.innerHTML='';
+   for(const v of ['raw'].concat(mics.map(l=>'mic:'+l))){const o=document.createElement('option');
+    o.value=v;o.textContent=v==='raw'?'alle Mikros':v.slice(4);abh.mic.appendChild(o);}
+   if(abhMic!=='raw'&&mics.indexOf(abhMic.slice(4))<0)abhMic='raw';
+   abh.mic.value=abhMic;}
+  abhLine();}
+ abhRender();
  const hmFmt=mkFmt({hour:'2-digit',minute:'2-digit',hour12:false});
  let lisStatus=null,lisOpen=sget('sb.lisOpen')==='1';
  let lisSeen=new Set((()=>{try{return JSON.parse(sget('sb.lisSeen')||'[]');}catch(e){return [];}})());

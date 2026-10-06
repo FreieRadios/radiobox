@@ -10,6 +10,7 @@ import { FilePlayer } from './audio/file-player';
 import { FileDirs } from './audio/file-dirs';
 import { QueuePlayer } from './audio/play-queue';
 import { BedDeck, BedStatus } from './audio/bed';
+import { ListenEncoder, ListenHub } from './audio/listen';
 import { AirFifo } from './audio/air-fifo';
 import { SampleClock } from './audio/sample-clock';
 import { BYTES_PER_SAMPLE, interleave, interleaveStereo } from './audio/format';
@@ -87,6 +88,9 @@ export class Pipeline {
   private meters: MeterServer | null;
   /** Listener feedback from eve for the show on air (see ListenerFeed). */
   private listeners: ListenerFeed | null = null;
+  /** "Abhören" on the technician's tablet (with the meters page only). */
+  private listen: ListenHub | null = null;
+  private dry: Float32Array[] = [];
   private filePlayer: FilePlayer | null;
   private fileDirs: FileDirs | null;
   private playQueue: QueuePlayer | null;
@@ -143,7 +147,10 @@ export class Pipeline {
   private lastPumpMs = 0;
   private returnDropped = 0;
 
-  constructor(private cfg: StudioboxConfig) {
+  constructor(
+    private cfg: StudioboxConfig,
+    opts: { listenSpawn?: (args: string[]) => ListenEncoder } = {}
+  ) {
     const sr = (this.sr = cfg.capture.sampleRate);
     const frames = cfg.capture.blockSize;
     this.blockMs = (frames / sr) * 1000;
@@ -156,7 +163,7 @@ export class Pipeline {
     const returnMs = this.ret
       ? outputLatencyMs(cfg.output.return, sr, 'push') + (cfg.capture.latencyMs ?? 20)
       : 0;
-    this.graph = new Graph(cfg, { musicDelayMs: returnMs });
+    this.graph = new Graph(cfg, { musicDelayMs: returnMs, dryTaps: cfg.meters.enabled });
     this.capture = new Capture(cfg.capture, makeLog('capture'));
     this.encoder = new Encoder(cfg.output, cfg.capture, makeLog('encoder'));
     this.recorder = cfg.output.backup.enabled
@@ -184,6 +191,16 @@ export class Pipeline {
       ? new MeterServer(cfg.meters.port, makeLog('meters'), cfg.meters.roles)
       : null;
     this.meters?.setMics(cfg.channels.filter((c) => c.role === 'mic').map((c) => c.label));
+    if (this.meters) {
+      const hub = new ListenHub({
+        sampleRate: sr,
+        mics: this.graph.micLabels,
+        log: makeLog('listen'),
+        spawn: opts.listenSpawn,
+      });
+      this.listen = hub;
+      this.meters.onListen((id, src, res) => hub.attach(id, src, res));
+    }
 
     // --- air delay ---
     this.graphLatencyMs = (this.graph.latencySamples / sr) * 1000;
@@ -268,6 +285,7 @@ export class Pipeline {
     this.fileL = block();
     this.fileR = block();
     this.taps = (layout ?? []).map(block);
+    this.dry = this.listen ? this.graph.micLabels.map(block) : [];
     this.silence = Buffer.alloc(frames * 2 * BYTES_PER_SAMPLE);
   }
 
@@ -391,6 +409,9 @@ export class Pipeline {
         this.state.musicGainDb = this.graph.musicLevelDb;
         this.persist();
       }
+    } else if (type === 'listen' && this.listen) {
+      const req = isObj(value) ? value : {};
+      this.listen.select(String(req.id ?? ''), req.src);
     } else if (type === 'endShow') {
       if (value === false) this.cancelEndShow();
       else this.endShow();
@@ -669,7 +690,13 @@ export class Pipeline {
       retL: this.retL,
       retR: this.retR,
       taps: this.taps,
+      dry: this.listen ? this.dry : undefined,
     });
+    // "Abhören" at the recording's point: the programme and the dry mics.
+    if (this.listen?.wantsRoom) {
+      const trims = this.graph.micLabels.map((l) => this.graph.getProcessing(l)?.trimDb ?? 0);
+      this.listen.room(this.outL, this.outR, this.dry, trims, frames);
+    }
 
     // Music return: room time, no air delay. If the device stalls, skip
     // blocks rather than queue them up (a late return is worse than a gap).
@@ -704,7 +731,10 @@ export class Pipeline {
     // then a plain delay line in front of the harbor encoder).
     if (!this.monitor?.active) {
       this.fifo.setOutputLatency(0);
-      for (const b of this.fifo.drain(now)) this.encoder.write(b.buf);
+      for (const b of this.fifo.drain(now)) {
+        this.encoder.write(b.buf);
+        this.listen?.air(b.buf);
+      }
     }
   }
 
@@ -731,6 +761,7 @@ export class Pipeline {
     const b = this.fifo.pop(Date.now());
     const buf = b ? b.buf : this.silence;
     this.encoder.write(buf);
+    this.listen?.air(buf);
     this.monitor.writeThen(this.testTone ? this.toneBlock(frames) : buf, this.pump, watchdog);
   };
 
@@ -918,6 +949,7 @@ export class Pipeline {
     this.loopDelay?.disable();
     this.scheduler?.stop();
     this.listeners?.stop();
+    this.listen?.stopAll();
     this.meters?.stop();
     this.filePlayer?.shutdown();
     this.bedPlayer?.shutdown();

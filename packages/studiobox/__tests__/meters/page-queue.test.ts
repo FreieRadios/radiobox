@@ -1232,6 +1232,66 @@ describe('meters page — music level on air', () => {
   });
 });
 
+describe('meters page — Abhören', () => {
+  const air = { targetMs: 10000, delayMs: 10020, nowMs: Date.now(), state: 'live' };
+  const frame = () => liveFrame({ air, lookaheadMs: 6200 });
+
+  it("is the technician's, in live mode only", async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    p.push(liveFrame());
+    expect(p.byId('abhBox').style.display).toBe('none'); // no air: playout box
+    p.push(frame());
+    expect(p.byId('abhBox').style.display).toBe('');
+    p.push({ type: 'hello', role: 'host' });
+    p.push(frame());
+    expect(p.byId('abhBox').style.display).toBe('none');
+  });
+
+  it('starts one stream, switches its source on the box, and stops it', async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=T');
+    await p.flush();
+    p.push(frame());
+    const audio = p.byId('abhAudio');
+    expect(p.byId('abhMic').children.map((o) => o.textContent)).toEqual([
+      'alle Mikros',
+      'Host',
+      'Gast',
+    ]);
+    p.byId('abhPlay').click();
+    const url = new URL(String(audio.src), 'http://box/');
+    expect(url.pathname).toBe('/listen');
+    expect(url.searchParams.get('src')).toBe('rec');
+    expect(url.searchParams.get('k')).toBe('T');
+    const id = url.searchParams.get('id');
+    expect(id).toMatch(/^[\w-]{4,64}$/);
+    expect(p.byId('abhPlay').attrs['aria-pressed']).toBe('true');
+    p.push(frame());
+    expect(p.byId('abhState').textContent).toBe('Etwa 6 s hinter dem Raum');
+    // A/B: the same stream, the box switches.
+    p.byId('abhRaw').click();
+    expect(p.sent).toEqual([{ type: 'listen', value: { id, src: 'raw' } }]);
+    expect(p.byId('abhMic').style.display).toBe('');
+    const mic = p.byId('abhMic') as unknown as { value: string; onchange: () => void };
+    mic.value = 'mic:Gast';
+    mic.onchange();
+    expect(p.sent[1]).toEqual({ type: 'listen', value: { id, src: 'mic:Gast' } });
+    p.byId('abhAir').click();
+    expect(p.sent[2]).toEqual({ type: 'listen', value: { id, src: 'air' } });
+    expect(p.byId('abhMic').style.display).toBe('none');
+    p.push(frame());
+    expect(p.byId('abhState').textContent).toBe('Etwa 10 s hinter dem Raum');
+    expect(audio.src).toBe(url.href.replace('http://box/', '')); // never reloaded
+    p.byId('abhPlay').click();
+    expect(audio.src).toBeUndefined();
+    expect(audio.paused).toBe(true);
+    expect(p.byId('abhPlay').textContent).toBe('▶ Abhören');
+    // Stopped, a pick is only remembered.
+    p.byId('abhRec').click();
+    expect(p.sent).toHaveLength(3);
+  });
+});
+
 describe('meters page — host priority', () => {
   const prio = (p: ReturnType<typeof boot>) =>
     p.byId('prio') as unknown as { value: string; oninput: () => void; onchange: () => void };

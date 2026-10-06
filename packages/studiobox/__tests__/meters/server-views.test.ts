@@ -179,6 +179,30 @@ describe('MeterServer — views and what each role gets', () => {
     expect((await linksVia('evil"/x'))[0]).not.toContain('evil');
   });
 
+  it('streams "Abhören" to the technician only', async () => {
+    await boot(true);
+    expect((await get(port, '/listen?id=tab-1&src=rec&k=T')).status).toBe(404); // no hub
+    const asked: string[] = [];
+    server.onListen((id, src, res) => {
+      asked.push(`${id} ${src}`);
+      if (src === 'nope') return 'bad';
+      if (src === 'air') return 'full';
+      setImmediate(() => res.end('ID3'));
+      return 'ok';
+    });
+    for (const q of ['', '&k=nope', '&k=H', '&k=G']) {
+      expect((await get(port, `/listen?id=tab-1&src=rec${q}`)).status).toBe(403);
+    }
+    expect(asked).toEqual([]);
+    const ok = await get(port, '/listen?id=tab-1&src=rec&k=T');
+    expect(ok.status).toBe(200);
+    expect(ok.type).toBe('audio/mpeg');
+    expect(ok.body).toBe('ID3');
+    expect((await get(port, '/listen?id=tab-1&src=nope&k=T')).status).toBe(400);
+    expect((await get(port, '/listen?id=tab-1&src=air&k=T')).status).toBe(503);
+    expect(asked).toEqual(['tab-1 rec', 'tab-1 nope', 'tab-1 air']);
+  });
+
   it('answers 403 on the file tree without an operator token', async () => {
     await boot(true);
     for (const url of [

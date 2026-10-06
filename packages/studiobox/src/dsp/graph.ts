@@ -119,7 +119,7 @@ interface MicNode {
   mixDelay: DelayLine | null; // audio delay of the mix look-ahead
   gainLead: DelayLine | null; // automix gain, delayed to line up with the audio
   prioritised: boolean; // gives way to the priority mic
-  dryDelay: DelayLine | null; // multitrack tap (dry): raw input, programme-aligned
+  dryDelay: DelayLine | null; // dry tap (multitrack, listening): raw input, programme-aligned
   tapDelay: DelayLine | null; // multitrack tap (processed): limiter alignment
   tap: number; // last processed-tap sample
 }
@@ -155,6 +155,9 @@ export interface GraphAux {
    *  music source, then the programme L/R (see `Graph.tapLayout`). Only
    *  written when the graph was built with `output.multitrack.enabled`. */
   taps?: Float32Array[];
+  /** One per mic: the raw input, sample-aligned with outL/outR (listening,
+   *  "Roh"). Only written when the graph was built with `dryTaps`. */
+  dry?: Float32Array[];
 }
 
 export interface GraphOptions {
@@ -163,6 +166,9 @@ export interface GraphOptions {
    *  talks to what it hears; delaying the programme's music by the same
    *  amount keeps talk and music lined up on air as they were in the room. */
   musicDelayMs?: number;
+  /** Keep a dry tap per mic, aligned with the programme, whether or not the
+   *  multitrack is on (listening on the tablet compares the two). */
+  dryTaps?: boolean;
 }
 
 /** A mic counts as the talker only within this many dB of the loudest mic … */
@@ -282,6 +288,7 @@ export class Graph {
     this.tapSource = mt?.enabled ? mt.source : null;
     const dry = this.tapSource === 'dry';
     const processed = this.tapSource === 'processed';
+    const micDry = dry || !!opts.dryTaps;
 
     const pri = cfg.automix.priority;
     const priOn = !!pri?.enabled;
@@ -303,7 +310,7 @@ export class Graph {
           mixDelay: mixN > 0 ? new DelayLine(mixN) : null,
           gainLead: mixN > 0 ? new DelayLine(mixN) : null,
           prioritised: priOn && pri.attenuate.includes(ch.label),
-          dryDelay: dry ? new DelayLine(this.latencySamples) : null,
+          dryDelay: micDry ? new DelayLine(this.latencySamples) : null,
           tapDelay: processed ? new DelayLine(limN) : null,
           tap: 0,
         });
@@ -468,7 +475,11 @@ export class Graph {
       for (let i = 0; i < nMics; i++) {
         const m = mics[i];
         const x = input[m.source][n];
-        if (m.dryDelay && taps) taps[i][n] = m.dryDelay.process(x);
+        if (m.dryDelay) {
+          const d = m.dryDelay.process(x);
+          if (dryTaps && taps) taps[i][n] = d;
+          if (aux.dry) aux.dry[i][n] = d;
+        }
         micOut[i] = m.strip.pre(x);
         const e = m.actEnv.process(micOut[i]);
         if (e > loudest) loudest = e;

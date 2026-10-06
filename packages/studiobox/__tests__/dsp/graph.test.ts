@@ -438,6 +438,27 @@ describe('Graph multitrack taps (roadmap M1.6)', () => {
     expect(peak).toBe(at);
   });
 
+  it('keeps dry mic taps for listening without the multitrack, aligned with the programme', () => {
+    const cfg = config([mic(1, 'A', bypass({ gainDb: 6 })), mic(2, 'B')], { lookahead: LOOK });
+    expect(new Graph(cfg).tapLayout).toBeNull();
+    const graph = new Graph(cfg, { dryTaps: true });
+    const click = concat(silence(0.1), new Float32Array([0.25]), silence(1.5));
+    const total = Math.floor(click.length / FRAMES) * FRAMES;
+    const l = new Float32Array(total);
+    const dryA = new Float32Array(total);
+    const [outL, outR] = [new Float32Array(FRAMES), new Float32Array(FRAMES)];
+    const dry = [new Float32Array(FRAMES), new Float32Array(FRAMES)];
+    for (let o = 0; o < total; o += FRAMES) {
+      graph.process([click.subarray(o, o + FRAMES), silence(1)], outL, outR, FRAMES, { dry });
+      l.set(outL, o);
+      dryA.set(dry[0], o);
+    }
+    const at = Math.round(0.1 * SR) + graph.latencySamples;
+    expect(dryA[at]).toBeCloseTo(0.25, 6); // before the strip's +6 dB
+    const peak = l.reduce((p, v, i) => (Math.abs(v) > Math.abs(l[p]) ? i : p), 0);
+    expect(peak).toBe(at);
+  });
+
   it('processed: each source as it enters the mix', () => {
     const graph = new Graph(mt('processed'));
     const click = concat(silence(0.1), new Float32Array([0.25]), silence(1.5));

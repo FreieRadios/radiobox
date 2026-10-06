@@ -598,6 +598,21 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   mode starts in `single` (one track, then the talk), playout mode keeps
   chaining. **Test tone** `testTone`: 1 kHz at −18 dBFS on the local output
   only (not recorded, not streamed).
+- **Abhören** (`src/audio/listen.ts`, roadmap M1c.4): the technician listens
+  on a tablet over `/listen?id=…&src=…` (MP3, tech token only; 400 for a bad
+  id/source, 503 beyond 4 listeners). One ffmpeg encoder per listener id,
+  spawned on the first request and ended 3 s after its last connection (a
+  second request with the same id, e.g. Safari's probe, joins the stream;
+  new clients start at an MP3 frame header). Sources: `rec` (the graph
+  output, i.e. what the recorder gets), `raw` (dry mics summed, each after
+  its trim) and `mic:<label>`, both from the graph's dry taps
+  (`GraphOptions.dryTaps`, `aux.dry`: always on with the meters, aligned
+  with the programme), and `air` (the blocks that go to the encoder/output
+  after the FIFO). The `listen {id, src}` command switches inside the
+  running stream with a 20 ms fade out and in, so A/B lands on the same
+  moment. `room()`/`air()` return at once while nobody listens. Panel
+  `setAbh` (techonly, live mode), source remembered per browser, the delay
+  behind the room = look-ahead (or air delay) + the browser's buffer.
 - **Roles** (`meters.roles`, `src/meters/roles.ts`): per-connection role from
   the `?k=` token, command allowlist enforced in `MeterServer`; off by default
   (playout boxes), role links (incl. one guest link per mic) printed at start

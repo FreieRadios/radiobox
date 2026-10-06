@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { Pipeline } from '../src/pipeline';
 import { StudioboxConfig } from '../src/config/schema';
 import { SR, bypass, config, mic, rmsDb, scale, silence, tone } from '../test-support/config';
@@ -387,6 +389,61 @@ describe('Pipeline: music return level', () => {
     const { pipeline, p } = make();
     p.onCommand('returnGain', -20);
     expect(pipeline.snapshot().returnGainDb).toBeNull();
+  });
+});
+
+describe('Pipeline: Abhören (roadmap M1c.4)', () => {
+  /** A fake MP3 encoder that keeps the left channel it was fed. */
+  const encoders: { left: number[]; killed: boolean }[] = [];
+  const spawn = () => {
+    const e = { left: [] as number[], killed: false };
+    encoders.push(e);
+    const stdin = new PassThrough();
+    stdin.on('data', (b: Buffer) => {
+      for (let i = 0; i + 7 < b.length; i += 8) e.left.push(b.readFloatLE(i));
+    });
+    return { stdin, stdout: new PassThrough(), kill: () => (e.killed = true), on: () => {} };
+  };
+  const client = () =>
+    Object.assign(new EventEmitter(), { write: () => true, writableLength: 0, destroy() {} });
+
+  it('runs no encoder while nobody listens; a listener hears the dry mics with their trim', async () => {
+    encoders.length = 0;
+    const dir = tmp();
+    const base = config([mic(1, 'Gast'), mic(2, 'Host')], {
+      lookahead: { seconds: 0.5, gateMs: 10, mixMs: 100 },
+      stateFile: path.join(dir, 'session-state.json'),
+    });
+    const cfg = { ...base, meters: { ...base.meters, enabled: true } };
+    const pipeline = new Pipeline(cfg, { listenSpawn: spawn });
+    const p = pipeline as unknown as Internals & {
+      listen: { attach(id: string, src: string, c: unknown): string; count: number };
+      encoder: { write(b: Buffer): boolean };
+    };
+    p.encoder.write = () => true;
+    const block = (v: number) => new Float32Array(FRAMES).fill(v);
+    const run = (blocks: number) => {
+      for (let i = 0; i < blocks; i++) {
+        now += BLOCK_MS;
+        p.onBlock([block(0), block(0.05)]);
+      }
+    };
+    run(20);
+    expect(encoders).toHaveLength(0);
+    p.onCommand('trim', { label: 'Host', trimDb: 6 });
+    expect(p.listen.attach('tab-1', 'mic:Host', client())).toBe('ok');
+    run(60); // past the look-ahead: the dry tap carries the 0.05 by now
+    await new Promise((r) => setImmediate(r));
+    expect(encoders[0].left[encoders[0].left.length - 1]).toBeCloseTo(
+      0.05 * Math.pow(10, 6 / 20),
+      4
+    );
+    p.onCommand('listen', { id: 'tab-1', src: 'rec' });
+    run(4);
+    await new Promise((r) => setImmediate(r));
+    expect(encoders).toHaveLength(1); // the same stream, switched on the box
+    pipeline.stop();
+    expect(encoders[0].killed).toBe(true);
   });
 });
 
