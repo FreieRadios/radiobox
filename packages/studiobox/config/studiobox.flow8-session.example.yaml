@@ -2,7 +2,7 @@
 # a second USB interface (out, e.g. an ESI MAYA22 into a desk's line input).
 #
 # Four mics, a file player for jingles/music with a looping bed, timestamp-
-# scheduled jingles, the buffered chain (3 s look-ahead, 10 s air delay),
+# scheduled jingles, the buffered chain (6 s look-ahead, 10 s air delay),
 # music return to the Flow 8 headphones, stereo + multitrack recording, role
 # links for the tablets. Copy to studiobox.yaml and adapt the marked lines;
 # run `yarn workspace @freieradios/studiobox doctor` and the rehearsal first.
@@ -30,7 +30,7 @@ capture:
   periodMs: 20
 
 lookahead:
-  seconds: 3
+  seconds: 6
   gateMs: 15
   mixMs: 150
 
@@ -62,6 +62,11 @@ automix:
 duck:
   enabled: true
   targets: []
+  # The programme ducks only on talk: at least minSpeechMs of voice on one mic
+  # with syllables at talk level, decided with the look-ahead so the music is
+  # down before the first word. A bump, a click or a breath during a jingle
+  # doesn't duck. thresholdDb only drives the music return (headphones).
+  minSpeechMs: 300
   thresholdDb: -40
   musicPresentDb: -45
   depthDb: -15

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { MonitorConfig, StudioboxConfig } from './config/schema';
 import { AUDIO_EXTENSIONS } from './audio/file-player';
+import { outputLatencyMs } from './audio/monitor';
 import { parsePlayAtMs } from './schedule';
 import { pickLanAddress } from './util/lan';
 
@@ -342,13 +343,20 @@ function diskCheck(cfg: StudioboxConfig, env: Env): Check[] {
 
 function timingChecks(cfg: StudioboxConfig): Check[] {
   const look = cfg.lookahead.seconds + (cfg.lookahead.gateMs + cfg.lookahead.mixMs) / 1000;
+  // The output card's buffer is part of the delay too: what is left over is
+  // the FIFO that absorbs the two cards' drift and a stalled machine.
+  const mon = cfg.output.monitor;
+  const outS = mon?.enabled ? outputLatencyMs(mon, cfg.capture.sampleRate, 'pull') / 1000 : 0;
   const out: Check[] = [];
-  if (cfg.airDelay.seconds < look + 1) {
+  if (cfg.airDelay.seconds < look + outS + 1) {
     out.push({
       name: 'air delay',
       status: 'warn',
-      detail: `airDelay.seconds (${cfg.airDelay.seconds}) leaves no margin over the ${look.toFixed(2)} s look-ahead`,
-      fix: 'use 10 s unless there is a reason not to',
+      detail:
+        `airDelay.seconds (${cfg.airDelay.seconds}) leaves less than 1 s over the ` +
+        `${look.toFixed(2)} s look-ahead` +
+        (outS > 0 ? ` and the ${outS.toFixed(1)} s output buffer` : ''),
+      fix: 'raise airDelay.seconds or lower lookahead.seconds (10 s / 6 s is the default pair)',
     });
   } else {
     out.push({

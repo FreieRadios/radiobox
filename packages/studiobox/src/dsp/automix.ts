@@ -2,12 +2,17 @@ import { dbToGain, msToCoef } from './dsp-math';
 import { EnvelopeFollower } from './envelope';
 
 /**
- * Dan Dugan-style gain-sharing automixer.
+ * Dan Dugan-style gain-sharing automixer, sharing by power.
  *
- * Each member's applied gain = its amplitude / (sum of all member amplitudes
- * + noise floor). The summed gain of open mics stays ~constant, so a single
- * talker is fully open, N equal talkers share 1/N each, and during silence the
- * floor term pulls everything down. Smoother than gating: no first-syllable loss.
+ * Each member's applied gain = its power / (sum of all member powers + noise
+ * floor). The summed gain of open mics stays ~constant, so a single talker is
+ * fully open, N equal talkers share 1/N each, and during silence the floor
+ * term pulls everything down. Smoother than gating: no first-syllable loss.
+ *
+ * Sharing by power rather than amplitude keeps the talker's own mic open
+ * while its neighbours pick the voice up as bleed: 10 dB of bleed costs the
+ * talker 0.4 dB instead of 2.4 dB (amplitude sharing), and a child whose
+ * voice reaches several mics is not turned down for it.
  */
 export class Automix {
   private envs: EnvelopeFollower[];
@@ -31,11 +36,11 @@ export class Automix {
 
   /** Feed one sample per member; returns the per-member gains (live array). */
   process(samples: ArrayLike<number>): Float32Array {
-    let sum = this.floorAmp;
+    let sum = this.floorAmp * this.floorAmp;
     for (let i = 0; i < this.n; i++) {
       const a = this.envs[i].process(samples[i]);
-      this.amps[i] = a;
-      sum += a;
+      this.amps[i] = a * a;
+      sum += a * a;
     }
     for (let i = 0; i < this.n; i++) {
       const target = this.amps[i] / sum;

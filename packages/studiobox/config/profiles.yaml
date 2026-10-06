@@ -4,6 +4,11 @@
 # sensible treatment without hand-tuning every knob.
 #
 # Chain order per mic: HPF -> gate -> EQ -> de-esser -> compressor -> leveler (AGC)
+#
+# Leveler: up to +24 dB, so a child far from the mic still reaches the
+# target; `noiseCeilingDb` stops the boost where the mic's own noise floor
+# would rise above -50 dBFS, so a noisy mic is not pumped up. `riderDb`
+# (default 6) is the fast stage for a talker turning away mid-sentence.
 
 profiles:
   # Catch-all baseline.
@@ -23,7 +28,7 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -20, ratio: 3, kneeDb: 6, attackMs: 10, releaseMs: 120, makeupDb: 3 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 18, rangeDb: 15, responseMs: 1500 }
+      { enabled: true, targetLufs: -23, maxGainDb: 24, rangeDb: 15, responseMs: 1500, noiseCeilingDb: -50 }
 
   # Dynamic broadcast mic (SM7B / RE20 type): clean, low handling noise.
   dynamic-broadcast:
@@ -43,7 +48,7 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -22, ratio: 3, kneeDb: 6, attackMs: 8, releaseMs: 140, makeupDb: 4 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 18, rangeDb: 15, responseMs: 1500 }
+      { enabled: true, targetLufs: -23, maxGainDb: 24, rangeDb: 15, responseMs: 1500, noiseCeilingDb: -50 }
 
   # Cheap lavalier / clip-on: thin, noisy, sibilant -> work harder.
   cheap-lav:
@@ -63,7 +68,7 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -18, ratio: 4, kneeDb: 4, attackMs: 6, releaseMs: 110, makeupDb: 5 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 20, rangeDb: 16, responseMs: 1500 }
+      { enabled: true, targetLufs: -23, maxGainDb: 24, rangeDb: 16, responseMs: 1500, noiseCeilingDb: -50 }
 
   # Studio condenser: detailed, sensitive -> gentle, watch sibilance.
   condenser:
@@ -82,4 +87,4 @@ profiles:
     compressor:
       { enabled: true, thresholdDb: -24, ratio: 2.5, kneeDb: 8, attackMs: 12, releaseMs: 150, makeupDb: 3 }
     leveler:
-      { enabled: true, targetLufs: -23, maxGainDb: 15, rangeDb: 14, responseMs: 1800 }
+      { enabled: true, targetLufs: -23, maxGainDb: 24, rangeDb: 14, responseMs: 1800, noiseCeilingDb: -50 }

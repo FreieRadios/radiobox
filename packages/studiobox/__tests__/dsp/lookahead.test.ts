@@ -12,6 +12,7 @@ import {
   silence,
   tone,
 } from '../../test-support/config';
+import { voice } from '../../test-support/voice';
 
 const GATE = Math.round(0.015 * SR);
 const LEV = 3 * SR;
@@ -90,8 +91,9 @@ describe('look-ahead mic chain (roadmap M1.3)', () => {
         lookahead: { seconds: 3, gateMs: 15, mixMs: 150 },
       })
     );
-    const voice = tone(-30, 6);
-    runGraph(graph, [voice, scale(voice, -20)]);
+    // 5.9 s: the last block ends inside a syllable, where the talker is on.
+    const talk = voice({ rmsDb: -30, seconds: 5.9 });
+    runGraph(graph, [talk, scale(talk, -20)]);
     const [talker, neighbour] = graph.getMeters().channels;
     expect(talker.active).toBe(true);
     expect(talker.levelerDb).toBeGreaterThan(2);

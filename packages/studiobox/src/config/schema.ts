@@ -45,7 +45,15 @@ export interface LevelerParams {
   targetLufs: number;
   maxGainDb: number;
   rangeDb: number;
+  /** Mics: the phrase window, centred on the audio as far as the look-ahead
+   *  reaches (±responseMs/2). Music: the AGC's time constant. */
   responseMs: number;
+  /** Mics only: limit of the fast "rider" stage that follows a talker turning
+   *  away from the mic mid-sentence (dB, 0 = off). 6 when omitted. */
+  riderDb?: number;
+  /** Mics only: the boost stops where the mic's noise floor (after the trim)
+   *  would rise above this (dBFS). Unlimited when omitted. */
+  noiseCeilingDb?: number;
 }
 
 /** Fully-resolved per-channel processing chain. */
@@ -108,12 +116,14 @@ export interface CaptureConfig {
  *  the first word, music ducks just before speech starts. The cost is delay,
  *  which the buffered design spends freely (see AirDelayConfig). */
 export interface LookaheadConfig {
-  /** Leveler look-ahead in seconds (0 = causal leveler, still voice-keyed). */
+  /** Leveler look-ahead in seconds (0 = causal leveler, still voice-keyed).
+   *  The duck plan sees this far ahead too: talk is confirmed in room time
+   *  and the music goes down when it reaches the programme. */
   seconds: number;
   /** Gate look-ahead in ms: the gate opens this long before speech onset. */
   gateMs: number;
-  /** Mix look-ahead in ms: automix shares, host priority and music ducking
-   *  move this long before the speech that triggers them. */
+  /** Mix look-ahead in ms: automix shares and host priority move this long
+   *  before the speech that triggers them. */
   mixMs: number;
 }
 
@@ -159,7 +169,15 @@ export interface AutomixConfig {
 export interface DuckConfig {
   enabled: boolean;
   targets: string[];
+  /** Level of the mic bus (after the leveler) that ducks the **music return**
+   *  in the headphones, which has no look-ahead. The programme ducks on
+   *  confirmed talk instead (see `minSpeechMs`). */
   thresholdDb: number;
+  /** Programme: talk has to go on this long (ms, in any one mic) before the
+   *  music ducks — a bump, a click or a short laugh doesn't. Decided with the
+   *  look-ahead, so the music is still down before the first word. 300 when
+   *  omitted. */
+  minSpeechMs?: number;
   musicPresentDb: number;
   depthDb: number;
   attackMs: number;

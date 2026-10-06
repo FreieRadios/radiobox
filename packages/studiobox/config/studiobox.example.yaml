@@ -39,7 +39,7 @@ capture:
 # gain on the first word, the gate is open on the first consonant, music ducks
 # just before speech starts. All zeros give the old real-time chain.
 lookahead:
-  seconds: 3 # leveler look-ahead
+  seconds: 6 # leveler and duck look-ahead
   gateMs: 15 # gate opens this long before the onset
   mixMs: 150 # automix shares, host priority and ducking move ahead by this much
 
@@ -89,7 +89,8 @@ automix:
 duck:
   enabled: true
   targets: [Playout, GuestBYO]
-  thresholdDb: -40 # mic-bus level that triggers ducking
+  thresholdDb: -40 # mic-bus level that ducks the music return (headphones)
+  minSpeechMs: 300 # programme: talk this long ducks; bumps and clicks don't
   musicPresentDb: -45 # arm only when music is above this
   depthDb: -15 # how far music is pulled down
   attackMs: 40

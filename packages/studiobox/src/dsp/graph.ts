@@ -9,6 +9,7 @@ import { StereoLoudness } from './loudness';
 import { DelayLine } from './delay-line';
 import { clamp, dbToGain, gainToDb, msToCoef } from './dsp-math';
 import { EnvelopeFollower } from './envelope';
+import { DuckPlanner, FRAME_MS, VoiceDetector } from './voice';
 
 export interface ChannelMeter extends StripMeters {
   label: string;
@@ -110,6 +111,7 @@ interface MicNode {
   muted: boolean; // per-channel mute (independent of the global mic mute)
   muteGain: number; // 0..1, slewed toward the mute state (click-free)
   actEnv: EnvelopeFollower; // pre-leveler level, to tell the talker from bleed
+  voice: VoiceDetector; // noise floor, speech level, voiced frames
   active: boolean;
   mixDelay: DelayLine | null; // audio delay of the mix look-ahead
   gainLead: DelayLine | null; // automix gain, delayed to line up with the audio
@@ -172,8 +174,8 @@ const PRIORITY_ACTIVE_DB = -0.5;
  * stereo block to `outL`/`outR`.
  *
  * Timing. The mic path runs behind its own analysis (config `lookahead`):
- * the gate by a few ms, the leveler by seconds, the mix decisions (automix
- * shares, host priority, ducking) by ~150 ms. The music is delayed by the same
+ * the gate by a few ms, the leveler and the duck plan by seconds, automix
+ * shares and host priority by ~150 ms. The music is delayed by the same
  * total so it stays lined up with the talk. The programme therefore leaves
  * the graph `latencySamples` behind the room — a delay the buffered design
  * wants anyway (see `audio/air-fifo.ts`). Per-channel meters are reported in
@@ -192,6 +194,11 @@ export class Graph {
   private priorityLead: DelayLine | null = null;
   private priorityDb = 0; // attenuation applied to the prioritised mics now
   private ducker: Ducker;
+  private planner: DuckPlanner;
+  private voiced: boolean[];
+  private strong: boolean[];
+  private readonly frame: number;
+  private inFrame = 0;
   private returnDucker: Ducker;
   private returnGainDb: number; // output.return.gainDb, live from the page
   private returnGain: number;
@@ -280,6 +287,7 @@ export class Graph {
           muted: false,
           muteGain: 1,
           actEnv: new EnvelopeFollower(sr, 5, 200),
+          voice: new VoiceDetector(sr),
           active: false,
           mixDelay: mixN > 0 ? new DelayLine(mixN) : null,
           gainLead: mixN > 0 ? new DelayLine(mixN) : null,
@@ -329,9 +337,25 @@ export class Graph {
     this.fileL = new Float32Array(cfg.capture.blockSize);
     this.fileR = new Float32Array(cfg.capture.blockSize);
 
-    // The programme ducker decides `mixMs` ahead of the audio, so it would
-    // also let go that much early: the hold gets the head start back.
-    this.ducker = new Ducker({ ...cfg.duck, holdMs: cfg.duck.holdMs + look.mixMs }, sr);
+    // The programme ducks on confirmed talk, planned in room time and acted
+    // on when that talk reaches the programme (the mic path's latency). The
+    // planner holds; the ducker only glides. The music starts down three
+    // attack time constants ahead, so it is (nearly) there at the first word.
+    this.frame = Math.round((FRAME_MS / 1000) * sr);
+    this.planner = new DuckPlanner(
+      {
+        minSpeechMs: cfg.duck.minSpeechMs ?? 300,
+        minStrongMs: 30,
+        gapMs: 150,
+        leadMs: 3 * cfg.duck.attackMs,
+        holdMs: cfg.duck.holdMs,
+      },
+      this.mics.length,
+      Math.round(this.mixLatency / this.frame)
+    );
+    this.voiced = this.mics.map(() => false);
+    this.strong = this.mics.map(() => false);
+    this.ducker = new Ducker({ ...cfg.duck, holdMs: 0 }, sr);
     this.returnDucker = new Ducker(cfg.duck, sr);
     this.returnGainDb = cfg.output?.return?.gainDb ?? 0;
     this.returnGain = dbToGain(this.returnGainDb);
@@ -432,25 +456,40 @@ export class Graph {
       // --- who is talking -> leveler key; mutes; leveler + look-ahead delay ---
       // A mute acts here, in room time: what is said after "Mikros zu" never
       // reaches the air, while what was said before it still plays out.
+      // The talker is the mic whose gate is open, that is not just bleed of a
+      // louder neighbour, and whose voice detector hears talk (not noise).
       let roomKey = 0; // the mic bus as it stands in the room (for the return)
       const need = Math.max(ACTIVE_FLOOR, loudest * this.dominance);
+      const frameDone = ++this.inFrame >= this.frame;
+      if (frameDone) this.inFrame = 0;
       for (let i = 0; i < nMics; i++) {
         const m = mics[i];
         const off = m.muted || this.micsMuted;
         const target = off ? 0 : 1;
         m.muteGain = this.muteCoef * (m.muteGain - target) + target;
-        m.active = !off && m.strip.gateIsOpen && m.actEnv.value >= need;
+        const talker = !off && m.strip.gateIsOpen && m.actEnv.value >= need;
+        if (m.voice.process(m.strip.input, talker)) m.strip.setNoiseFloor(m.voice.floorDb);
+        m.active = talker && m.voice.voiced;
+        if (frameDone) {
+          this.voiced[i] = !off && m.voice.voiced;
+          this.strong[i] = !off && m.voice.strong;
+        }
         const c = micOut[i] * m.muteGain;
         roomKey += c * m.strip.roomGain;
         micOut[i] = m.strip.level(c, m.active);
       }
 
       // --- gain-sharing automix (decided on the not-yet-delayed signal) ---
+      // The shares compare the mics as they come in (after the trim, without
+      // the leveler's gain): a quiet mic's leveler boosts its bleed and noise
+      // too, and that must not take the share from the mic someone talks into.
       let gains: Float32Array | null = null;
       if (this.automix) {
         for (let i = 0; i < nMics; i++) {
           const slot = mics[i].automixSlot;
-          if (slot >= 0) this.automixBuf[slot] = micOut[i];
+          if (slot < 0) continue;
+          const rg = mics[i].strip.roomGain;
+          this.automixBuf[slot] = micOut[i] / (rg > 1e-6 ? rg : 1e-6);
         }
         gains = this.automix.process(this.automixBuf);
         lastAutomixGains = gains;
@@ -468,13 +507,14 @@ export class Graph {
       }
       const priGain = this.priorityDb < -0.01 ? dbToGain(this.priorityDb) : 1;
 
+      // --- talk confirmed in room time -> the duck plan ---
+      if (frameDone) this.planner.push(this.voiced, this.strong);
+
       // --- mic bus: the audio runs `mixMs` behind the decisions above ---
       let micBus = 0;
-      let duckKey = 0; // the bus without the mix delay: keys the ducker early
       for (let i = 0; i < nMics; i++) {
         const m = mics[i];
         const gNow = gains && m.automixSlot >= 0 ? gains[m.automixSlot] : 1;
-        duckKey += micOut[i] * gNow;
         let g = gNow;
         let a = micOut[i];
         if (m.mixDelay) {
@@ -554,8 +594,8 @@ export class Graph {
         aux.retR[n] = (retTgtR * rg + retOthR) * this.returnGain;
       }
 
-      // --- programme ducking (keyed ahead of the speech by the mix delay) ---
-      const duckGain = this.ducker.process(duckKey, (tgtL + tgtR) * 0.5);
+      // --- programme ducking (planned on confirmed talk, see the planner) ---
+      const duckGain = this.ducker.step(this.planner.ducking, (tgtL + tgtR) * 0.5);
       lastDuck = this.ducker.depthDb;
       const musicL = tgtL * duckGain + othL;
       const musicR = tgtR * duckGain + othR;

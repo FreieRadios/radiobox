@@ -1363,7 +1363,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      <li class="techonly"><b>Moderations-Vorrang</b>: so viel leiser werden die
      anderen Mikros, solange die Moderation spricht — sanft, nie stumm.</li>
      <li><b>Programm</b>: Lautheit kurz und momentan (LUFS), <b>Spitze</b>,
-     <b>Limiter</b> und <b>Duck</b> — die Absenkung der Musik unter Sprache.</li>
+     <b>Limiter</b> und <b>Duck</b> — die Absenkung der Musik, sobald jemand
+     ins Mikro spricht (nicht bei Klopfen, Räuspern, Atmen oder Flüstern).</li>
      <li><span class="k">● Mikros offen</span> / <span class="k">Mikros zu</span>
      (unten rechts) schaltet alle Mikrofone stumm bzw. wieder auf; bei
      „Mikros zu“ läuft nur Musik, die Kanäle zeigen PAUSE.</li>

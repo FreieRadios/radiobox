@@ -11,6 +11,7 @@ import {
   silence,
   tone,
 } from '../../test-support/config';
+import { noise, voice } from '../../test-support/voice';
 
 const FRAMES = 1024;
 
@@ -252,6 +253,34 @@ describe('Graph ducking with look-ahead', () => {
     const early = rmsDb(musicOnly, onset - SR / 2, onset - SR / 2 + ms10 * 10);
     const atOnset = rmsDb(musicOnly, onset - ms10, onset);
     expect(early - atOnset).toBeGreaterThan(10);
+  });
+
+  it('lets a bump or a click during a jingle pass, but ducks real talk', () => {
+    // The processed taps show the music as it enters the mix (after the
+    // duck, before the master leveler).
+    const cfg = config([mic(1, 'A')], {
+      lookahead: { seconds: 1, gateMs: 10, mixMs: 100 },
+      filePlayer: player(),
+      duck: { ...duck, holdMs: 400, releaseMs: 600 },
+      output: { ...config([]).output, multitrack: { enabled: true, source: 'processed' } },
+    });
+    // A 100 ms bump on the mic at 1 s, then 1.5 s of talk at 3 s.
+    const room = concat(
+      silence(1),
+      noise(-30, 0.1),
+      silence(1.9),
+      voice({ rmsDb: -30, seconds: 1.5 }),
+      silence(1.5)
+    );
+    const graph = new Graph(cfg);
+    const music = run(graph, [room], tone(-20, 6, 440)).taps[1];
+    const lat = graph.latencySamples;
+    const ref = rmsDb(music, lat + SR / 2, lat + 0.9 * SR);
+    // Around the bump: the music stays where it was.
+    expect(ref - rmsDb(music, lat + SR, lat + 1.6 * SR)).toBeLessThan(0.5);
+    // In the talk: ducked, already at the first word.
+    expect(ref - rmsDb(music, lat + 3 * SR, lat + 3.05 * SR)).toBeGreaterThan(10);
+    expect(ref - rmsDb(music, lat + 3.2 * SR, lat + 4.2 * SR)).toBeGreaterThan(14);
   });
 });
 

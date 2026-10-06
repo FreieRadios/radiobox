@@ -220,9 +220,13 @@ describe('setup measurement: the result works on the strip', () => {
     const far = new ChannelStrip(r.processing!, SR);
     for (let i = 0; i < 2 * SR; i++) far.process(raw[i] * Math.pow(10, -10 / 20));
     expect(far.meters().zone).toBe('low');
-    // Without the seed the same strip starts at 0 dB and is off by the seed.
+    // Without the seed the same strip starts at 0 dB and is off by the seed
+    // until it has heard enough of the voice (the first few dozen ms).
     expect(Math.abs(r.after!.seedDb)).toBeGreaterThan(1);
-    expect(Math.abs(rmsDb(b) - rmsDb(last))).toBeGreaterThan(Math.abs(rmsDb(a) - rmsDb(last)));
+    const head = Math.round(0.06 * SR);
+    expect(Math.abs(rmsDb(b.subarray(0, head)) - rmsDb(last))).toBeGreaterThan(
+      Math.abs(rmsDb(a.subarray(0, head)) - rmsDb(last))
+    );
   });
 
   it('derives an automix floor from the results', () => {

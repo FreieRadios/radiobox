@@ -30,9 +30,9 @@ function load(extra: string[] = [], over: Record<string, string> = {}) {
 }
 
 describe('config: buffered-design blocks and their defaults', () => {
-  it('defaults to a 3 s look-ahead and a 10 s air delay', () => {
+  it('defaults to a 6 s look-ahead and a 10 s air delay', () => {
     const c = load().cfg();
-    expect(c.lookahead).toEqual({ seconds: 3, gateMs: 15, mixMs: 150 });
+    expect(c.lookahead).toEqual({ seconds: 6, gateMs: 15, mixMs: 150 });
     expect(c.airDelay).toEqual({ seconds: 10, toleranceSeconds: 1 });
   });
 

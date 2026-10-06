@@ -27,6 +27,13 @@ describe('Automix (Dugan gain-sharing)', () => {
     expect(g[0] + g[1]).toBeCloseTo(1, 1); // summed gain stays ~constant
   });
 
+  it('keeps the talker open while a neighbour hears the voice 10 dB down', () => {
+    const mix = new Automix(2, SR, 20, -60);
+    const g = settle(mix, [0.5, 0.5 * Math.pow(10, -10 / 20)]);
+    expect(g[0]).toBeGreaterThan(0.9); // amplitude sharing would give 0.76
+    expect(g[1]).toBeLessThan(0.1);
+  });
+
   it('pulls everything down toward the floor during silence', () => {
     const mix = new Automix(3, SR, 20, -60);
     const g = settle(mix, [0, 0, 0]);

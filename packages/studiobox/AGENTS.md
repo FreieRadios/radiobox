@@ -20,9 +20,11 @@ ahead of the audio, and the programme leaves a fixed air delay behind the room.
 ```
 room time                                                          air time (room + D)
 USB (N ch) ─arecord─► strip, 1st half (trim·HPF·gate·EQ·de-ess·comp)
-                        └─► leveler: analysis now, audio 3 s later (voice-keyed)
-                              └─► automix · host priority (decided 150 ms ahead) ─┐
-file player + bed ─► leveler ─┬─► delay (= mic latency) ─► duck ─────────────────┴─► master
+                        ├─► voice detector (noise floor, speech level) ─► duck plan ─┐
+                        └─► leveler: analysis now, audio 6 s later (voice-keyed)    │
+                              └─► automix · host priority (decided 150 ms ahead) ─┐ │
+file player + bed ─► leveler ─┬─► delay (= mic latency) ─► duck ◄─────────────────┼─┘
+                              │                              └────────────────────┴─► master
 music pairs ────────► gain ───┤                                        leveler ─► limiter
                               └─► duck (room time, no mics) ─► music return           │
                                                    (mixer USB playback)               │
@@ -119,8 +121,9 @@ Live meters: `http://localhost:4445`.
 `graph.ts` wires the chain; per-block files: `biquad`, `channel-strip` (two
 halves: `pre()` up to the compressor, `level()` = keyed leveler + gain),
 `gate`, `deesser`, `compressor`, `speech-leveler` (mics: voice-keyed, with
-look-ahead), `leveler` (music: windowed AGC), `automix` (Dugan gain-share),
-`priority` (host priority), `duck` (sidechain), `limiter`, `loudness`
+look-ahead), `leveler` (music: windowed AGC), `automix` (Dugan gain-share by
+power), `priority` (host priority), `voice` (per-mic voice detector and the
+duck planner), `duck` (glide and arming of the duck), `limiter`, `loudness`
 (BS.1770), `envelope`, `delay-line`, `dsp-math`. Audio I/O in `src/audio/`
 (`capture`, `encoder`, `recorder`, `monitor`, `format`, `file-player`, `bed`,
 `play-queue`, `air-fifo`, `sample-clock`); the setup assistant in `src/setup/`
@@ -373,7 +376,7 @@ hidden where the box does not report it, so a playout box shows none of it):
   tippen", 4 s), and a second tap at least 400 ms later acts — the path for a
   screen reader's activate gesture and for anybody who cannot hold a press.
   Starting stays a single tap. Never a `confirm()`.
-  After a recording stop the box keeps writing for the look-ahead (~3 s) and
+  After a recording stop the box keeps writing for the look-ahead (~6 s) and
   reports `recording: true` that long; the chip reads "Aufnahme endet …"
   meanwhile (`recEnding`), so it does not look like a stop that failed.
 - **Moderations-Vorrang** panel (`setPrio`, shown when `snapshot.priority` is
@@ -488,13 +491,35 @@ Everything below is live mode only (`src/pipeline.ts`); playout mode is
 unchanged. Verified by unit tests and an end-to-end run against fake sound
 cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
 
-- **Look-ahead** (`lookahead`, default 3 s / 15 ms / 150 ms). The mic leveler
-  (`SpeechLeveler`) estimates loudness only while its mic is the _active
-  talker_ — gate open and within 10 dB of the loudest mic (`DOMINANCE_DB` in
-  `graph.ts`), so bleed and room noise don't pump it — and applies the gain to
-  audio delayed by the look-ahead: a quiet voice is at target on its first
-  word. The gate opens 15 ms before an onset. Automix shares, host priority
-  and the programme ducker are decided 150 ms ahead of the audio.
+- **Look-ahead** (`lookahead`, default 6 s / 15 ms / 150 ms; 6 s + the 2 s
+  output buffer leave ~2 s of FIFO in a 10 s air delay, `doctor` checks it).
+  Each mic has a **voice detector** (`voice.ts`, 10 ms frames, room time):
+  noise floor by minimum statistics over 8 s, the talker's speech level
+  learned while the mic is the talker; a frame is _voiced_ above -60 dBFS,
+  12 dB over the floor and no more than 18 dB under the speech level. The mic
+  leveler (`SpeechLeveler`) counts evidence only while its mic is the _active
+  talker_ — gate open, within 10 dB of the loudest mic (`DOMINANCE_DB` in
+  `graph.ts`) and voiced, so bleed, rustle and room noise don't pump it. Its
+  gain for each moment comes from the speech **around** it: a phrase window
+  of ±`responseMs`/2 centred on the audio (as far as the look-ahead reaches),
+  leaning on the long-term level when the window holds little speech, plus a
+  fast **rider** (±250 ms, 70 %, at most ±`riderDb`, default 6) for a child
+  turning away mid-sentence. The boost stops at `maxGainDb` (profiles: +24)
+  or where the mic's noise floor would pass `noiseCeilingDb` (profiles: -50).
+  The gate opens 15 ms before an onset. Automix shares (by power, compared on
+  the input after the trim — without the leveler's gain, so a quiet mic's
+  boosted bleed doesn't take the share from the talker) and host priority are
+  decided 150 ms ahead of the audio. The **programme duck** is planned
+  (`DuckPlanner`): only a stretch of at least `duck.minSpeechMs` (300) of
+  voice on one mic, bridging gaps up to 150 ms, with 30 ms of talk-level
+  syllables in it (above -50 dBFS or within 10 dB of the mic's speech level)
+  counts; it is marked back to its first frame and the music goes down
+  3 × `attackMs` before the first word reaches the programme and stays down
+  `holdMs` after the last. A bump, a click, a breath or a whisper during a
+  jingle doesn't duck. The music return keeps the causal ducker on
+  `duck.thresholdDb`. Tuned on the multitrack recordings of 2026-10-04 by
+  replaying the dry channels through the graph (the replay matches the
+  recorded programme within ~1 dB).
 - **Host priority** (`automix.priority`): listed mics go down by `depthDb`
   (default −8, never below −24: not a mute) while the priority mic talks;
   `priorityDepth` command, `priority` + per-mic `priorityDb` in the snapshot.
@@ -531,7 +556,7 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   `.multitrack.json` channel map. `dry` taps are the raw sources delayed to
   line up with the programme. A stop keeps recording for the look-ahead, so
   what was said up to the button press is in the file (`recording` stays true
-  for those ~3 s). `Recorder.stop()` closes stdin and lets ffmpeg finalize.
+  for those ~6 s). `Recorder.stop()` closes stdin and lets ffmpeg finalize.
 - **Setup assistant "Einmessen"** (`src/setup/`): `setupStart` (optionally
   `{only:[label]}` to re-measure after a gain-knob change) → 5 s room silence →
   each voice until 6 s of speech are collected (the talking mic is detected

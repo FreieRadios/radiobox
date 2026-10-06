@@ -316,13 +316,13 @@ function resolveOutput(raw: unknown): OutputConfig {
   };
 }
 
-/** Look-ahead defaults: 3 s for the leveler, 15 ms for the gate, 150 ms for
- *  the mix decisions. `lookahead: { seconds: 0, gateMs: 0, mixMs: 0 }` gives
- *  the old real-time chain. */
+/** Look-ahead defaults: 6 s for the leveler and the duck plan, 15 ms for the
+ *  gate, 150 ms for automix and host priority. `lookahead: { seconds: 0,
+ *  gateMs: 0, mixMs: 0 }` gives the old real-time chain. */
 function resolveLookahead(raw: unknown): LookaheadConfig {
   const r = isObj(raw) ? raw : {};
   return {
-    seconds: Math.min(10, Math.max(0, finite(r.seconds, 3))),
+    seconds: Math.min(10, Math.max(0, finite(r.seconds, 6))),
     gateMs: Math.min(100, Math.max(0, finite(r.gateMs, 15))),
     mixMs: Math.min(1000, Math.max(0, finite(r.mixMs, 150))),
   };

@@ -32,14 +32,20 @@ export class Ducker {
   process(micBus: number, musicBus: number): number {
     if (!this.p.enabled) return 1;
     const micDb = gainToDb(this.micDet.process(micBus));
-    const musicDb = gainToDb(this.musicDet.process(musicBus));
+    return this.step(micDb > this.p.thresholdDb, musicBus);
+  }
 
+  /** Same, with the decision made by the caller: `trigger` = talk now.
+   *  Returns the linear gain to apply to the music bus. */
+  step(trigger: boolean, musicBus: number): number {
+    if (!this.p.enabled) return 1;
+    const musicDb = gainToDb(this.musicDet.process(musicBus));
     const armed = musicDb > this.p.musicPresentDb;
-    const trigger = armed && micDb > this.p.thresholdDb;
-    if (trigger) this.held = this.holdSamples;
+    const fire = armed && trigger;
+    if (fire) this.held = this.holdSamples;
     else if (this.held > 0) this.held--;
 
-    const target = armed && (trigger || this.held > 0) ? this.p.depthDb : 0;
+    const target = armed && (fire || this.held > 0) ? this.p.depthDb : 0;
     const c = target < this.gainDb ? this.atk : this.rel;
     this.gainDb = c * (this.gainDb - target) + target;
     return dbToGain(this.gainDb);

@@ -161,6 +161,16 @@ export class ChannelStrip {
     return this.level(c, this.gate.openness > 0.5);
   }
 
+  /** The sample `pre()` last saw, after trim and HPF (before the gate). */
+  get input(): number {
+    return this.lastIn;
+  }
+
+  /** Tell the leveler the mic's noise floor (dBFS RMS after the trim). */
+  setNoiseFloor(db: number): void {
+    this.leveler.setNoiseFloor(db);
+  }
+
   /** True while the gate is (mostly) open. */
   get gateIsOpen(): boolean {
     return this.gate.openness > 0.5;
