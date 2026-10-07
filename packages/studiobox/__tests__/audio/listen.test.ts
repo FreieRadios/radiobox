@@ -224,6 +224,20 @@ describe('ListenHub', () => {
   });
 });
 
+describe('ListenHub on a playout box', () => {
+  it('offers only what the box plays, and refuses the rest', () => {
+    const { hub, encoders } = setup({ sources: ['air'] });
+    expect(hub.sources).toEqual(['air']);
+    for (const src of ['rec', 'raw', 'mic:Host']) {
+      expect(hub.attach('tab-1', src, new FakeClient())).toBe('bad');
+    }
+    expect(encoders).toHaveLength(0);
+    expect(hub.attach('tab-1', 'air', new FakeClient())).toBe('ok');
+    expect(hub.select('tab-1', 'rec')).toBe(false);
+    hub.stopAll();
+  });
+});
+
 describe('frameSync', () => {
   it('finds an MPEG audio frame header and skips false syncs', () => {
     expect(frameSync(Buffer.concat([Buffer.from([0, 0xff, 0xff, 0xf0, 0]), HEADER]))).toBe(5);

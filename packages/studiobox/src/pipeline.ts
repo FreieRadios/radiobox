@@ -892,6 +892,7 @@ export class Pipeline {
       serve: this.serve ? this.serve.status() : null,
       outputTarget: this.outputTarget(),
       stream: this.filePlayer?.streamStatus ?? null,
+      listen: this.listen ? { sources: this.listen.sources } : null,
       monitorFault: !!this.monitor && this.monitorArmed && this.monitor.failing(now),
       multitrack: this.multitrack ? this.multitrack.active : null,
       setup: this.setup.status(),

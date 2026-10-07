@@ -1286,18 +1286,18 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   <div class="prio"><input id="musLvl" type="range" min="-12" max="6" step="1" value="0"><output id="musLvlVal" for="musLvl"></output><button id="musLvlReset" style="display:none">Zurücksetzen</button></div>
   <p class="hintline">Wie laut Musik, Jingles und Bett auf Sendung neben den Stimmen stehen. 0 dB = automatisch eingepegelt.</p>
  </section>
+</div>
+<div class="col2">
  <section class="panel techonly" id="abhBox" style="display:none" aria-labelledby="abhTitle">
   <h2 id="abhTitle">Abhören</h2>
   <div class="abh">
    <button id="abhPlay" aria-pressed="false">▶ Abhören</button>
-   <div class="segc" role="group" aria-label="Was hören"><button id="abhRec" aria-pressed="true">Aufnahme</button><button id="abhRaw" aria-pressed="false">Roh</button><button id="abhAir" aria-pressed="false">Auf Sendung</button></div>
+   <div class="segc" id="abhSrc" role="group" aria-label="Was hören"><button id="abhRec" aria-pressed="true">Aufnahme</button><button id="abhRaw" aria-pressed="false">Roh</button><button id="abhAir" aria-pressed="false">Auf Sendung</button></div>
    <select id="abhMic" aria-label="Rohsignal von" style="display:none"><option value="raw">alle Mikros</option></select>
   </div>
   <p class="hintline" id="abhState" aria-live="polite"></p>
   <audio id="abhAudio" preload="none"></audio>
  </section>
-</div>
-<div class="col2">
  <section class="panel guide" id="guidebox" style="display:none" aria-labelledby="gdTitle">
   <div class="lishead">
    <h2><button class="qt" id="gdTitle" aria-expanded="true" aria-controls="gdBody" title="ein-/ausklappen">Sendung</button></h2>
@@ -1475,7 +1475,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     <li><span class="k">👂</span> neben dem laufenden Titel ist
     <b>Reinhören</b>: du hörst die laufende Ausspielung an genau der Stelle mit,
     an der sie gerade ist. Ein gerade vorgehörter Titel rutscht dabei oben in
-    die Vorhören-Liste und kommt danach zurück.</li>
+    die Vorhören-Liste und kommt danach zurück. Läuft ein Stream, öffnet 👂
+    das <b>Abhören</b>: das Gerät schickt, was es gerade ausspielt.</li>
     <li class="note">Formate, die Browser nicht abspielen (.wma, .aiff), werden
     zum Vorhören nicht angeboten — auf dem Gerät laufen sie trotzdem.</li>
    </ul>
@@ -1801,7 +1802,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  let ws, muted=false, playing=null, recording=null, streaming=null, monitor=null;
  // Where the playing file lives ({folder,name}), so the page can jump back to
  // it — the server reports it because only the box knows how playback started.
- let playingAt=null, playingAtKey='';
+ let playingAt=null, playingAtKey='', streamPlaying=false, tuneOfferKey='';
  // Its playback position (seconds) and when that frame arrived, so Reinhören
  // can seek to where the box is *now*, not where it was one frame ago.
  let playPos=null, playPosAt=0;
@@ -1953,11 +1954,14 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   if(playing){
    // Reinhören needs a location to fetch from and a format the browser plays.
    const canTune=!!playingAt&&cuePlayable(playing);
+   const canTuneStream=streamPlaying&&abhOffer.indexOf('air')>=0;
    npbox.innerHTML='<span class="ic" aria-hidden="true">▶</span><span class="nm" title="'+esc(playing)+'">'+midName(playing)+'</span>'+
     (playingAt?'<button class="jump" title="Ordner des laufenden Titels öffnen" aria-label="Ordner des laufenden Titels öffnen">📂</button>':'')+
-    (canTune?'<button class="jump tune" title="Reinhören: die laufende Ausspielung an der aktuellen Stelle im Browser mithören" aria-label="Reinhören">👂</button>':'');
+    (canTune?'<button class="jump tune" title="Reinhören: die laufende Ausspielung an der aktuellen Stelle im Browser mithören" aria-label="Reinhören">👂</button>'
+     :canTuneStream?'<button class="jump tune" title="Reinhören: den Stream so mithören, wie das Gerät ihn ausspielt (Abhören)" aria-label="Reinhören">👂</button>':'');
    if(playingAt)npbox.querySelector('.jump').onclick=()=>gotoFile(playingAt.folder,playingAt.name);
-   if(canTune)npbox.querySelector('.tune').onclick=tuneIn;}
+   if(canTune)npbox.querySelector('.tune').onclick=tuneIn;
+   else if(canTuneStream)npbox.querySelector('.tune').onclick=tuneInStream;}
   else{npbox.innerHTML='Keine Datei läuft';}
   setStop();}
  // Footer transport: remaining time large, elapsed small, and a progress bar;
@@ -2403,8 +2407,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    // Two files in different folders can share a basename, so the location is
    // part of what makes the now-playing line stale, not just the name.
    const atKey=s.filePlayingAt?s.filePlayingAt.folder+':'+s.filePlayingAt.name:'';
-   if(s.filePlaying!==playing||atKey!==playingAtKey){
-    playing=s.filePlaying;playingAt=s.filePlayingAt||null;playingAtKey=atKey;markPlaying();}
+   // The Abhören offer and whether a stream plays decide the 👂 of a stream.
+   const sp=!!s.stream;const offerKey=tech()&&s.listen?s.listen.sources.join():'';
+   if(s.filePlaying!==playing||atKey!==playingAtKey||sp!==streamPlaying||offerKey!==tuneOfferKey){
+    playing=s.filePlaying;playingAt=s.filePlayingAt||null;playingAtKey=atKey;streamPlaying=sp;tuneOfferKey=offerKey;
+    setAbh(s);markPlaying();}
    setNext(s.nextScheduled||null);
    setStream(s.stream||null);
    playPos=typeof s.filePosition==='number'&&isFinite(s.filePosition)?s.filePosition:null;
@@ -2501,19 +2508,25 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  const abh={box:$('abhBox'),play:$('abhPlay'),mic:$('abhMic'),state:$('abhState'),audio:$('abhAudio'),
   seg:{rec:$('abhRec'),raw:$('abhRaw'),air:$('abhAir')}};
  let abhKind=(()=>{const v=sget('sb.abhSrc');return v==='raw'||v==='air'?v:'rec';})();
+ let abhOffer=[]; // what this box can stream: rec/raw/air live, air on a playout box
  let abhMic=sget('sb.abhMic')||'raw'; // 'raw' = all mics, or 'mic:<label>'
  let abhId=null,abhErr=false,abhMics=null,abhLook=null,abhAirMs=null;
  const abhSrc=()=>abhKind==='raw'?abhMic:abhKind;
  function abhLine(){let t;
-  if(!abhId)t='Hört auf diesem Gerät mit: Aufnahme = verarbeitet, Roh = die Mikros unverarbeitet, Auf Sendung = was das Gerät verlässt.';
+  const only=abhOffer.length===1;
+  if(!abhId)t=only?'Hört auf diesem Gerät mit, was das Gerät gerade ausspielt (Datei, Bett oder Stream).'
+   :'Hört auf diesem Gerät mit: Aufnahme = verarbeitet, Roh = die Mikros unverarbeitet, Auf Sendung = was das Gerät verlässt.';
   else if(abhErr)t='Verbindung unterbrochen — ▶ Abhören startet neu.';
   else{const base=abhKind==='air'?abhAirMs:abhLook;let buf=0;
    // What the browser holds on top of the box's own delay.
    try{const b=abh.audio.buffered;if(b&&b.length)buf=Math.max(0,b.end(b.length-1)-abh.audio.currentTime);}catch(e){}
-   t=typeof base==='number'?'Etwa '+Math.round(base/1000+buf)+' s hinter dem Raum':'Verbindet …';}
+   // A playout box has no room to be behind: what it plays is the reference.
+   t=only?'Etwa '+Math.round(buf)+' s hinter der Ausspielung'
+    :typeof base==='number'?'Etwa '+Math.round(base/1000+buf)+' s hinter dem Raum':'Verbindet …';}
   if(abh.state.textContent!==t)abh.state.textContent=t;}
- function abhRender(){for(const k in abh.seg)setPressed(abh.seg[k],k===abhKind);
-  show(abh.mic,abhKind==='raw');
+ function abhRender(){for(const k in abh.seg){setPressed(abh.seg[k],k===abhKind);show(abh.seg[k],abhOffer.indexOf(k)>=0);}
+  show($('abhSrc'),abhOffer.length>1);
+  show(abh.mic,abhKind==='raw'&&abhOffer.indexOf('raw')>=0);
   abh.play.textContent=abhId?'■ Abhören stoppen':'▶ Abhören';setPressed(abh.play,!!abhId);abhLine();}
  function abhStart(){abhId=Math.random().toString(36).slice(2,10)+Date.now().toString(36);abhErr=false;
   abh.audio.src=withK('listen?id='+abhId+'&src='+encodeURIComponent(abhSrc()));
@@ -2525,9 +2538,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  for(const k in abh.seg)abh.seg[k].onclick=()=>{if(abhKind!==k){abhKind=k;abhPick();}};
  abh.mic.onchange=()=>{abhMic=abh.mic.value;abhPick();};
  abh.audio.onerror=()=>{if(abhId){abhErr=true;abhLine();}};
- // Live mode and the technician only: the box refuses everybody else anyway.
- function setAbh(s){const on=tech()&&!!s.air;show(abh.box,on);
-  if(!on){if(abhId)abhStop();return;}
+ // The technician only (the box refuses everybody else anyway), on a box
+ // that offers it: live mode all three sources, a playout box what it plays.
+ function setAbh(s){const offer=tech()&&s.listen?s.listen.sources:[];const on=offer.length>0;show(abh.box,on);
+  if(!on){if(abhId)abhStop();abhOffer=[];return;}
+  if(offer.join()!==abhOffer.join()){abhOffer=offer.slice();
+   if(abhOffer.indexOf(abhKind)<0)abhKind=abhOffer[abhOffer.length-1];abhRender();}
   abhLook=typeof s.lookaheadMs==='number'?s.lookaheadMs:null;
   abhAirMs=s.air&&typeof s.air.delayMs==='number'?s.air.delayMs:null;
   const mics=(s.channels||[]).filter(c=>c.role==='mic').map(c=>c.label);
@@ -2539,6 +2555,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    abh.mic.value=abhMic;}
   abhLine();}
  abhRender();
+ // Reinhören on a stream: there is no file to fetch, and the page must not
+ // hand out the stream's URL (it carries the sender's token). The box relays
+ // what it plays instead: Abhören on "Auf Sendung".
+ function tuneInStream(){if(abhOffer.indexOf('air')<0)return;
+  if(abhKind!=='air'){abhKind='air';abhPick();}
+  if(!abhId)abhStart();
+  if(abh.box.scrollIntoView)abh.box.scrollIntoView({block:'nearest'});}
  const hmFmt=mkFmt({hour:'2-digit',minute:'2-digit',hour12:false});
  let lisStatus=null,lisOpen=sget('sb.lisOpen')==='1';
  let lisSeen=new Set((()=>{try{return JSON.parse(sget('sb.lisSeen')||'[]');}catch(e){return [];}})());

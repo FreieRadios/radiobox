@@ -619,8 +619,15 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   after the FIFO). The `listen {id, src}` command switches inside the
   running stream with a 20 ms fade out and in, so A/B lands on the same
   moment. `room()`/`air()` return at once while nobody listens. Panel
-  `setAbh` (techonly, live mode), source remembered per browser, the delay
-  behind the room = look-ahead (or air delay) + the browser's buffer.
+  `setAbh` (techonly, top of the right column), source remembered per
+  browser, the delay behind the room = look-ahead (or air delay) + the
+  browser's buffer. **Playout mode too** (`PlayoutPipeline`): a hub with
+  `sources: ['air']`, fed the block that goes to the sound card (file, bed
+  or stream). The snapshot's `listen.sources` tells the page what a box
+  offers; with only `air` the source picker is hidden. 👂 (Reinhören) on a
+  playing stream opens Abhören on `air` (`tuneInStream`) rather than giving
+  the browser the stream's URL, which may carry the sender's token. For
+  files Reinhören stays the browser's own `/preview` fetch.
 - **Streams that play like files** (`filePlayer.streams`, both modes,
   roadmap M1c.2): listed as one more folder "📡 Streams" (`FileDirs`;
   `resolve()` gives a `stream:<n>` token, never the URL, which may carry a

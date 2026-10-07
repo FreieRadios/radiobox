@@ -1308,6 +1308,45 @@ describe('meters page — a stream playing like a file', () => {
   });
 });
 
+describe('meters page — Reinhören on a stream (playout box)', () => {
+  it('opens Abhören on "Auf Sendung" instead of handing out the stream URL', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const stream = {
+      label: 'Studio',
+      state: 'playing',
+      connected: true,
+      goneSinceMs: null,
+      reason: null,
+      bufferMs: 2000,
+      ppm: 0,
+    };
+    p.push(
+      liveFrame({
+        channels: [],
+        filePlaying: 'Studio',
+        filePlayingAt: { folder: 2, name: 'Studio' },
+        stream,
+        listen: { sources: ['air'] },
+      })
+    );
+    // A playout box: no source to pick, it plays what it plays.
+    expect(p.byId('abhBox').style.display).toBe('');
+    expect(p.byId('abhSrc').style.display).toBe('none');
+    expect(p.byId('abhState').textContent).toContain('was das Gerät gerade ausspielt');
+    const ear = p.byId('nowplaying').querySelector('.tune');
+    ear.click();
+    const src = String(p.byId('abhAudio').src);
+    expect(src).toMatch(/^listen\?id=[\w-]+&src=air$/);
+    expect(src).not.toContain('http'); // never the stream's own URL
+    expect(p.byId('abhPlay').attrs['aria-pressed']).toBe('true');
+    p.push(
+      liveFrame({ channels: [], filePlaying: 'Studio', stream, listen: { sources: ['air'] } })
+    );
+    expect(p.byId('abhState').textContent).toMatch(/^Etwa \d+ s hinter der Ausspielung$/);
+  });
+});
+
 describe('meters page — Studio-Stream', () => {
   it('says how many pull it, starts with a tap and ends with the hold', async () => {
     const p = boot(LISTINGS);
@@ -1334,13 +1373,14 @@ describe('meters page — Studio-Stream', () => {
 
 describe('meters page — Abhören', () => {
   const air = { targetMs: 10000, delayMs: 10020, nowMs: Date.now(), state: 'live' };
-  const frame = () => liveFrame({ air, lookaheadMs: 6200 });
+  const LIVE = { sources: ['rec', 'raw', 'air'] };
+  const frame = () => liveFrame({ air, lookaheadMs: 6200, listen: LIVE });
 
-  it("is the technician's, in live mode only", async () => {
+  it("is the technician's, on a box that offers it", async () => {
     const p = boot(LISTINGS);
     await p.flush();
     p.push(liveFrame());
-    expect(p.byId('abhBox').style.display).toBe('none'); // no air: playout box
+    expect(p.byId('abhBox').style.display).toBe('none'); // no meters page behind it
     p.push(frame());
     expect(p.byId('abhBox').style.display).toBe('');
     p.push({ type: 'hello', role: 'host' });

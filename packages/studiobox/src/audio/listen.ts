@@ -52,6 +52,9 @@ export interface ListenHubOptions {
    *  browser that reconnects (Safari probes first) finds it running. */
   graceMs?: number;
   spawn?: (args: string[]) => ListenEncoder;
+  /** What this box can feed: all three in live mode; a playout box has no
+   *  recording point, only what it plays (`air`). Default: all. */
+  sources?: readonly ('rec' | 'raw' | 'air')[];
 }
 
 /** Length of the fade out and in when a listener switches source. */
@@ -93,11 +96,17 @@ export class ListenHub {
 
   /** A source name from a request, or null when it names nothing. */
   parse(src: unknown): ListenSource | null {
-    if (src === 'rec' || src === 'raw' || src === 'air') return src;
-    if (typeof src === 'string' && src.startsWith('mic:')) {
+    const offered = this.sources;
+    if (src === 'rec' || src === 'raw' || src === 'air') return offered.includes(src) ? src : null;
+    if (typeof src === 'string' && src.startsWith('mic:') && offered.includes('raw')) {
       return this.opts.mics.includes(src.slice(4)) ? (src as ListenSource) : null;
     }
     return null;
+  }
+
+  /** The sources this box offers (the page shows only these). */
+  get sources(): readonly ('rec' | 'raw' | 'air')[] {
+    return this.opts.sources ?? ['rec', 'raw', 'air'];
   }
 
   /** Listeners right now. */

@@ -6,6 +6,7 @@ import { FileDirs } from './audio/file-dirs';
 import { QueuePlayer } from './audio/play-queue';
 import { BedDeck, BedStatus } from './audio/bed';
 import { setupStreams } from './audio/stream-fallback';
+import { ListenEncoder, ListenHub } from './audio/listen';
 import { StreamPlayerOptions } from './audio/stream-player';
 import { interleaveStereo } from './audio/format';
 import { MeterSnapshot } from './dsp/graph';
@@ -40,6 +41,8 @@ export class PlayoutPipeline {
   private bedPlayer: FilePlayer | null = null;
   private bed: BedDeck | null = null;
   private autoStartStream: (() => void) | null = null;
+  /** "Abhören": what this box plays (file, bed or stream), to a tablet. */
+  private listen: ListenHub | null = null;
   private fileDirs: FileDirs;
   private playQueue: QueuePlayer;
   private meters: MeterServer | null;
@@ -54,7 +57,7 @@ export class PlayoutPipeline {
 
   constructor(
     private cfg: StudioboxConfig,
-    opts: { stream?: StreamPlayerOptions } = {}
+    opts: { stream?: StreamPlayerOptions; listenSpawn?: (args: string[]) => ListenEncoder } = {}
   ) {
     if (!cfg.filePlayer?.enabled) {
       throw new Error('mode "playout" requires filePlayer.enabled');
@@ -92,6 +95,19 @@ export class PlayoutPipeline {
           logoAlt: cfg.meters.logoAlt ?? 'studiobox',
         })
       : null;
+    // Listening in: the box relays what goes to its sound card, so a tablet
+    // hears a stream without being handed its URL (and the sender's token).
+    if (this.meters) {
+      const hub = new ListenHub({
+        sampleRate: cfg.capture.sampleRate,
+        mics: [],
+        sources: ['air'],
+        log: makeLog('listen'),
+        spawn: opts.listenSpawn,
+      });
+      this.listen = hub;
+      this.meters.onListen((id, src, res) => hub.attach(id, src, res));
+    }
     // Pending play list: chains the next file when one ends by itself. Never
     // starts audio on its own (see QueuePlayer).
     this.playQueue = new QueuePlayer({
@@ -160,6 +176,9 @@ export class PlayoutPipeline {
       // Through the queue player: an operator stop must not roll into the
       // next pending item (the list itself is kept).
       this.playQueue.stop(fadeMs);
+    } else if (type === 'listen' && this.listen) {
+      const req = isObj(value) ? value : {};
+      this.listen.select(String(req.id ?? ''), req.src);
     } else if (type === 'bed' && this.bed) {
       this.bed.set(!!value);
     } else if (type === 'bedSelect' && this.bed) {
@@ -201,6 +220,7 @@ export class PlayoutPipeline {
       serverNowMs: Date.now(),
       stream: this.filePlayer.streamStatus,
       bed: this.bed ? this.bed.status() : null,
+      listen: this.listen ? { sources: this.listen.sources } : null,
     };
   }
 
@@ -211,7 +231,9 @@ export class PlayoutPipeline {
     const frames = this.cfg.capture.blockSize;
     this.filePlayer.read(this.outL, this.outR, frames);
     this.bed?.mixInto(this.outL, this.outR, frames);
-    this.monitor.write(interleaveStereo(this.outL, this.outR, frames));
+    const buf = interleaveStereo(this.outL, this.outR, frames);
+    this.monitor.write(buf);
+    this.listen?.air(buf);
     // Watchdog a little above the block duration: long enough to normally be
     // beaten by 'drain', short enough to keep near-real-time consumption when
     // the device is gone.
@@ -254,6 +276,7 @@ export class PlayoutPipeline {
     this.meters?.stop();
     this.filePlayer.shutdown();
     this.bedPlayer?.shutdown();
+    this.listen?.stopAll();
     this.monitor.stop();
     log.info('stopped');
   }

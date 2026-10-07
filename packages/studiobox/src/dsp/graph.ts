@@ -110,6 +110,9 @@ export interface MeterSnapshot {
   multitrack?: boolean | null;
   /** The network stream the file player plays, or null (roadmap M1c.2). */
   stream?: StreamStatus | null;
+  /** "Abhören": the sources this box can stream to a technician; null
+   *  without the meters page. */
+  listen?: { sources: readonly ('rec' | 'raw' | 'air')[] } | null;
 }
 
 interface MicNode {
