@@ -1,0 +1,18 @@
+[Unit]
+Description=Nextcloud sync of @NEXTCLOUD_DIR@ with @NEXTCLOUD_URL@ @NEXTCLOUD_PATH@
+Documentation=file://@APP_DIR@/station/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+# NC_USER and NC_PASSWORD (an app password). Root-only; systemd reads it
+# before it drops to the user.
+EnvironmentFile=/etc/studiobox/nextcloud.env
+ExecStart=/usr/bin/nextcloudcmd --non-interactive --silent --exclude /etc/Nextcloud/sync-exclude.lst --path "@NEXTCLOUD_PATH@" "@NEXTCLOUD_DIR@" @NEXTCLOUD_URL@
+# Never in the way of a show: lowest CPU and disk priority.
+Nice=19
+IOSchedulingClass=idle
+# The first run of a new box may pull gigabytes.
+TimeoutStartSec=6h

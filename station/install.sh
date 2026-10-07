@@ -5,13 +5,13 @@
 #   sudo station/install.sh --env … wifi service        # single steps
 #
 # Steps (all = in this order): packages node repo build icecast config service
-# power usb journal wifi lan desktop card. Not in `all`: relay (the receiving
-# box at the desk).
+# power usb journal wifi lan desktop nextcloud card. Not in `all`: relay (the
+# receiving box at the desk).
 # Every step can be run again; it converges instead of piling up.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ALL_STEPS=(packages node repo build icecast config service power usb journal wifi lan desktop card)
+ALL_STEPS=(packages node repo build icecast config service power usb journal wifi lan desktop nextcloud card)
 
 say() { printf '\033[1;32m[station]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[station]\033[0m %s\n' "$*" >&2; }
@@ -59,6 +59,7 @@ load_env() {
   : "${STREAM_ENABLED:=yes}" "${STREAM_SERVER:=local}" "${STREAM_MOUNT:=/studiobox}" "${STREAM_FORMAT:=mp3}"
   : "${AP_ENABLED:=yes}" "${AP_SSID:=studiobox}" "${AP_BAND:=bg}" "${AP_CHANNEL:=6}" "${AP_ADDRESS:=10.42.0.1/24}"
   : "${LAN_SHARE_ENABLED:=no}" "${LAN_ADDRESS:=10.43.0.1/24}"
+  : "${NEXTCLOUD_ENABLED:=no}" "${NEXTCLOUD_PATH:=/}" "${NEXTCLOUD_DIR:=$STATE_DIR/nextcloud}"
   NODE_DIR="$(dirname "$NODE_BIN")"
 }
 
@@ -344,6 +345,87 @@ step_desktop() {
     done
     echo "]"
   } | as_user tee "$d/51-studiobox-cards.conf" >/dev/null
+}
+
+# Ask on the terminal (the script may be piped). $2=secret: no echo.
+ask() {
+  { : </dev/tty; } 2>/dev/null || die "$1: needed, but there is no terminal to ask on - set it in the env file"
+  local a
+  if [ "${2:-}" = secret ]; then
+    read -rsp "$1: " a </dev/tty
+    echo >/dev/tty
+  else
+    read -rp "$1: " a </dev/tty
+  fi
+  printf '%s' "$a"
+}
+
+# 0 when user $1 with app password $2 can log in at NEXTCLOUD_URL. The
+# password goes to curl on stdin, never on its command line.
+nextcloud_login_ok() {
+  local u p
+  u="$(printf '%s' "$1" | sed 's/[\\"]/\\&/g')"
+  p="$(printf '%s' "$2" | sed 's/[\\"]/\\&/g')"
+  printf 'user = "%s:%s"\n' "$u" "$p" |
+    curl -sf -K - -o /dev/null -H 'OCS-APIRequest: true' "$NEXTCLOUD_URL/ocs/v2.php/cloud/user?format=json"
+}
+
+# A Nextcloud folder kept on the box (music, jingles, pre-produced shows):
+# nextcloudcmd under a system timer, no desktop client, no login needed.
+# Two-way, so whatever is deleted on the server goes here too - record
+# elsewhere (RECORDINGS_DIR), never into this folder.
+step_nextcloud() {
+  [ "$NEXTCLOUD_ENABLED" = yes ] || {
+    say "nextcloud: off"
+    return
+  }
+  command -v nextcloudcmd >/dev/null || {
+    say "nextcloud: apt nextcloud-desktop-cmd"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nextcloud-desktop-cmd
+  }
+  nextcloudcmd --help 2>&1 | grep -q NC_PASSWORD ||
+    die "nextcloud: this nextcloudcmd does not read NC_PASSWORD from the environment - it is too old"
+  [ -n "${NEXTCLOUD_URL:-}" ] || set_env NEXTCLOUD_URL "$(ask 'Nextcloud address (https://…)')"
+  set_env NEXTCLOUD_URL "${NEXTCLOUD_URL%/}"
+  [[ "$NEXTCLOUD_URL" == https://* ]] || die "nextcloud: NEXTCLOUD_URL must start with https://"
+  [ -n "${NEXTCLOUD_USER:-}" ] || set_env NEXTCLOUD_USER "$(ask 'Nextcloud user')"
+  [ -n "$NEXTCLOUD_USER" ] || die "nextcloud: no NEXTCLOUD_USER"
+
+  # The app password lives only in a root-only file, not in station.env.
+  local cred=/etc/studiobox/nextcloud.env pw="" try
+  [ -f "$cred" ] && pw="$(sed -n "s/^NC_PASSWORD='\(.*\)'$/\1/p" "$cred")"
+  if [ -n "$pw" ] && grep -qxF "NC_USER='$NEXTCLOUD_USER'" "$cred" && nextcloud_login_ok "$NEXTCLOUD_USER" "$pw"; then
+    say "nextcloud: login as $NEXTCLOUD_USER works, keeping it"
+  else
+    say "nextcloud: create an app password for $NEXTCLOUD_USER at $NEXTCLOUD_URL"
+    say "           (Personal settings > Security > Devices & sessions)"
+    for try in 1 2 3; do
+      pw="$(ask "App password for $NEXTCLOUD_USER" secret)" || exit 1
+      [[ "$pw" != *"'"* ]] && nextcloud_login_ok "$NEXTCLOUD_USER" "$pw" && break
+      warn "nextcloud: login failed (attempt $try of 3)"
+      pw=""
+    done
+    [ -n "$pw" ] || die "nextcloud: no working login - check address, user and app password"
+    install -d -m 0755 /etc/studiobox
+    (
+      umask 077
+      printf "NC_USER='%s'\nNC_PASSWORD='%s'\n" "$NEXTCLOUD_USER" "$pw" >"$cred"
+    )
+    say "nextcloud: login saved to $cred (root only)"
+  fi
+
+  install -d -o "$RUN_USER" -m 0755 "$NEXTCLOUD_DIR"
+  say "nextcloud: $NEXTCLOUD_URL $NEXTCLOUD_PATH -> $NEXTCLOUD_DIR, every 5 minutes"
+  sed -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@NEXTCLOUD_URL@|$NEXTCLOUD_URL|g" \
+    -e "s|@NEXTCLOUD_PATH@|$NEXTCLOUD_PATH|g" -e "s|@NEXTCLOUD_DIR@|$NEXTCLOUD_DIR|g" \
+    "$HERE/systemd/nextcloud-sync.service.in" >/etc/systemd/system/nextcloud-sync.service
+  install -m 0644 "$HERE/systemd/nextcloud-sync.timer" /etc/systemd/system/nextcloud-sync.timer
+  systemctl daemon-reload
+  systemctl enable nextcloud-sync.timer >/dev/null
+  # The first sync starts now; it can take long, the timer waits for it.
+  systemctl start --no-block nextcloud-sync.service
+  systemctl start nextcloud-sync.timer
+  say "nextcloud: first sync running (journalctl -u nextcloud-sync -f)"
 }
 
 step_card() {

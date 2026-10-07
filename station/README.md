@@ -45,22 +45,23 @@ sudo systemctl restart studiobox
 
 `all` runs these steps (each can be run on its own, and again):
 
-| Step       | What it does                                                                                                                          |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages` | ffmpeg, alsa-utils, git, NetworkManager, time zone, NTP                                                                               |
-| `node`     | Node 20 from apt (or `NODE_BIN`), yarn 1.22.22                                                                                        |
-| `repo`     | the `RUN_USER` (in group `audio`), a clone at `APP_DIR` if there is none                                                              |
-| `build`    | `yarn install` + build — skipped while the checkout has uncommitted changes                                                           |
-| `icecast`  | an Icecast on :8000 (apt `icecast2`; a running `icecast2` container is reused)                                                        |
-| `config`   | `STATE_DIR/studiobox.template.yaml`, created once; patched with the stream, random role tokens (≥ 12 chars) and the recordings folder |
-| `service`  | `studiobox.service`: starts at boot, restarts on failure, `Nice=-10`; picks the output card at every start (`bin/prestart.js`)        |
-| `power`    | never suspends; lid, suspend and hibernate keys ignored                                                                               |
-| `usb`      | no USB autosuspend (a sleeping audio interface drops out)                                                                             |
-| `journal`  | persistent journal, at most 1 GB                                                                                                      |
-| `wifi`     | the Wi-Fi card becomes the access point `AP_SSID` at every boot; other Wi-Fi profiles stop joining by themselves                      |
-| `lan`      | a second Ethernet port hands out addresses to a playout box on a cable                                                                |
-| `desktop`  | only with a desktop: PipeWire leaves the studio cards alone                                                                           |
-| `card`     | `STATE_DIR/station-card.html`: QR codes for the WLAN, the technician and the host view — print it                                     |
+| Step        | What it does                                                                                                                                                                  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages`  | ffmpeg, alsa-utils, git, NetworkManager, time zone, NTP                                                                                                                       |
+| `node`      | Node 20 from apt (or `NODE_BIN`), yarn 1.22.22                                                                                                                                |
+| `repo`      | the `RUN_USER` (in group `audio`), a clone at `APP_DIR` if there is none                                                                                                      |
+| `build`     | `yarn install` + build — skipped while the checkout has uncommitted changes                                                                                                   |
+| `icecast`   | an Icecast on :8000 (apt `icecast2`; a running `icecast2` container is reused)                                                                                                |
+| `config`    | `STATE_DIR/studiobox.template.yaml`, created once; patched with the stream, random role tokens (≥ 12 chars) and the recordings folder                                         |
+| `service`   | `studiobox.service`: starts at boot, restarts on failure, `Nice=-10`; picks the output card at every start (`bin/prestart.js`)                                                |
+| `power`     | never suspends; lid, suspend and hibernate keys ignored                                                                                                                       |
+| `usb`       | no USB autosuspend (a sleeping audio interface drops out)                                                                                                                     |
+| `journal`   | persistent journal, at most 1 GB                                                                                                                                              |
+| `wifi`      | the Wi-Fi card becomes the access point `AP_SSID` at every boot; other Wi-Fi profiles stop joining by themselves                                                              |
+| `lan`       | a second Ethernet port hands out addresses to a playout box on a cable                                                                                                        |
+| `desktop`   | only with a desktop: PipeWire leaves the studio cards alone                                                                                                                   |
+| `nextcloud` | only with `NEXTCLOUD_ENABLED=yes`: asks for address, user and app password, then keeps `NEXTCLOUD_PATH` in sync with `NEXTCLOUD_DIR` every 5 minutes (`nextcloud-sync.timer`) |
+| `card`      | `STATE_DIR/station-card.html`: QR codes for the WLAN, the technician and the host view — print it                                                                             |
 
 Not in `all`: **`relay`**, for the receiving box at the desk (below).
 
@@ -80,6 +81,27 @@ studiobox doctor:  cd $APP_DIR/packages/studiobox && node dist/index.js doctor -
 
 A new build is picked up at the next restart; a broken build is too, so build
 and test before restarting during a show.
+
+## Audio from Nextcloud
+
+With `NEXTCLOUD_ENABLED=yes` the `nextcloud` step installs
+`nextcloud-desktop-cmd` and asks for what the env file does not hold yet: the
+address, the user and an app password (Nextcloud: Personal settings >
+Security > Devices & sessions). It checks the login before it saves anything.
+The password stays in `/etc/studiobox/nextcloud.env` (root only). Run the step
+again to change it; a login that still works is kept without asking.
+
+`nextcloud-sync.timer` syncs every 5 minutes and 2 minutes after boot, as
+`RUN_USER`, at the lowest CPU and disk priority, so it never gets in the way
+of a show. The sync goes both ways: files deleted on the server are deleted on
+the box. Recordings therefore go to `RECORDINGS_DIR`, never into the synced
+folder. To play from the folder, add `NEXTCLOUD_DIR` to `filePlayer.dirs` in the
+template.
+
+```bash
+journalctl -u nextcloud-sync -f               # what it syncs
+sudo systemctl start nextcloud-sync            # sync now
+```
 
 ## Programme output: USB, stream, or both
 
