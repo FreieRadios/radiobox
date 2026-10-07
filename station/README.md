@@ -52,7 +52,7 @@ sudo systemctl restart studiobox
 | `repo`      | the `RUN_USER` (in group `audio`), a clone at `APP_DIR` if there is none                                                                                                      |
 | `build`     | `yarn install` + build — skipped while the checkout has uncommitted changes                                                                                                   |
 | `icecast`   | an Icecast on :8000 (apt `icecast2`; a running `icecast2` container is reused)                                                                                                |
-| `config`    | `STATE_DIR/studiobox.template.yaml`, created once; patched with the stream, random role tokens (≥ 12 chars) and the recordings folder                                         |
+| `config`    | `STATE_DIR/studiobox.template.yaml`, created once; patched with the stream, random role tokens (≥ 12 chars), the recordings folder and the Nextcloud folder                   |
 | `service`   | `studiobox.service`: starts at boot, restarts on failure, `Nice=-10`; picks the output card at every start (`bin/prestart.js`)                                                |
 | `power`     | never suspends; lid, suspend and hibernate keys ignored                                                                                                                       |
 | `usb`       | no USB autosuspend (a sleeping audio interface drops out)                                                                                                                     |
@@ -95,8 +95,10 @@ again to change it; a login that still works is kept without asking.
 `RUN_USER`, at the lowest CPU and disk priority, so it never gets in the way
 of a show. The sync goes both ways: files deleted on the server are deleted on
 the box. Recordings therefore go to `RECORDINGS_DIR`, never into the synced
-folder. To play from the folder, add `NEXTCLOUD_DIR` to `filePlayer.dirs` in the
-template.
+folder. The `config` step puts the folder into the file browser
+(`filePlayer.dirs`, labelled `NEXTCLOUD_LABEL`) unless a folder there already
+holds it. `all` runs `config` before it starts the service; after a single
+`config` step, restart studiobox.
 
 ```bash
 journalctl -u nextcloud-sync -f               # what it syncs

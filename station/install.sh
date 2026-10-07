@@ -59,7 +59,7 @@ load_env() {
   : "${STREAM_ENABLED:=yes}" "${STREAM_SERVER:=local}" "${STREAM_MOUNT:=/studiobox}" "${STREAM_FORMAT:=mp3}"
   : "${AP_ENABLED:=yes}" "${AP_SSID:=studiobox}" "${AP_BAND:=bg}" "${AP_CHANNEL:=6}" "${AP_ADDRESS:=10.42.0.1/24}"
   : "${LAN_SHARE_ENABLED:=no}" "${LAN_ADDRESS:=10.43.0.1/24}"
-  : "${NEXTCLOUD_ENABLED:=no}" "${NEXTCLOUD_PATH:=/}" "${NEXTCLOUD_DIR:=$STATE_DIR/nextcloud}"
+  : "${NEXTCLOUD_ENABLED:=no}" "${NEXTCLOUD_PATH:=/}" "${NEXTCLOUD_DIR:=$STATE_DIR/nextcloud}" "${NEXTCLOUD_LABEL:=Nextcloud}"
   NODE_DIR="$(dirname "$NODE_BIN")"
 }
 
@@ -159,12 +159,15 @@ step_config() {
       url="$STREAM_SERVER"
     fi
   fi
-  say "config: stream ${url:+on (${STREAM_FORMAT}, mount ${STREAM_MOUNT})}${url:-off}, role tokens, recordings"
+  local nc=""
+  [ "$NEXTCLOUD_ENABLED" = yes ] && nc="$NEXTCLOUD_DIR"
+  say "config: stream ${url:+on (${STREAM_FORMAT}, mount ${STREAM_MOUNT})}${url:-off}, role tokens, recordings${nc:+, Nextcloud folder}"
   as_user env TPL="$tpl" URL="$url" FMT="$STREAM_FORMAT" REC="${RECORDINGS_DIR:-$STATE_DIR/recordings}" \
+    NC_DIR="$nc" NC_LABEL="$NEXTCLOUD_LABEL" \
     "$NODE_BIN" -e '
-const fs = require("fs"), crypto = require("crypto");
+const fs = require("fs"), crypto = require("crypto"), path = require("path");
 const yaml = require(require.resolve("js-yaml", { paths: [process.argv[1]] }));
-const { TPL, URL, FMT, REC } = process.env;
+const { TPL, URL, FMT, REC, NC_DIR, NC_LABEL } = process.env;
 const c = yaml.load(fs.readFileSync(TPL, "utf8"));
 c.output = c.output || {};
 c.output.harbor = URL
@@ -183,6 +186,22 @@ c.output.serve = { ...(c.output.serve || {}), enabled: true };
 // Guests share the WLAN: a token they can guess is a technician they become.
 for (const k of ["tech", "host", "guest", "stream"])
   if (!r.tokens[k] || String(r.tokens[k]).length < 12) r.tokens[k] = crypto.randomBytes(12).toString("base64url");
+// The Nextcloud folder in the file browser, unless a folder there already
+// holds it. Relative paths resolve where the service starts studiobox.
+if (NC_DIR) {
+  const fp = (c.filePlayer = c.filePlayer || { enabled: true });
+  if (!Array.isArray(fp.dirs) || !fp.dirs.length) fp.dirs = fp.dir ? [fp.dir] : [];
+  delete fp.dir;
+  const cwd = path.join(process.argv[1], "packages/studiobox");
+  const holds = (e) => {
+    const p = typeof e === "string" ? e : e && e.path;
+    if (typeof p !== "string" || !p.trim()) return false;
+    const rel = path.relative(path.resolve(cwd, p.trim()), NC_DIR);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  };
+  if (!fp.dirs.some(holds)) fp.dirs.push({ path: NC_DIR, label: NC_LABEL });
+  fs.mkdirSync(NC_DIR, { recursive: true });
+}
 fs.writeFileSync(TPL, yaml.dump(c, { lineWidth: 120 }), { mode: 0o600 });
 ' "$APP_DIR"
 }
