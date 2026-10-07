@@ -6,3 +6,4 @@ config/studiobox.yaml
 config/*.local.yaml
 session-state.json
 session-state.json.tmp
+session/

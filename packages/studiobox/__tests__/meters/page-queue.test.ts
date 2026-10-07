@@ -15,6 +15,18 @@ function pageScript(): string {
   return page.split('<script>')[1].split('</script>')[0].replace('__SERVER_TZ__', 'Europe/Berlin');
 }
 
+/** A technician page (/einstellungen, /einmessen): its inline script, run
+ *  with the shared meter.js passed in as `SB`. */
+function techPageScript(page: 'einstellungen' | 'einmessen'): string {
+  const html = fs.readFileSync(
+    path.join(__dirname, `../../src/meters/public/${page}.html`),
+    'utf8'
+  );
+  return html.split('<script>')[1].split('</script>')[0];
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const SB = require('../../src/meters/public/meter.js');
+
 /** A DOM node with just the surface the page touches. */
 class El {
   tagName: string;
@@ -22,6 +34,8 @@ class El {
   style: Record<string, string> = {};
   children: El[] = [];
   textContent = '';
+  hidden = false;
+  href = '';
   onclick: (() => void) | null = null;
   src?: string;
   disabled = false;
@@ -146,7 +160,8 @@ function boot(
   listings: Record<string, FileRow[]>,
   folders = FOLDERS,
   search = '',
-  connectBody: unknown = { enabled: true, pinned: true, links: [] }
+  connectBody: unknown = { enabled: true, pinned: true, links: [] },
+  page: 'desk' | 'einstellungen' | 'einmessen' = 'desk'
 ) {
   const els: Record<string, El> = {};
   const byId = (id: string) => (els[id] ??= new El());
@@ -220,7 +235,8 @@ function boot(
     'setTimeout',
     'clearTimeout',
     'Date',
-    pageScript()
+    'SB',
+    page === 'desk' ? pageScript() : techPageScript(page)
   );
   run(
     document,
@@ -231,7 +247,8 @@ function boot(
     () => 0,
     setTimeoutStub,
     clearTimeoutStub,
-    pageDate
+    pageDate,
+    SB
   );
 
   const flush = async () => {
@@ -1203,66 +1220,27 @@ describe('meters page — output to the desk', () => {
   });
 });
 
-describe('meters page — music return level', () => {
-  const lvl = (p: ReturnType<typeof boot>) =>
-    p.byId('retLvl') as unknown as { value: string; oninput: () => void; onchange: () => void };
-
-  it('is absent without a music return', async () => {
+describe('meters page — Einmessen lives on /einmessen', () => {
+  it('has no assistant, Vorrang or music levels of its own; the chip links there with the token', async () => {
     const p = boot(LISTINGS);
     await p.flush();
-    p.push(liveFrame({ returnGainDb: null }));
-    expect(p.byId('retLvlBox').style.display).toBe('none');
-    p.push(liveFrame({ returnGainDb: -12 }));
-    expect(p.byId('retLvlBox').style.display).toBe('');
-    expect(lvl(p).value).toBe('-12');
-    expect(p.byId('retLvlVal').textContent).toBe('−12 dB');
-  });
-
-  it('sends the level and does not fight the finger with stale echoes', async () => {
-    const p = boot(LISTINGS);
-    await p.flush();
-    p.push(liveFrame({ returnGainDb: -12 }));
-    lvl(p).value = '-20';
-    lvl(p).oninput();
-    expect(p.sent).toEqual([{ type: 'returnGain', value: -20 }]);
-    p.push(liveFrame({ returnGainDb: -12 }));
-    expect(lvl(p).value).toBe('-20');
-    p.tick(50);
-    lvl(p).value = '-22';
-    lvl(p).oninput();
-    lvl(p).onchange();
-    expect(p.sent[1]).toEqual({ type: 'returnGain', value: -22 });
-    p.tick(2000);
-    p.push(liveFrame({ returnGainDb: -22 }));
-    expect(lvl(p).value).toBe('-22');
-    expect(p.byId('retLvlVal').textContent).toBe('−22 dB');
-  });
-});
-
-describe('meters page — music level on air', () => {
-  const lvl = (p: ReturnType<typeof boot>) =>
-    p.byId('musLvl') as unknown as { value: string; oninput: () => void; onchange: () => void };
-
-  it('shows the level, sends a change and resets to 0 dB', async () => {
-    const p = boot(LISTINGS);
-    await p.flush();
-    p.push(liveFrame()); // a box that does not report it (playout)
-    expect(p.byId('musLvlBox').style.display).toBe('none');
-    p.push(liveFrame({ musicGainDb: -3 }));
-    expect(p.byId('musLvlBox').style.display).toBe('');
-    expect(lvl(p).value).toBe('-3');
-    expect(p.byId('musLvlVal').textContent).toBe('−3 dB');
-    expect(p.byId('musLvlReset').style.display).toBe('');
-    lvl(p).value = '2';
-    lvl(p).oninput();
-    expect(p.sent).toEqual([{ type: 'musicGain', value: 2 }]);
-    expect(p.byId('musLvlVal').textContent).toBe('+2 dB');
-    p.push(liveFrame({ musicGainDb: -3 })); // a stale echo does not pull the thumb back
-    expect(lvl(p).value).toBe('2');
-    p.tick(200);
-    (p.byId('musLvlReset') as unknown as { onclick: () => void }).onclick();
-    expect(p.sent[1]).toEqual({ type: 'musicGain', value: 0 });
-    expect(p.byId('musLvlReset').style.display).toBe('none');
+    const setup = (phase: string) => ({
+      phase,
+      mics: [{ label: 'Host', channel: 1, done: false, progress: 0 }],
+      silence: 0,
+      current: 'Host',
+      sentence: 'Satz.',
+      results: phase === 'result' ? [] : null,
+      automixFloorDb: null,
+    });
+    p.push(liveFrame({ musicGainDb: -3, setup: setup('idle') }));
+    expect(p.byId('setupChip').style.display).toBe('none');
+    p.push(liveFrame({ setup: setup('speakers') }));
+    expect(p.byId('setupChip').style.display).toBe('');
+    expect(p.byId('setupChip').textContent).toBe('Einmessen läuft');
+    expect((p.byId('setupChip') as unknown as { href: string }).href).toMatch(/^\/einmessen/);
+    expect((p.byId('mesBtn') as unknown as { href: string }).href).toMatch(/^\/einmessen/);
+    expect((p.byId('setBtn') as unknown as { href: string }).href).toMatch(/^\/einstellungen/);
   });
 });
 
@@ -1432,49 +1410,116 @@ describe('meters page — Abhören', () => {
   });
 });
 
-describe('meters page — host priority', () => {
-  const prio = (p: ReturnType<typeof boot>) =>
-    p.byId('prio') as unknown as { value: string; oninput: () => void; onchange: () => void };
-
-  it('is absent unless the box has a priority mic', async () => {
-    const p = boot(LISTINGS);
+describe('Einstellungen — host priority and music levels', () => {
+  const settingsPage = async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=T', undefined, 'einstellungen');
     await p.flush();
+    p.push({ type: 'hello', role: 'tech' });
+    return p;
+  };
+  const slider = (p: ReturnType<typeof boot>, id: string) =>
+    p.byId(id) as unknown as { value: string; oninput: () => void; onchange: () => void };
+
+  it('shows Vorrang only where the box has a priority mic, "aus" at 0 dB', async () => {
+    const p = await settingsPage();
     p.push(liveFrame());
-    expect(p.byId('prioBox').style.display).toBe('none');
-    p.push(liveFrame({ priority: { label: 'Host', depthDb: -8, active: false } }));
-    expect(p.byId('prioBox').style.display).toBe('');
-    expect(prio(p).value).toBe('8');
-    expect(p.byId('prioVal').textContent).toBe('−8 dB');
+    expect(p.byId('prioBox').hidden).toBe(true);
+    p.push(liveFrame({ priority: { label: 'Host', depthDb: 0, active: false } }));
+    expect(p.byId('prioBox').hidden).toBe(false);
+    expect(slider(p, 'prio').value).toBe('0');
+    expect(p.byId('prioVal').textContent).toBe('aus');
     expect(p.byId('prioWho').textContent).toBe('Host');
   });
 
   it('sends the depth as a cut and does not fight the finger with stale echoes', async () => {
-    const p = boot(LISTINGS);
-    await p.flush();
+    const p = await settingsPage();
     p.push(liveFrame({ priority: { label: 'Host', depthDb: -8, active: false } }));
-    prio(p).value = '12';
-    prio(p).oninput();
+    expect(slider(p, 'prio').value).toBe('8');
+    slider(p, 'prio').value = '12';
+    slider(p, 'prio').oninput();
     expect(p.sent).toEqual([{ type: 'priorityDepth', value: -12 }]);
     expect(p.byId('prioVal').textContent).toBe('−12 dB');
     // A frame from before the change arrives: the slider stays where it was put.
     p.push(liveFrame({ priority: { label: 'Host', depthDb: -8, active: false } }));
-    expect(prio(p).value).toBe('12');
+    expect(slider(p, 'prio').value).toBe('12');
     // Dragging on: throttled, but letting go always sends the final value.
     p.tick(50);
-    prio(p).value = '13';
-    prio(p).oninput();
-    prio(p).value = '14';
-    prio(p).oninput();
+    slider(p, 'prio').value = '13';
+    slider(p, 'prio').oninput();
+    slider(p, 'prio').value = '14';
+    slider(p, 'prio').oninput();
     expect(p.sent).toHaveLength(1);
-    prio(p).onchange();
+    slider(p, 'prio').onchange();
     expect(p.sent[1]).toEqual({ type: 'priorityDepth', value: -14 });
     // Once the finger is off, the box's value is the truth again.
     p.tick(2000);
     p.push(liveFrame({ priority: { label: 'Host', depthDb: -14, active: true } }));
-    expect(prio(p).value).toBe('14');
-    expect(p.byId('prioAct').style.display).toBe('');
+    expect(slider(p, 'prio').value).toBe('14');
+    expect(p.byId('prioAct').hidden).toBe(false);
   });
 
+  it('shows the music level, sends a change and resets to 0 dB', async () => {
+    const p = await settingsPage();
+    p.push(liveFrame()); // a box that does not report it (playout)
+    expect(p.byId('musLvlBox').hidden).toBe(true);
+    p.push(liveFrame({ musicGainDb: -3 }));
+    expect(p.byId('musLvlBox').hidden).toBe(false);
+    expect(slider(p, 'musLvl').value).toBe('-3');
+    expect(p.byId('musLvlVal').textContent).toBe('−3 dB');
+    expect(p.byId('musLvlReset').hidden).toBe(false);
+    slider(p, 'musLvl').value = '2';
+    slider(p, 'musLvl').oninput();
+    expect(p.sent).toEqual([{ type: 'musicGain', value: 2 }]);
+    expect(p.byId('musLvlVal').textContent).toBe('+2 dB');
+    p.push(liveFrame({ musicGainDb: -3 })); // a stale echo does not pull the thumb back
+    expect(slider(p, 'musLvl').value).toBe('2');
+    p.tick(200);
+    p.byId('musLvlReset').click();
+    expect(p.sent[1]).toEqual({ type: 'musicGain', value: 0 });
+    expect(p.byId('musLvlReset').hidden).toBe(true);
+  });
+
+  it('shows the music in the headphones only where there is a return', async () => {
+    const p = await settingsPage();
+    p.push(liveFrame({ returnGainDb: null }));
+    expect(p.byId('retLvlBox').hidden).toBe(true);
+    p.push(liveFrame({ returnGainDb: -12 }));
+    expect(p.byId('retLvlBox').hidden).toBe(false);
+    expect(slider(p, 'retLvl').value).toBe('-12');
+    expect(p.byId('retLvlVal').textContent).toBe('−12 dB');
+  });
+
+  it('sends the headphone level and does not fight the finger with stale echoes', async () => {
+    const p = await settingsPage();
+    p.push(liveFrame({ returnGainDb: -12 }));
+    slider(p, 'retLvl').value = '-20';
+    slider(p, 'retLvl').oninput();
+    expect(p.sent).toEqual([{ type: 'returnGain', value: -20 }]);
+    p.push(liveFrame({ returnGainDb: -12 }));
+    expect(slider(p, 'retLvl').value).toBe('-20');
+    p.tick(50);
+    slider(p, 'retLvl').value = '-22';
+    slider(p, 'retLvl').oninput();
+    slider(p, 'retLvl').onchange();
+    expect(p.sent[1]).toEqual({ type: 'returnGain', value: -22 });
+    p.tick(2000);
+    p.push(liveFrame({ returnGainDb: -22 }));
+    expect(slider(p, 'retLvl').value).toBe('-22');
+    expect(p.byId('retLvlVal').textContent).toBe('−22 dB');
+  });
+
+  it('shows nothing and sends nothing to a connection that is not the technician', async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=H', undefined, 'einstellungen');
+    await p.flush();
+    p.push({ type: 'hello', role: 'host' });
+    p.push(liveFrame({ musicGainDb: -3, priority: { label: 'Host', depthDb: -8, active: false } }));
+    expect(p.byId('denied').hidden).toBe(false);
+    expect(slider(p, 'musLvl').value).toBe(undefined);
+    expect(p.byId('musLvlBox').hidden).toBe(false); // untouched: never shown
+  });
+});
+
+describe('meters page — host priority on the mics', () => {
   it('names a mic that is being held back LEISER', async () => {
     const p = boot(LISTINGS);
     await p.flush();
@@ -1540,36 +1585,42 @@ const settings = (trimDb: number) => ({
   zoneCenterDb: -20,
 });
 
-describe('meters page — Einmessen', () => {
+describe('Einmessen', () => {
   const tiles = (p: ReturnType<typeof boot>) =>
     p.byId('suSteps').children.map((li) => li.children.map((c) => c.textContent).join(' | '));
   const shown = (p: ReturnType<typeof boot>, ...ids: string[]) =>
-    ids.filter((id) => p.byId(id).style.display !== 'none');
+    ids.filter((id) => !p.byId(id).hidden);
+  const boot0 = boot;
+  const bootSettings = (listings: typeof LISTINGS) => {
+    const p = boot0(listings, FOLDERS, '?k=T', undefined, 'einmessen');
+    p.push({ type: 'hello', role: 'tech' });
+    return p;
+  };
   const BUTTONS = ['suStart', 'suCancel', 'suFinish', 'suApply', 'suDiscard'];
 
   it('offers the start while idle and says whether a result is in force', async () => {
-    const p = boot(LISTINGS);
+    const p = bootSettings(LISTINGS);
     await p.flush();
     p.push(liveFrame({ setup: setup('idle'), setupApplied: false }));
     expect(shown(p, ...BUTTONS)).toEqual(['suStart']);
     expect(p.byId('suInfo').textContent).toBe('Noch nicht eingemessen');
-    expect(p.byId('suIntro').style.display).toBe(''); // what it does, until it has been done
+    expect(p.byId('suIntro').hidden).toBe(false); // what it does, until it has been done
     p.byId('suStart').click();
     expect(p.sent).toEqual([{ type: 'setupStart' }]);
     p.push(liveFrame({ setup: setup('idle'), setupApplied: true }));
     expect(p.byId('suInfo').textContent).toBe('Eingemessen ✓');
-    expect(p.byId('suIntro').style.display).toBe('none');
+    expect(p.byId('suIntro').hidden).toBe(true);
   });
 
   it('walks the steps in words: silence, then who is up, with what to read', async () => {
-    const p = boot(LISTINGS);
+    const p = bootSettings(LISTINGS);
     await p.flush();
     const mics = [
       { label: 'Gast 1', channel: 1, progress: 0, done: false },
       { label: 'Host', channel: 3, progress: 0, done: false },
     ];
     p.push(liveFrame({ setup: setup('silence', { silence: 0.4, mics }) }));
-    expect(p.byId('setupChip').style.display).toBe('');
+    expect(p.byId('chip').textContent).toBe('LÄUFT');
     expect(shown(p, ...BUTTONS)).toEqual(['suCancel']);
     expect(tiles(p)).toEqual([
       '1 · JETZT | Stille | Raumgeräusch · 40 %',
@@ -1600,7 +1651,7 @@ describe('meters page — Einmessen', () => {
   });
 
   it('shows before and after per mic, the knob advice, and applies only on "Übernehmen"', async () => {
-    const p = boot(LISTINGS);
+    const p = bootSettings(LISTINGS);
     await p.flush();
     const results = [
       {
@@ -1639,7 +1690,7 @@ describe('meters page — Einmessen', () => {
     ];
     p.push(liveFrame({ setup: setup('result', { results, automixFloorDb: -18 }) }));
     expect(shown(p, ...BUTTONS)).toEqual(['suApply', 'suDiscard']);
-    expect(p.byId('setupChip').style.display).toBe('none');
+    expect(p.byId('chip').textContent).toBe('ERGEBNIS WARTET');
     expect(p.byId('suInfo').textContent).toBe(
       'Ergebnis — noch nicht übernommen · Automix-Boden −18 dB'
     );
@@ -1672,10 +1723,10 @@ describe('meters page — Einmessen', () => {
   });
 
   it('has no assistant on a playout-only box', async () => {
-    const p = boot(LISTINGS);
+    const p = bootSettings(LISTINGS);
     await p.flush();
     p.push(frame(null, null));
-    expect(p.byId('setupBox').style.display).toBe('none');
+    expect(p.byId('setupBox').hidden).toBe(true);
   });
 });
 
@@ -1719,6 +1770,36 @@ describe('meters page — bed and queue mode', () => {
     // Any other folder has no such button: a file there cannot become the bed by a slip.
     await p.selectFolder(0);
     expect(rows()[0].innerHTML).not.toContain('bedbtn');
+  });
+
+  it('says "Havarie" while the bed is on by itself, and stops saying it after', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const at = { folder: 1, name: 'bett.flac' };
+    p.push(liveFrame({ bed: { on: true, name: 'bett.flac', at, havarie: true } }));
+    expect(p.byId('bed').textContent).toBe('⚠ Havarie — Bett läuft');
+    expect(p.byId('bed').className).toBe('havarie');
+    p.byId('bed').click();
+    expect(p.sent).toEqual([{ type: 'bed', value: false }]);
+    p.push(liveFrame({ bed: { on: false, name: 'bett.flac', at, havarie: false } }));
+    expect(p.byId('bed').textContent).toBe('Bett aus');
+    expect(p.byId('bed').className).toBe('');
+  });
+
+  it('has a havarie switch in the menu where the box watches for silence', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const at = { folder: 1, name: 'bett.flac' };
+    p.push(liveFrame({ bed: { on: false, name: 'bett.flac', at, havarieArmed: null } }));
+    expect(p.byId('havarieBtn').style.display).toBe('none');
+    p.push(liveFrame({ bed: { on: false, name: 'bett.flac', at, havarieArmed: true } }));
+    expect(p.byId('havarieBtn').style.display).toBe('');
+    expect(p.byId('havarieBtn').textContent).toBe('Havarie-Bett an');
+    p.byId('havarieBtn').click();
+    expect(p.sent).toEqual([{ type: 'havarie', value: false }]);
+    p.push(liveFrame({ bed: { on: false, name: 'bett.flac', at, havarieArmed: false } }));
+    expect(p.byId('havarieBtn').textContent).toBe('Havarie-Bett aus');
+    expect(p.byId('havarieBtn').attrs['aria-pressed']).toBe('false');
   });
 
   it('cannot start a bed that has no file', async () => {

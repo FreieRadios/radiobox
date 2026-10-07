@@ -369,6 +369,20 @@ export interface BedConfig {
   gainDb: number;
   fadeInMs: number;
   fadeOutMs: number;
+  /** Havarie: the bed switches itself on after silence (see HavarieConfig). */
+  havarie: HavarieConfig;
+}
+
+/** "Havarie" (dead-air fallback): when nothing but silence comes in for
+ *  `afterSeconds` — no open mic gate, no file, stream or music above
+ *  `belowDb` — the bed fades in by itself and the page says "Havarie". Any
+ *  sound switches it off again. On a live box only while a recording runs
+ *  (the show is on), on a playout box always. Off by default. */
+export interface HavarieConfig {
+  enabled: boolean;
+  afterSeconds: number;
+  /** Peak level (dBFS) below which files, streams and music count as silent. */
+  belowDb: number;
 }
 
 /** Optional local audio file player exposed on the meters page. Files from the
@@ -405,7 +419,9 @@ export interface FilePlayerConfig {
   /** Whether the player is a ducking target (pulled under live speech). */
   ducked: boolean;
   /** Fade-out duration (ms) applied when the operator stops playback so the
-   *  audio is ramped to silence instead of cut abruptly. */
+   *  audio is ramped to silence instead of cut abruptly; also the crossfade
+   *  when a file takes over from another (a scheduled one, or ▶ while one
+   *  plays): the old one fades out under the new one over this time. */
   fadeOutMs: number;
   /** Jitter-buffer depth (ms) filled before playout starts. Higher values
    *  resist startup/underrun crackle on slow hardware at the cost of more

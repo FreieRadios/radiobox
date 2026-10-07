@@ -48,6 +48,28 @@ describe('MusicLeveler (per item, with look-ahead)', () => {
     expect(prog[5 * SR - Math.round(0.05 * SR)]).toBeCloseTo(8, 0);
   });
 
+  it("keeps the previous item's gain for the crossfade tail", () => {
+    // Quiet music (gain +8), then a loud jingle (gain -12) starts at 5 s.
+    const lev = new MusicLeveler(params(), SR, DELAY);
+    const x = concat(tone(-30, 5), tone(-10, 4));
+    const db = (g: number) => 20 * Math.log10(g);
+    let roomTail = NaN;
+    for (let i = 0; i < x.length + DELAY; i++) {
+      if (i === 5 * SR) {
+        lev.newItem();
+        roomTail = db(lev.tailRoomGain);
+      }
+      lev.process(i < x.length ? x[i] : 0, 0);
+      // The jingle's start leaves the delay: the tail still has the music's
+      // gain, the programme the jingle's.
+      if (i === DELAY + 5 * SR + Math.round(0.1 * SR)) {
+        expect(db(lev.tailProgrammeGain)).toBeCloseTo(8, 0);
+        expect(lev.gainDbValue).toBeCloseTo(-12, 0);
+      }
+    }
+    expect(roomTail).toBeCloseTo(8, 0);
+  });
+
   it('keeps one gain through an item instead of riding its dynamics', () => {
     // A song: 6 s quiet verse, 6 s loud chorus (12 dB apart).
     const x = concat(tone(-34, 6), tone(-22, 6));

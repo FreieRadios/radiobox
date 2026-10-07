@@ -285,6 +285,13 @@ filePlayer:
   #   gainDb: -6
   #   fadeInMs: 1500
   #   fadeOutMs: 2500
+  #   # Havarie (dead air): after `afterSeconds` of silence — no open mic
+  #   # gate, nothing from files, streams or music above `belowDb` — the bed
+  #   # comes on by itself and the page says "Havarie"; any sound fades it
+  #   # out again. Live: only while a recording runs. Off unless set.
+  #   havarie:
+  #     afterSeconds: 10
+  #     belowDb: -50
 
   # Network streams, listed as a folder "📡 Streams": a row plays like a file
   # and runs until stopped. Typical use: a box wired to the desk (e.g. the Pi

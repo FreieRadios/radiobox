@@ -6,10 +6,15 @@ const makeLog = () => ({ info: () => {}, warn: () => {}, error: () => {} });
 
 class FakePlayer extends EventEmitter implements BedPlayer {
   playing: string | null = null;
+  position = 0;
+  duration: number | null = null;
   calls: string[] = [];
-  play(file: string, opts: { loop?: boolean; fadeInMs?: number } = {}): void {
+  play(file: string, opts: { loop?: boolean; fadeInMs?: number; startSec?: number } = {}): void {
     this.playing = file;
-    this.calls.push(`play ${file} loop=${!!opts.loop} fadeIn=${opts.fadeInMs}`);
+    this.calls.push(
+      `play ${file} loop=${!!opts.loop} fadeIn=${opts.fadeInMs}` +
+        (opts.startSec ? ` from=${opts.startSec}` : '')
+    );
   }
   fadeOut(ms: number): void {
     this.calls.push(`fadeOut ${ms}`);
@@ -28,6 +33,7 @@ const cfg: BedConfig = {
   gainDb: -6,
   fadeInMs: 1500,
   fadeOutMs: 2500,
+  havarie: { enabled: false, afterSeconds: 10, belowDb: -50 },
 };
 
 const dirs = (files: string[] = ['bed.flac', 'other.flac']): BedDirs => ({
@@ -60,6 +66,8 @@ describe('BedDeck', () => {
       on: false,
       name: 'bed.flac',
       at: { folder: 1, name: 'bed.flac' },
+      havarie: false,
+      havarieArmed: null,
     });
   });
 
@@ -104,9 +112,53 @@ describe('BedDeck', () => {
     expect(bed.status().on).toBe(false);
   });
 
+  it('goes on where it was switched off (after the fade), wrapping at the end', () => {
+    const { player, bed } = setup();
+    bed.set(true);
+    player.duration = 100;
+    player.position = 30; // 30 s in; the 2.5 s fade-out plays on from there
+    bed.set(false);
+    bed.set(true);
+    expect(player.calls.at(-1)).toBe('play /bed/bed.flac loop=true fadeIn=1500 from=32.5');
+    player.position = 198.5; // looped once: 98.5 s into the file, + 2.5 s fade
+    bed.set(false);
+    bed.set(true);
+    expect(player.calls.at(-1)).toBe('play /bed/bed.flac loop=true fadeIn=1500 from=1');
+  });
+
+  it('starts from the top when a file is chosen, its length is unknown, or the loop died', () => {
+    const { player, bed } = setup();
+    player.duration = 100;
+    bed.set(true);
+    player.position = 40;
+    bed.set(false);
+    bed.select(1, 'bed.flac'); // chosen (again): from the top
+    bed.set(true);
+    expect(player.calls.at(-1)).toBe('play /bed/bed.flac loop=true fadeIn=1500');
+    player.duration = null;
+    player.position = 40;
+    bed.set(false);
+    bed.set(true);
+    expect(player.calls.at(-1)).toBe('play /bed/bed.flac loop=true fadeIn=1500');
+    player.duration = 100;
+    player.position = 40;
+    bed.set(false);
+    bed.set(true);
+    player.playing = null;
+    player.emit('ended'); // the decoder died, not our fade
+    bed.set(true);
+    expect(player.calls.at(-1)).toBe('play /bed/bed.flac loop=true fadeIn=1500');
+  });
+
   it('stays off, with a status that says why, when the folder holds no audio', () => {
     const { player, bed } = setup([]);
-    expect(bed.status()).toEqual({ on: false, name: null, at: null });
+    expect(bed.status()).toEqual({
+      on: false,
+      name: null,
+      at: null,
+      havarie: false,
+      havarieArmed: null,
+    });
     bed.set(true);
     expect(player.calls).toEqual([]);
     expect(bed.on).toBe(false);
@@ -123,5 +175,97 @@ describe('BedDeck', () => {
     const g = Math.pow(10, -6 / 20);
     expect(l[0]).toBeCloseTo(0.1 + 0.5 * g, 6);
     expect(r[0]).toBeCloseTo(0.1 - 0.5 * g, 6);
+  });
+});
+
+describe('BedDeck havarie', () => {
+  const BLOCK = 100; // ms
+  const make = (havarie = true) => {
+    const player = new FakePlayer();
+    const bed = new BedDeck(
+      player,
+      dirs(),
+      { ...cfg, havarie: { enabled: havarie, afterSeconds: 10, belowDb: -50 } },
+      makeLog()
+    );
+    const run = (ms: number, sound: boolean, armed = true) => {
+      for (let t = 0; t < ms; t += BLOCK) bed.watch(sound, armed, BLOCK);
+    };
+    return { player, bed, run };
+  };
+
+  it('comes on by itself after 10 s of silence and says so', () => {
+    const { player, bed, run } = make();
+    run(9900, false);
+    expect(bed.on).toBe(false);
+    run(100, false);
+    expect(bed.status()).toMatchObject({ on: true, havarie: true });
+    expect(player.calls).toEqual(['play /bed/bed.flac loop=true fadeIn=1500']);
+  });
+
+  it('starts counting again whenever there is sound', () => {
+    const { bed, run } = make();
+    run(9000, false);
+    run(100, true);
+    run(9000, false);
+    expect(bed.on).toBe(false);
+  });
+
+  it('fades out once sound is back, but not on a click', () => {
+    const { player, bed, run } = make();
+    run(10000, false);
+    run(100, true); // a click
+    run(100, false);
+    expect(bed.status().havarie).toBe(true);
+    run(300, true);
+    expect(bed.status()).toMatchObject({ on: false, havarie: false });
+    expect(player.calls[1]).toBe('fadeOut 2500');
+  });
+
+  it('is no havarie any more once the host switches the bed', () => {
+    const { player, bed, run } = make();
+    run(10000, false);
+    bed.set(true); // the host keeps it on: now an ordinary bed
+    expect(bed.status()).toMatchObject({ on: true, havarie: false });
+    run(1000, true);
+    expect(bed.on).toBe(true);
+    expect(player.calls).toHaveLength(1);
+  });
+
+  it('does nothing unarmed, and ends a havarie when the show ends', () => {
+    const { bed, run } = make();
+    run(20000, false, false);
+    expect(bed.on).toBe(false);
+    run(10000, false);
+    expect(bed.status().havarie).toBe(true);
+    run(100, false, false);
+    expect(bed.status()).toMatchObject({ on: false, havarie: false });
+  });
+
+  it('can be switched off and on by the technician; off ends a running one', () => {
+    const { bed, run } = make();
+    expect(bed.status().havarieArmed).toBe(true);
+    run(10000, false);
+    expect(bed.setHavarieWatch(false)).toBe(true);
+    expect(bed.status()).toMatchObject({ on: false, havarie: false, havarieArmed: false });
+    run(30000, false);
+    expect(bed.on).toBe(false);
+    bed.setHavarieWatch(true);
+    run(10000, false);
+    expect(bed.status().havarie).toBe(true);
+    // Not configured: no switch at all.
+    const off = make(false);
+    expect(off.bed.setHavarieWatch(true)).toBe(false);
+    expect(off.bed.status().havarieArmed).toBe(null);
+  });
+
+  it('never fires while a bed the host started is on, or when disabled', () => {
+    const { bed, run } = make();
+    bed.set(true);
+    run(30000, false);
+    expect(bed.status().havarie).toBe(false);
+    const off = make(false);
+    off.run(30000, false);
+    expect(off.bed.on).toBe(false);
   });
 });

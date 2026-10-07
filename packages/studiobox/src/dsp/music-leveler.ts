@@ -35,6 +35,11 @@ const GLIDE_MS = 10;
  *
  * The room (the music return to the headphones) has no look-ahead: it gets
  * the same measurement made causally (`roomGain`).
+ *
+ * When a file takes over, the old one can fade out under it (the file
+ * player's crossfade tail). The tail keeps the gain its item had when the
+ * new one began (`tailProgrammeGain`, `tailRoomGain`): it is never measured,
+ * so neither item's level moves the other's.
  */
 export class MusicLeveler {
   private kwL = new KWeighting();
@@ -65,6 +70,9 @@ export class MusicLeveler {
   private roomWant = 0;
   private roomDb = 0;
   private roomLin = 1;
+  private progItem = 0; // first frame of the item the programme gain is for
+  private progTailLin = 1;
+  private roomTailLin = 1;
   private readonly gatePower = Math.pow(10, (GATE_LUFS + 0.691) / 10);
 
   constructor(
@@ -89,6 +97,7 @@ export class MusicLeveler {
   /** A new item (file) starts with the next sample. */
   newItem(): void {
     this.pendingStart = true;
+    this.roomTailLin = this.roomLin;
   }
 
   /** Feed one room-time stereo sample. Loudness as BS.1770 measures it: the
@@ -129,6 +138,12 @@ export class MusicLeveler {
     // Programme: the frame leaving the delay (plus the glide's lag), measured
     // over its item up to the look-ahead. Room: now, measured over the past.
     const c = this.f - this.delayF + this.smoothF;
+    const item = this.itemStart(c);
+    if (item !== this.progItem) {
+      // The previous item's gain, before it starts to glide: the tail's.
+      this.progItem = item;
+      this.progTailLin = this.progLin;
+    }
     const p = this.loudness(c);
     if (p !== null) this.progWant = this.gainFor(p);
     const r = this.loudness(this.f - 1);
@@ -145,6 +160,13 @@ export class MusicLeveler {
     if (s[s.length - 1] !== frame) s.push(frame);
     // Forget items that have left the ring for good.
     while (s.length > 1 && s[1] <= this.f - this.ring) s.shift();
+  }
+
+  /** First frame of the item frame `c` belongs to. */
+  private itemStart(c: number): number {
+    const s = this.starts;
+    for (let i = s.length - 1; i >= 0; i--) if (s[i] <= c) return s[i];
+    return 0;
   }
 
   /** The loudness of the item frame `c` belongs to, over its frames up to
@@ -178,6 +200,17 @@ export class MusicLeveler {
   /** Linear gain for the room (no look-ahead). */
   get roomGain(): number {
     return this.roomLin;
+  }
+
+  /** Linear gain for the programme sample of the crossfade tail leaving the
+   *  delay now: the previous item's. */
+  get tailProgrammeGain(): number {
+    return this.progTailLin;
+  }
+
+  /** Linear gain for the room's crossfade tail: the previous item's. */
+  get tailRoomGain(): number {
+    return this.roomTailLin;
   }
 
   /** Programme gain in dB. */

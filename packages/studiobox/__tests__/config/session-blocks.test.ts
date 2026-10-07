@@ -175,7 +175,17 @@ describe('config: buffered-design blocks and their defaults', () => {
       gainDb: -6,
       fadeInMs: 1500,
       fadeOutMs: 2500,
+      havarie: { enabled: false, afterSeconds: 10, belowDb: -50 },
     });
+    expect(load(fp('{ dir: Bett, havarie: true }')).cfg().filePlayer!.bed.havarie).toEqual({
+      enabled: true,
+      afterSeconds: 10,
+      belowDb: -50,
+    });
+    expect(
+      load(fp('{ dir: Bett, havarie: { afterSeconds: 20, belowDb: -45 } }')).cfg().filePlayer!.bed
+        .havarie
+    ).toEqual({ enabled: true, afterSeconds: 20, belowDb: -45 });
     expect(load(['filePlayer:', '  enabled: true']).cfg().filePlayer!.bed.enabled).toBe(false);
     expect(load(fp('{ dir: Nirgends }')).cfg).toThrow(/filePlayer\.bed\.dir/);
   });

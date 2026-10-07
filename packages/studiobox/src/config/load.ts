@@ -11,6 +11,7 @@ import {
   ChannelProcessing,
   FilePlayerConfig,
   FilePlayerDir,
+  HavarieConfig,
   ListenersConfig,
   LookaheadConfig,
   MetersConfig,
@@ -241,6 +242,18 @@ function resolveBed(raw: unknown): BedConfig {
     gainDb: num(r.gainDb, -6),
     fadeInMs: Math.max(0, num(r.fadeInMs, 1500)),
     fadeOutMs: Math.max(0, num(r.fadeOutMs, 2500)),
+    havarie: resolveHavarie(r.havarie),
+  };
+}
+
+/** Havarie: on with `havarie: true` or `havarie: { … }`, off otherwise. */
+function resolveHavarie(raw: unknown): HavarieConfig {
+  const r = isObj(raw) ? raw : {};
+  const enabled = raw === true || (isObj(raw) && r.enabled !== false);
+  return {
+    enabled,
+    afterSeconds: Math.max(1, finite(r.afterSeconds, 10)),
+    belowDb: Math.min(0, finite(r.belowDb, -50)),
   };
 }
 

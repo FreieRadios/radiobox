@@ -121,7 +121,14 @@ describe('A stream with the bed as fallback (roadmap M1c.2)', () => {
     const bed = new BedDeck(
       bedPlayer,
       fd,
-      { enabled: true, dir: 'Bett', gainDb: 0, fadeInMs: 1500, fadeOutMs: 2500 },
+      {
+        enabled: true,
+        dir: 'Bett',
+        gainDb: 0,
+        fadeInMs: 1500,
+        fadeOutMs: 2500,
+        havarie: { enabled: false, afterSeconds: 10, belowDb: -50 },
+      },
       quiet
     );
     const { autoStart } = setupStreams({

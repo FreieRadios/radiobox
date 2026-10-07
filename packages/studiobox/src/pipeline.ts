@@ -118,6 +118,8 @@ export class Pipeline {
   private retR: Float32Array;
   private fileL: Float32Array;
   private fileR: Float32Array;
+  private fileTailL: Float32Array;
+  private fileTailR: Float32Array;
   private taps: Float32Array[];
   private silence: Buffer;
   private metersTimer: NodeJS.Timeout | null = null;
@@ -195,13 +197,23 @@ export class Pipeline {
       ? new Monitor(cfg.output.monitor, cfg.capture, makeLog('monitor'))
       : null;
     this.filePlayer = cfg.filePlayer?.enabled
-      ? new FilePlayer(sr, makeLog('fileplayer'), cfg.filePlayer.prebufferMs)
+      ? new FilePlayer(
+          sr,
+          makeLog('fileplayer'),
+          cfg.filePlayer.prebufferMs,
+          cfg.filePlayer.fadeOutMs
+        )
       : null;
     this.fileDirs = cfg.filePlayer?.enabled
       ? new FileDirs(cfg.filePlayer.dirs, log, cfg.filePlayer.streams)
       : null;
     if (cfg.filePlayer?.enabled && cfg.filePlayer.bed.enabled && this.fileDirs) {
-      this.bedPlayer = new FilePlayer(sr, makeLog('bed'), cfg.filePlayer.prebufferMs);
+      this.bedPlayer = new FilePlayer(
+        sr,
+        makeLog('bed'),
+        cfg.filePlayer.prebufferMs,
+        cfg.filePlayer.fadeOutMs
+      );
       this.bed = new BedDeck(this.bedPlayer, this.fileDirs, cfg.filePlayer.bed, makeLog('bed'));
     }
     if (this.filePlayer && this.fileDirs && cfg.filePlayer?.streams.length) {
@@ -334,6 +346,8 @@ export class Pipeline {
     this.retR = block();
     this.fileL = block();
     this.fileR = block();
+    this.fileTailL = block();
+    this.fileTailR = block();
     this.taps = (layout ?? []).map(block);
     this.dry = this.listen ? this.graph.micLabels.map(block) : [];
     this.silence = Buffer.alloc(frames * 2 * BYTES_PER_SAMPLE);
@@ -418,6 +432,7 @@ export class Pipeline {
     if (s.returnGainDb !== undefined) this.graph.setReturnGain(s.returnGainDb);
     if (s.musicGainDb !== undefined) this.graph.setMusicGain(s.musicGainDb);
     if (s.queueMode && this.playQueue) this.playQueue.autoAdvance = s.queueMode === 'chain';
+    if (s.havarie !== undefined) this.bed?.setHavarieWatch(s.havarie);
     this.state = s;
     this.setupApplied = n > 0;
     log.info(
@@ -504,6 +519,11 @@ export class Pipeline {
       log.info(`test tone ${this.testTone ? 'on (1 kHz, -18 dBFS, local output only)' : 'off'}`);
     } else if (type === 'bed' && this.bed) {
       this.bed.set(!!value);
+    } else if (type === 'havarie' && this.bed) {
+      if (this.bed.setHavarieWatch(!!value)) {
+        this.state.havarie = this.bed.havarieWatch;
+        this.persist();
+      }
     } else if (type === 'bedSelect' && this.bed) {
       const req = isObj(value) ? value : {};
       const ok = this.bed.select(Number(req.folder ?? 0) || 0, String(req.name ?? ''));
@@ -746,10 +766,26 @@ export class Pipeline {
     this.clock.mark(this.samples, now);
     const roomMs = this.clock.timeOf(start, now);
 
+    let filePeak = 0;
     if (this.filePlayer) {
       // The player's clock is the on-air time of the block it fills, so a
       // cued file starts on the sample that airs at its timestamp.
-      this.filePlayer.read(this.fileL, this.fileR, frames, roomMs + this.musicDelayMs());
+      // The file fading out under a new one (crossfade) comes separately, so
+      // it keeps its own leveler gain.
+      this.filePlayer.read(
+        this.fileL,
+        this.fileR,
+        frames,
+        roomMs + this.musicDelayMs(),
+        this.fileTailL,
+        this.fileTailR
+      );
+      this.graph.setFileTail(this.fileTailL, this.fileTailR);
+      // What the player makes without the bed, for the havarie watch.
+      filePeak = Math.max(
+        blockPeak(this.fileL, this.fileR, frames),
+        blockPeak(this.fileTailL, this.fileTailR, frames)
+      );
       // The bed rides on the file player's source: leveled and ducked with it.
       this.bed?.mixInto(this.fileL, this.fileR, frames);
       // Report only the basename: the snapshot field is the file *name* (the
@@ -779,6 +815,17 @@ export class Pipeline {
       taps: this.taps,
       dry: this.listen ? this.dry : undefined,
     });
+    if (this.bed) {
+      // Havarie: anything but the bed counts as sound; only while the show
+      // is on (recording running, not ending).
+      const heard = this.graph.blockSound;
+      const floor = Math.pow(10, this.cfg.filePlayer!.bed.havarie.belowDb / 20);
+      this.bed.watch(
+        heard.micOpen || heard.musicPeak > floor || filePeak > floor,
+        this.recordingArmed && this.show === 'live',
+        (frames / this.sr) * 1000
+      );
+    }
     // "Abhören" at the recording's point: the programme and the dry mics.
     if (this.listen?.wantsRoom) {
       const trims = this.graph.micLabels.map((l) => this.graph.getProcessing(l)?.trimDb ?? 0);
@@ -1079,4 +1126,16 @@ function version(): string {
     }
   }
   return cachedVersion;
+}
+
+/** Peak magnitude of a stereo block. */
+function blockPeak(l: Float32Array, r: Float32Array, frames: number): number {
+  let p = 0;
+  for (let i = 0; i < frames; i++) {
+    const a = Math.abs(l[i]);
+    const b = Math.abs(r[i]);
+    if (a > p) p = a;
+    if (b > p) p = b;
+  }
+  return p;
 }

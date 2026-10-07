@@ -112,6 +112,21 @@ describe('MeterServer — views and what each role gets', () => {
     expect(await title('/spectator?k=T')).toBe('studiobox – Zuschauer');
   });
 
+  it('gives /einstellungen and /einmessen to the technician only', async () => {
+    await boot(true);
+    const title = async (url: string) => view((await get(port, url)).body);
+    expect(await title('/einstellungen?k=T')).toBe('studiobox – Einstellungen');
+    expect(await title('/einstellungen?k=H')).toBe('studiobox'); // the host gets the page
+    expect(await title('/einstellungen?k=G')).toBe('studiobox – Gast');
+    expect(await title('/einstellungen')).toBe('studiobox – Zuschauer');
+    expect((await get(port, '/einstellungen.html')).status).toBe(404);
+    expect(await title('/einmessen?k=T')).toBe('studiobox – Einmessen');
+    expect(await title('/einmessen?k=H')).toBe('studiobox');
+    expect(await title('/einmessen?k=G')).toBe('studiobox – Gast');
+    expect(await title('/einmessen')).toBe('studiobox – Zuschauer');
+    expect((await get(port, '/einmessen.html')).status).toBe(404);
+  });
+
   it('keeps the box as it was with roles disabled: / is the page', async () => {
     await boot(false);
     expect(view((await get(port, '/')).body)).toBe('studiobox');

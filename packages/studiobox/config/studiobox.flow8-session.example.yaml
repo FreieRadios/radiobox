@@ -51,11 +51,13 @@ automix:
   members: [Gast 1, Gast 2, Host, Technik]
   responseMs: 120
   floorDb: -60
-  # Guests go down gently while the host talks — never muted.
+  # Host priority: guests go down gently while the host talks — never muted.
+  # Off (0) by default; only for a guest who talks over everybody. Set it
+  # live under ⋮ → Einstellungen (Moderations-Vorrang), e.g. 8 dB.
   priority:
     label: Host
     attenuate: [Gast 1, Gast 2]
-    depthDb: -8
+    depthDb: 0
 
 # No hardware music inputs: the only duckable source is the file player, which
 # opts in through `filePlayer.ducked` below.
@@ -171,3 +173,9 @@ filePlayer:
   bed:
     dir: Bett
     gainDb: -6
+    # Havarie: after 10 s of silence while the show is on (recording runs)
+    # the bed comes on by itself; the page says "Havarie" until any sound
+    # (a mic, a file, a stream) fades it out again.
+    havarie:
+      afterSeconds: 10
+      belowDb: -50

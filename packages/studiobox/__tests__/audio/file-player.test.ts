@@ -198,6 +198,96 @@ describe('FilePlayer', () => {
     fp.shutdown();
   });
 
+  /** Peak of `x` over [a, b). */
+  const peak = (x: Float32Array, a: number, b: number) =>
+    Math.max(0, ...Array.from(x.subarray(Math.max(0, a), b)).map(Math.abs));
+
+  it('crossfades a cued file: the old one fades out in the tail, the new one starts on time', async () => {
+    const music = makeToneFile(3);
+    const jingle = makeToneFile(1);
+    const XF = 200; // ms
+    const fp = new FilePlayer(SR, makeLog(), 50, XF);
+    const t0 = 3_000_000;
+    fp.play(music);
+    const startAt = t0 + 600.5;
+    fp.cue(jingle, startAt);
+    await new Promise((res) => setTimeout(res, 400));
+    const out: number[] = [];
+    const tail: number[] = [];
+    const l = new Float32Array(BLOCK);
+    const r = new Float32Array(BLOCK);
+    const tl = new Float32Array(BLOCK);
+    const tr = new Float32Array(BLOCK);
+    for (let b = 0; (b * BLOCK) / SR < 1.2; b++) {
+      fp.read(l, r, BLOCK, t0 + (b * BLOCK * 1000) / SR, tl, tr);
+      for (let i = 0; i < BLOCK; i++) {
+        out.push(l[i]);
+        tail.push(tl[i]);
+      }
+      await new Promise((res) => setTimeout(res, 2));
+    }
+    const o = Float32Array.from(out);
+    const t = Float32Array.from(tail);
+    const k = Math.round(((startAt - t0) * SR) / 1000);
+    const xf = Math.round((XF * SR) / 1000);
+    // Up to the block the start falls in the old one plays as before; in
+    // that block the playing output is the new item only: silent before its
+    // start, there on the sample after (a sine starts at 0).
+    const kb = k - (k % BLOCK);
+    expect(peak(o, kb, k)).toBe(0);
+    expect(Math.abs(o.subarray(kb).findIndex((v) => v !== 0) + kb - k)).toBeLessThanOrEqual(1);
+    // The old one goes on in the tail: full up to the start (lavfi's sine
+    // peaks at 1/8), half way down in the middle of the ramp, gone after it.
+    const full = peak(o, kb - 2000, kb);
+    expect(full).toBeGreaterThan(0.05);
+    expect(peak(t, kb, k) / full).toBeCloseTo(1, 1);
+    expect(peak(t, k + xf / 2 - 200, k + xf / 2 + 200) / full).toBeCloseTo(0.5, 1);
+    expect(peak(t, k + xf + 10, t.length)).toBe(0);
+    expect(fp.playing).toBe(jingle);
+    expect(fp.fadingOut).toBe(false);
+    fp.shutdown();
+  });
+
+  it('crossfades play() over a playing file, mixed in when no tail output is given', async () => {
+    const a = makeToneFile(3);
+    const b = makeToneFile(3);
+    const fp = new FilePlayer(SR, makeLog(), 50, 300);
+    let ended = 0;
+    fp.on('ended', () => ended++);
+    fp.play(a);
+    // Until a is really heard (a file still prebuffering is simply replaced).
+    let heard = false;
+    for (let i = 0; i < 200 && !heard; i++) {
+      const x = new Float32Array(BLOCK);
+      fp.read(x, new Float32Array(BLOCK), BLOCK);
+      heard = peak(x, 0, BLOCK) > 0.05;
+      await new Promise((res) => setTimeout(res, 20));
+    }
+    expect(heard).toBe(true);
+    fp.play(b);
+    expect(fp.playing).toBe(b);
+    expect(fp.fadingOut).toBe(true);
+    // While b prebuffers, a is still heard (fading), not cut to silence.
+    const l = new Float32Array(BLOCK);
+    const r = new Float32Array(BLOCK);
+    fp.read(l, r, BLOCK);
+    expect(peak(l, 0, BLOCK)).toBeGreaterThan(0.05);
+    await pump(fp, 0, (n) => (n * BLOCK) / SR > 0.5);
+    expect(fp.fadingOut).toBe(false);
+    expect(fp.playing).toBe(b);
+    expect(ended).toBe(0); // a was replaced, not finished
+    fp.shutdown();
+  });
+
+  it('cuts without a crossfade (crossfadeMs 0)', () => {
+    const a = makeToneFile(1);
+    const fp = new FilePlayer(SR, makeLog(), 50);
+    fp.play(a);
+    fp.play(a);
+    expect(fp.fadingOut).toBe(false);
+    fp.shutdown();
+  });
+
   it('play() and stop() leave a cue alone; shutdown() drops it', async () => {
     const file = makeToneFile(0.5);
     const fp = new FilePlayer(SR, makeLog());
@@ -209,6 +299,43 @@ describe('FilePlayer', () => {
     expect(fp.cued!.startAtMs).toBeGreaterThan(Date.now() + 80_000);
     fp.shutdown();
     expect(fp.cued).toBeNull();
+  });
+
+  it('starts a loop mid-file and then loops the whole file from the top', async () => {
+    // A ramp: the sample value tells where in the file (0.5 s long) it is.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fp-'));
+    const file = path.join(dir, 'ramp.wav');
+    const res = spawnSync('ffmpeg', [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      `aevalsrc='t|t':s=${SR}:d=0.5`,
+      '-c:a',
+      'pcm_f32le',
+      file,
+    ]);
+    if (res.status !== 0) throw new Error('ffmpeg unavailable');
+    const fp = new FilePlayer(SR, makeLog(), 50);
+    fp.play(file, { loop: true, startSec: 0.3 });
+    expect(fp.position).toBeCloseTo(0.3, 5);
+    const out = await pump(fp, 0, (b) => (b * BLOCK) / SR > 1.4, 22);
+    const first = out.findIndex((v) => v !== 0);
+    const seq = Array.from(out.subarray(first + 600)); // past the fade-in
+    // From 0.3 s on to the end, then the whole file again (0 … 0.5), twice.
+    expect(seq[0]).toBeGreaterThan(0.3);
+    expect(seq[0]).toBeLessThan(0.33);
+    const wraps = seq.map((v, i) => (i > 0 && v < seq[i - 1] - 0.4 ? i : -1)).filter((i) => i >= 0);
+    expect(wraps.length).toBeGreaterThanOrEqual(2);
+    // The second pass is a whole file: 0.5 s from wrap to wrap, starting at 0.
+    expect(wraps[1] - wraps[0]).toBe(0.5 * SR);
+    expect(seq[wraps[0]]).toBeLessThan(0.001);
+    // No gap at the seam: nothing in the sequence is silent.
+    expect(seq.slice(0, wraps[1]).filter((v) => v === 0).length).toBeLessThanOrEqual(2);
+    fp.shutdown();
   });
 
   it('loops a file without ending (audio bed) until it is faded out', async () => {

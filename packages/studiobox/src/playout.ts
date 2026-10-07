@@ -65,14 +65,16 @@ export class PlayoutPipeline {
     this.filePlayer = new FilePlayer(
       cfg.capture.sampleRate,
       makeLog('fileplayer'),
-      cfg.filePlayer.prebufferMs
+      cfg.filePlayer.prebufferMs,
+      cfg.filePlayer.fadeOutMs
     );
     this.fileDirs = new FileDirs(cfg.filePlayer.dirs, log, cfg.filePlayer.streams);
     if (cfg.filePlayer.bed.enabled) {
       this.bedPlayer = new FilePlayer(
         cfg.capture.sampleRate,
         makeLog('bed'),
-        cfg.filePlayer.prebufferMs
+        cfg.filePlayer.prebufferMs,
+        cfg.filePlayer.fadeOutMs
       );
       this.bed = new BedDeck(this.bedPlayer, this.fileDirs, cfg.filePlayer.bed, makeLog('bed'));
     }
@@ -181,6 +183,8 @@ export class PlayoutPipeline {
       this.listen.select(String(req.id ?? ''), req.src);
     } else if (type === 'bed' && this.bed) {
       this.bed.set(!!value);
+    } else if (type === 'havarie' && this.bed) {
+      this.bed.setHavarieWatch(!!value);
     } else if (type === 'bedSelect' && this.bed) {
       const req = isObj(value) ? value : {};
       if (!this.bed.select(Number(req.folder ?? 0) || 0, String(req.name ?? ''))) {
@@ -230,6 +234,15 @@ export class PlayoutPipeline {
     if (this.stopping) return;
     const frames = this.cfg.capture.blockSize;
     this.filePlayer.read(this.outL, this.outR, frames);
+    if (this.bed) {
+      // Havarie: the player (file or stream) silent; no show here, so armed.
+      let peak = 0;
+      for (let i = 0; i < frames; i++) {
+        peak = Math.max(peak, Math.abs(this.outL[i]), Math.abs(this.outR[i]));
+      }
+      const floor = Math.pow(10, this.cfg.filePlayer!.bed.havarie.belowDb / 20);
+      this.bed.watch(peak > floor, true, (frames / this.cfg.capture.sampleRate) * 1000);
+    }
     this.bed?.mixInto(this.outL, this.outR, frames);
     const buf = interleaveStereo(this.outL, this.outR, frames);
     this.monitor.write(buf);

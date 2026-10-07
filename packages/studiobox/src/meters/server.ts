@@ -16,7 +16,16 @@ import { RoleLink, Roles, ViewRole } from './roles';
 import { Snapshot, guestSnapshot, onAirOf, spectatorSnapshot } from './wire';
 
 /** Routes that serve a view (see `Roles.urls`, and `viewFor` for which one). */
-const VIEW_ROUTES = new Set(['/', '/index.html', '/tech', '/host', '/guest', '/spectator']);
+const VIEW_ROUTES = new Set([
+  '/',
+  '/index.html',
+  '/tech',
+  '/host',
+  '/guest',
+  '/spectator',
+  '/einstellungen',
+  '/einmessen',
+]);
 
 /** Routes that expose the file tree: operators only (technician, host). */
 const DATA_ROUTES = new Set(['/folders', '/files', '/scheduled', '/preview']);
@@ -56,6 +65,8 @@ const PUBLIC_FILES: Record<string, string> = {
   '/meter.js': 'text/javascript; charset=utf-8',
   '/guest.html': 'text/html; charset=utf-8',
   '/spectator.html': 'text/html; charset=utf-8',
+  '/einstellungen.html': 'text/html; charset=utf-8',
+  '/einmessen.html': 'text/html; charset=utf-8',
 };
 
 /** `public/` beside this file: under ts-node that is the source folder, in a
@@ -133,6 +144,7 @@ export function isPreviewable(name: string): boolean {
  *                                             source (rec | raw | mic:<label> | air)
  *   - { type: 'endShow', value?: false }      "Sendung beenden" (false cancels)
  *   - { type: 'testTone', value: boolean }    1 kHz alignment tone on the monitor
+ *   - { type: 'havarie', value: boolean }     havarie watch (bed after silence)
  *   - { type: 'priorityDepth', value: dB }    host-priority depth
  *   - { type: 'trim', value: { label, trimDb } } one mic's input trim
  *   - { type: 'setupStart', value?: { only: [label] } } start "Einmessen"
@@ -415,10 +427,17 @@ export class MeterServer {
    *  guest token gets the guest view whatever it asks for, and everything
    *  else is the spectator view. With roles disabled every connection is a
    *  technician: `/` is then the page (as on a playout box) and `/guest` and
-   *  `/spectator` show those views. */
-  private viewFor(url: string, role: ViewRole): 'page' | '/guest.html' | '/spectator.html' {
+   *  `/spectator` show those views. `/einstellungen` (Vorrang, Musik-Lautstärke,
+   *  Musik im Kopfhörer) and `/einmessen` (the setup assistant) are the
+   *  technician's alone: a host gets the page. */
+  private viewFor(
+    url: string,
+    role: ViewRole
+  ): 'page' | '/guest.html' | '/spectator.html' | '/einstellungen.html' | '/einmessen.html' {
     if (url === '/spectator' || role === 'spectator') return '/spectator.html';
     if (url === '/guest' || role === 'guest') return '/guest.html';
+    if (url === '/einstellungen' && role === 'tech') return '/einstellungen.html';
+    if (url === '/einmessen' && role === 'tech') return '/einmessen.html';
     return 'page';
   }
 
@@ -746,11 +765,32 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  button.cue:hover{background:var(--raised)}
  button.cue.on{background:var(--cue);color:var(--on-cue);font-weight:700}
  body.cueing .topbar{box-shadow:inset 0 -3px 0 var(--cue)}
- /* Top-right ⋮ menu: transport toggles that don't need to sit in the bar. */
+ /* Top-right ⋮ menu: the box's switches in groups (Ausgänge, Sendung), then
+    the ways to other screens. Rows, not tiles: a switch says its state in
+    words and with a dot on the right (filled = on), so a column of them
+    reads like a list instead of a wall of green. */
  .menuwrap{position:relative}
- .menu{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:260px;display:flex;flex-direction:column;gap:8px;
-  padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
- .menu button{width:100%;text-align:left}
+ .menu{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:min(320px,calc(100vw - 32px));
+  max-height:calc(100dvh - 96px);overflow-y:auto;display:flex;flex-direction:column;gap:2px;
+  padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+ .mgrp{display:flex;flex-direction:column;gap:2px}
+ .mgrp+.mgrp{margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
+ .mh{padding:8px 12px 2px;font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+ .menu button,.menu .menulink{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:0 12px;
+  border:0;border-radius:8px;background:transparent;color:var(--text);font:inherit;font-weight:600;text-align:left;text-decoration:none}
+ .menu button:hover,.menu .menulink:hover{background:var(--raised)}
+ .menu button:disabled{color:var(--muted);background:transparent}
+ /* Switch state: the dot on the right, after the words. (::before is the
+    press-and-hold fill.) */
+ .menu .mon::after,.menu #tone::after{content:"";flex:0 0 auto;width:12px;height:12px;margin-left:auto;border-radius:50%;
+  box-shadow:inset 0 0 0 2px var(--muted)}
+ .menu .mon.on,.menu #tone.on{background:transparent;color:var(--text);border:0}
+ .menu .mon.on::after{background:var(--ok);box-shadow:none}
+ .menu #tone.on{color:var(--warn)}
+ .menu #tone.on::after{background:var(--warn);box-shadow:none}
+ .menu #endShow:enabled{color:var(--onair)}
+ .menu #tgtBox{padding:4px 12px 8px}
+ a.chip{text-decoration:none}
  /* Status chips in the header: state in words, not switches. Filled red is
     reserved for "on air" — programme is leaving the box. */
  .chip{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:2px 12px;border-radius:8px;
@@ -857,48 +897,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  /* Host priority: how far the other mics lean back, as a plain slider. */
  .prio{display:flex;align-items:center;gap:12px}
  #tgtBox{display:flex;flex-direction:column;gap:4px;padding:4px 0}
- .tgtl{font-size:.8125rem;color:var(--muted)}
+ .tgtl{font-size:.875rem;font-weight:600;color:var(--text)}
  .abh{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px}
  .abh select{min-height:44px;max-width:100%}
  .prio input{flex:1 1 auto;min-width:0;height:44px;margin:0;accent-color:var(--accent)}
  .prio output{flex:0 0 auto;min-width:5ch;text-align:right;font-size:1.125rem;font-weight:700}
- /* Setup assistant ("Einmessen"): the steps as tiles, each with its state as
-    a word; the result as one before -> after row per mic. */
- .suhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
- .steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px}
- .steps li{display:flex;flex-direction:column;gap:2px;min-width:0;padding:8px 12px;border-radius:8px;background:var(--raised)}
- .steps .sn{font-size:.8125rem;font-weight:700;letter-spacing:.04em;color:var(--muted)}
- .steps b{font-size:.9375rem;overflow-wrap:anywhere}
- .steps .sd{font-size:.8125rem;color:var(--muted)}
- .steps li.done .sn{color:var(--ok)}
- .steps li.now{box-shadow:inset 0 0 0 2px var(--accent)}
- .steps li.now .sn{color:var(--accent)}
- .sunow{font-size:1.125rem;font-weight:600}
- .susent{margin:0;padding:12px 16px;border-radius:8px;background:var(--raised);font-size:1.25rem;line-height:1.4}
- .subtns{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px}
- button.go{border:2px solid var(--ok);font-weight:700}
- /* While nothing is being measured the panel is one line and sits below the
-    meters; a run or a result brings it up under the channels. */
- #setupBox.idle{order:1;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between}
- #setupBox.idle .hintline{flex:1 1 100%}
- /* Result: one card per mic — verdict in words, what was measured, then each
-    setting as "vorher → nachher" (no table to scroll sideways on a tablet). */
- .sures{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
- .sures li{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:8px;background:var(--raised)}
- .srh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
- .srh b{font-size:.9375rem}
- .sures .was{font-size:.8125rem;color:var(--muted)}
- .verd{margin-left:auto;font-size:.8125rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
- .verd.ok{color:var(--ok)}
- .verd.warn{color:var(--warn)}
- .verd.bad{color:var(--onair)}
- .sset{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;font-size:.875rem}
- .sset div{display:flex;gap:6px;white-space:nowrap}
- .sset dt{color:var(--muted)}
- .sset dd{margin:0}
- .sures .adv{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:6px;border-top:1px solid var(--line)}
- .sures .adv span{flex:1 1 220px;min-width:0}
- .sures .adv button{background:var(--pressed)}
  /* File browser: folder tabs, breadcrumb, one raised row per entry. */
  .files{flex:1 1 0;min-height:200px;gap:8px;overflow:hidden}
  body.cueing .files{box-shadow:inset 0 0 0 2px var(--cue)}
@@ -1029,6 +1032,10 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  #mute.muted{background:var(--off);border-color:var(--off)}
  /* Audio bed: running is filled green and says so. */
  #bed.on{background:var(--chip-green);color:#fff;border:2px solid var(--ok)}
+ /* Havarie: the bed came on by itself after silence; gone when sound is back. */
+ #bed.havarie{background:var(--chip-red);color:#fff;border:2px solid var(--onair);animation:havarie 1s ease-in-out infinite alternate}
+ @keyframes havarie{to{opacity:.6}}
+ @media (prefers-reduced-motion:reduce){#bed.havarie{animation:none}}
  /* Preview player: only present while pre-listening. */
  .cuebar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
  .cuebar .cname{flex:1 1 160px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cue);font-weight:600}
@@ -1177,6 +1184,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  @media (prefers-contrast:more){
   :root{--surface:var(--bg);--raised:var(--bg);--m-edge:var(--text)}
   .panel,.mbox,.menu{border:2px solid var(--text)}
+  .menu button,.menu .menulink{border:1px solid var(--text)}
   .topbar{border-bottom:2px solid var(--text)}
   .footer{border-top:2px solid var(--text)}
   button,.fbtn,#addall,.tile,.files li .addbtn,.files li .bedbtn{border:2px solid var(--text)}
@@ -1187,7 +1195,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
 <header class="topbar">
  <h1><button id="logo" class="logo" title="Quellen anzeigen">__BRAND__</button></h1>
  <span id="air" class="chip" role="status" style="display:none"><span class="dot"></span><span id="airText"></span></span>
- <span id="setupChip" class="chip info" style="display:none">Einmessen läuft</span>
+ <a id="setupChip" class="chip info" href="/einmessen" style="display:none">Einmessen läuft</a>
  <span id="toneChip" class="chip warn" style="display:none">Testton</span>
  <div class="toggles">
   <button id="rec" class="tog rec hold" style="display:none">Aufnahme aus</button>
@@ -1204,21 +1212,28 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   <div class="menuwrap">
    <button id="menuBtn" class="icon" title="Mehr" aria-label="Mehr" aria-haspopup="true">⋮</button>
    <div id="menu" class="menu" style="display:none">
-    <button id="mon" class="mon hold techonly" style="display:none">Lokale Ausgabe aus</button>
-    <div id="tgtBox" class="techonly" style="display:none">
-     <span class="tgtl" id="tgtLbl">Ausgang ans Pult</span>
-     <div class="segc" role="group" aria-labelledby="tgtLbl"><button id="tgtUsb" class="hold" aria-pressed="false">USB</button><button id="tgtStream" class="hold" aria-pressed="false">Stream</button><button id="tgtBoth" class="hold" aria-pressed="false">beides</button></div>
+    <div class="mgrp techonly" role="group" aria-labelledby="mhOut">
+     <div class="mh" id="mhOut">Ausgänge</div>
+     <button id="mon" class="mon hold techonly" style="display:none">Lokale Ausgabe aus</button>
+     <div id="tgtBox" class="techonly" style="display:none">
+      <span class="tgtl" id="tgtLbl">Ausgang ans Pult</span>
+      <div class="segc" role="group" aria-labelledby="tgtLbl"><button id="tgtUsb" class="hold" aria-pressed="false">USB</button><button id="tgtStream" class="hold" aria-pressed="false">Stream</button><button id="tgtBoth" class="hold" aria-pressed="false">beides</button></div>
+     </div>
+     <button id="srv" class="mon hold techonly" style="display:none">Studio-Stream aus</button>
+     <button id="ret" class="mon techonly" style="display:none">Musik-Rückweg aus</button>
     </div>
-    <button id="srv" class="mon hold techonly" style="display:none">Studio-Stream aus</button>
-    <button id="ret" class="mon techonly" style="display:none">Musik-Rückweg aus</button>
-    <div id="retLvlBox" class="techonly" style="display:none">
-     <label for="retLvl">Musik im Kopfhörer</label>
-     <div class="prio"><input id="retLvl" type="range" min="-40" max="6" step="1" value="0"><output id="retLvlVal" for="retLvl"></output></div>
+    <div class="mgrp techonly" role="group" aria-labelledby="mhShow">
+     <div class="mh" id="mhShow">Sendung</div>
+     <button id="havarieBtn" class="mon techonly" style="display:none" aria-pressed="false">Havarie-Bett aus</button>
+     <button id="tone" class="hold techonly" style="display:none">Testton aus</button>
+     <button id="endShow" class="hold techonly" style="display:none">Sendung beenden</button>
     </div>
-    <button id="tone" class="hold techonly" style="display:none">Testton aus</button>
-    <button id="endShow" class="hold techonly" style="display:none">Sendung beenden</button>
-    <button id="schedBtn">⏰ Geplante Sendungen</button>
-    <button id="connBtn" class="techonly">📱 Geräte verbinden</button>
+    <div class="mgrp">
+     <button id="schedBtn">⏰ Geplante Sendungen</button>
+     <button id="connBtn" class="techonly">📱 Geräte verbinden</button>
+     <a id="setBtn" class="menulink techonly liveonly" href="/einstellungen">⚙ Einstellungen</a>
+     <a id="mesBtn" class="menulink techonly liveonly" href="/einmessen">🎤 Einmessen</a>
+    </div>
    </div>
   </div>
  </div>
@@ -1244,22 +1259,6 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <button id="trimClose" class="icon" aria-label="Trim schließen">✕</button>
   </div>
  </section>
- <section class="panel techonly" id="setupBox" style="display:none" aria-labelledby="suTitle">
-  <div class="suhead"><h2 id="suTitle">Einmessen</h2><span class="hintline" id="suInfo"></span></div>
-  <ol class="steps" id="suSteps" style="display:none"></ol>
-  <div id="suNow" class="sunow" style="display:none"></div>
-  <blockquote id="suSent" class="susent" style="display:none"></blockquote>
-  <ul class="sures" id="suRows" style="display:none"></ul>
-  <div class="subtns">
-   <button id="suCancel" style="display:none">Abbrechen</button>
-   <button id="suFinish" style="display:none">Fertig – auswerten</button>
-   <button id="suDiscard" style="display:none">Verwerfen</button>
-   <button id="suApply" class="go" style="display:none">Übernehmen</button>
-   <button id="suStart" class="go">Einmessen starten</button>
-  </div>
-  <p class="hintline" id="suIntro" style="display:none">Misst alle Mikrofone in etwa einer Minute: erst 5 Sekunden Stille, dann liest
-  jede Person kurz einen Satz vor. Am Programm ändert sich nichts, bis du „Übernehmen“ drückst.</p>
- </section>
  <section class="panel techonly" aria-labelledby="pgTitle">
   <div class="lufs">
    <div><h2 id="pgTitle">Programm</h2><div class="sub">Momentan <span id="mom">–</span> LUFS</div></div>
@@ -1274,17 +1273,6 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <div class="stat"><div class="sl">Limiter</div><div class="sv"><span id="lgr">–</span> dB</div></div>
    <div class="stat"><div class="sl">Duck (Musik)</div><div class="sv"><span id="duck">–</span> dB <span class="act" id="duckOn" style="display:none">aktiv</span></div></div>
   </div>
- </section>
- <section class="panel techonly" id="prioBox" style="display:none">
-  <h2><label for="prio">Moderations-Vorrang</label></h2>
-  <div class="prio"><input id="prio" type="range" min="0" max="24" step="1" value="8"><output id="prioVal" for="prio"></output></div>
-  <p class="hintline">So viel leiser werden die anderen Mikrofone, solange <b id="prioWho">die Moderation</b> spricht.
-  <span class="act" id="prioAct" style="display:none">wirkt gerade</span></p>
- </section>
- <section class="panel" id="musLvlBox" style="display:none">
-  <h2><label for="musLvl">Musik-Lautstärke</label></h2>
-  <div class="prio"><input id="musLvl" type="range" min="-12" max="6" step="1" value="0"><output id="musLvlVal" for="musLvl"></output><button id="musLvlReset" style="display:none">Zurücksetzen</button></div>
-  <p class="hintline">Wie laut Musik, Jingles und Bett auf Sendung neben den Stimmen stehen. 0 dB = automatisch eingepegelt.</p>
  </section>
 </div>
 <div class="col2">
@@ -1530,9 +1518,9 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      <li class="techonly"><span class="k">⋮ → Lokale Ausgabe</span> gibt das Programm
      auf der angeschlossenen Soundkarte aus, <span class="k">⋮ →
      Musik-Rückweg</span> schickt die Musik (ohne Mikros) zurück ins Studio,
-     damit man sie im Kopfhörer hört. Der Regler <span class="k">Musik im
-     Kopfhörer</span> darunter stellt ein, wie laut sie dort neben den
-     Mikrofonen ist — die Sendung bleibt davon unberührt.</li>
+     damit man sie im Kopfhörer hört. Wie laut sie dort neben den Mikrofonen
+     ist, stellt <span class="k">⋮ → ⚙ Einstellungen → Musik im Kopfhörer</span>
+     ein — die Sendung bleibt davon unberührt.</li>
      <li class="techonly"><span class="k">⋮ → Ausgang ans Pult</span>: USB
      (Soundkarte direkt ins Pult), Stream (das Pult hängt an einem anderen
      Gerät, das den Studio-Stream abspielt) oder beides. Was einen laufenden
@@ -1556,6 +1544,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      (unten): ein Musikbett, das in Schleife läuft und unter Sprache leiser
      wird — auch als Notnagel, wenn nichts anderes bereit ist. Im Bett-Ordner
      wählt <span class="k">🛏</span> an einer Datei, welche es ist.</li>
+     <li class="techonly"><span class="k">Havarie-Bett</span> (⋮, nur wo es
+     eingerichtet ist): bleibt es auf Sendung still — kein offenes Mikro, keine
+     Datei, kein Stream —, geht das Bett nach einigen Sekunden von selbst an und
+     der Knopf unten sagt <span class="k">⚠ Havarie</span>. Sobald wieder Ton
+     kommt, blendet es aus; ein Klick auf das Bett beendet es sofort. Im
+     Live-Betrieb wacht es nur, solange die Aufnahme läuft.</li>
     </ul>
 
     <h4>Pegel</h4>
@@ -1572,13 +1566,6 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      <span class="k">STUMM</span> (von der Technik abgeschaltet).</li>
      <li class="techonly"><b>Trim</b>: ein Klick auf den Wert öffnet die
      Schritt-Tasten (±1, ±3 dB) für die Eingangsverstärkung dieses Mikros.</li>
-     <li class="techonly"><b>Moderations-Vorrang</b>: so viel leiser werden die
-     anderen Mikros, solange die Moderation spricht — sanft, nie stumm.</li>
-     <li><b>Musik-Lautstärke</b>: wie laut Musik, Jingles und Bett auf Sendung
-     neben den Stimmen stehen (−12 bis +6 dB). Die Musik wird ohnehin
-     automatisch eingepegelt; der Regler verschiebt sie nur gegenüber den
-     Stimmen. Der Kopfhörer im Studio bleibt davon unberührt
-     (<span class="k">Musik im Kopfhörer</span>).</li>
      <li class="techonly"><b>Abhören</b>: hört auf diesem Gerät (Kopfhörer, auch
      Bluetooth) mit, was gerade aufgenommen wird — <span class="k">Aufnahme</span>
      verarbeitet, <span class="k">Roh</span> unverarbeitet (alle Mikros oder
@@ -1594,23 +1581,21 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      „Mikros zu“ läuft nur Musik, die Kanäle zeigen PAUSE.</li>
     </ul>
 
-    <div class="techonly">
-     <h4>Einmessen</h4>
+    <div class="techonly liveonly">
+     <h4>Einstellungen und Einmessen</h4>
      <ul>
-      <li><span class="k">Einmessen starten</span> misst alle Mikrofone in etwa
-      einer Minute: erst 5 Sekunden <b>Stille</b>, dann liest jede Person den
-      angezeigten Satz vor. Die Reihenfolge ist egal — wer spricht, wird
-      erkannt; alle anderen Ansichten zeigen, wer dran ist.</li>
-      <li>Das Ergebnis zeigt pro Mikro ein Urteil (<span class="k">GUT</span>,
-      <span class="k">ZU LEISE</span>, <span class="k">ÜBERSTEUERT</span> …) und
-      jede Einstellung als <b>vorher → nachher</b>. Erst
-      <span class="k">Übernehmen</span> stellt die Kanäle ein;
-      <span class="k">Verwerfen</span> lässt alles, wie es war.</li>
-      <li>Was studiobox nicht selbst stellen kann — den Gain-Regler am
-      Mischpult — steht als Anweisung dabei („Kanal 3: Gain um etwa +18 dB
-      aufdrehen“). Danach <span class="k">Nur diesen Kanal neu messen</span>.</li>
-      <li class="note">Das Ergebnis übersteht einen Neustart des Geräts; in der
-      Konfigurationsdatei ändert es nichts.</li>
+      <li><span class="k">⋮ → ⚙ Einstellungen</span> (nur Technik): der
+      <b>Moderations-Vorrang</b> (so viel leiser werden die anderen Mikros,
+      solange die Moderation spricht — „aus“ ist der Normalfall), die
+      <b>Musik-Lautstärke</b> (Musik, Jingles und Bett gegenüber den Stimmen,
+      −12 bis +6 dB) und <b>Musik im Kopfhörer</b> (nur der Rückweg ins Studio,
+      nicht die Sendung).</li>
+      <li class="liveonly"><span class="k">⋮ → 🎤 Einmessen</span> (nur Technik): der
+      Pegel jedes Mikros gegen seinen Zielbereich samt Trim und der Assistent,
+      der alle Mikros in etwa einer Minute einmisst.</li>
+      <li>Läuft ein Einmessen oder wartet ein Ergebnis, steht oben ein Hinweis;
+      ein Klick darauf führt zur Seite. Alles auf beiden Seiten übersteht einen
+      Neustart.</li>
      </ul>
     </div>
 
@@ -2210,146 +2195,45 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  // says its state. The box fades it; the button follows the snapshot.
  const bedBtn=$('bed');let bed=null,bedKey='';
  function setBed(){show(bedBtn,!!bed);if(!bed)return;
-  bedBtn.textContent=bed.on?'Bett läuft':'Bett aus';bedBtn.className=bed.on?'on':'';setPressed(bedBtn,bed.on);
+  const ha=bed.havarieArmed;show(havBtn,typeof ha==='boolean');
+  havBtn.textContent=ha?'Havarie-Bett an':'Havarie-Bett aus';havBtn.className='mon techonly'+(ha?' on':'');
+  setPressed(havBtn,!!ha);
+  havBtn.title=ha?'Bei Stille auf Sendung geht das Bett von selbst an — Klick schaltet das ab'
+   :'Bei Stille passiert nichts — Klick schaltet die Havarie-Überwachung ein';
+  const hv=bed.on&&bed.havarie;
+  bedBtn.textContent=hv?'⚠ Havarie — Bett läuft':bed.on?'Bett läuft':'Bett aus';
+  bedBtn.className=hv?'havarie':bed.on?'on':'';setPressed(bedBtn,bed.on);
   bedBtn.disabled=!bed.on&&!bed.name;
   bedBtn.title=!bed.name?'Kein Bett gefunden — im Bett-Ordner liegt keine Audiodatei'
+   :hv?'Havarie: Stille auf Sendung, das Bett ('+bed.name+') ist von selbst angegangen. Sobald wieder Ton kommt, blendet es aus — Klick blendet es sofort aus'
    :'Bett: '+bed.name+(bed.on?' — Klick blendet es aus':' — Klick blendet es ein');}
  bedBtn.onclick=()=>{if(bed)send({type:'bed',value:!bed.on});};
- // Host priority: the slider is the depth as a positive number of dB.
- const prio=$('prio'),prioVal=$('prioVal');let prioAt=0,prioSentAt=0;
- const prioText=v=>Number(v)>0?'−'+v+' dB':'aus';
- function sendPrio(){prioSentAt=Date.now();send({type:'priorityDepth',value:-Number(prio.value)});}
- // Dragging sends at most every 150 ms; letting go always sends the final value.
- prio.oninput=()=>{prioAt=Date.now();prioVal.textContent=prioText(prio.value);if(prioAt-prioSentAt>=150)sendPrio();};
- prio.onchange=()=>{prioAt=Date.now();sendPrio();};
- function setPrio(p){show($('prioBox'),!!p);if(!p)return;
-  $('prioWho').textContent=p.label;show($('prioAct'),!!p.active);
-  // Not while a finger is on it: the echo of an older value would pull the
-  // thumb back.
-  if(Date.now()-prioAt<1500)return;
-  const v=String(Math.round(-p.depthDb));
-  if(prio.value!==v)prio.value=v;
-  const t=prioText(v);if(prioVal.textContent!==t)prioVal.textContent=t;}
- // Music return level: what the room hears of the music in the headphones,
- // next to the direct mics. Same drag rules as the priority slider.
- const retLvl=$('retLvl'),retLvlVal=$('retLvlVal');let retLvlAt=0,retLvlSentAt=0;
- const retLvlText=v=>Number(v)>0?'+'+v+' dB':Number(v)<0?'−'+(-Number(v))+' dB':'0 dB';
- function sendRetLvl(){retLvlSentAt=Date.now();send({type:'returnGain',value:Number(retLvl.value)});}
- retLvl.oninput=()=>{retLvlAt=Date.now();retLvlVal.textContent=retLvlText(retLvl.value);if(retLvlAt-retLvlSentAt>=150)sendRetLvl();};
- retLvl.onchange=()=>{retLvlAt=Date.now();sendRetLvl();};
- function setRetLvl(db){show($('retLvlBox'),typeof db==='number');if(typeof db!=='number')return;
-  if(Date.now()-retLvlAt<1500)return;
-  const v=String(Math.round(db));
-  if(retLvl.value!==v)retLvl.value=v;
-  const t=retLvlText(v);if(retLvlVal.textContent!==t)retLvlVal.textContent=t;}
- // Music on air ("Musik-Lautstärke"): every music source next to the voices.
- // Same drag rules as the sliders above.
- const musLvl=$('musLvl'),musLvlVal=$('musLvlVal'),musLvlReset=$('musLvlReset');let musLvlAt=0,musLvlSentAt=0;
- function showMusLvl(v){musLvlVal.textContent=retLvlText(v);show(musLvlReset,Number(v)!==0);}
- function sendMusLvl(){musLvlSentAt=Date.now();send({type:'musicGain',value:Number(musLvl.value)});}
- musLvl.oninput=()=>{musLvlAt=Date.now();showMusLvl(musLvl.value);if(musLvlAt-musLvlSentAt>=150)sendMusLvl();};
- musLvl.onchange=()=>{musLvlAt=Date.now();sendMusLvl();};
- musLvlReset.onclick=()=>{musLvl.value='0';musLvlAt=Date.now();showMusLvl('0');sendMusLvl();};
- function setMusLvl(db){show($('musLvlBox'),typeof db==='number');if(typeof db!=='number')return;
-  if(Date.now()-musLvlAt<1500)return;
-  const v=String(Math.round(db));
-  if(musLvl.value!==v)musLvl.value=v;
-  if(musLvlVal.textContent!==retLvlText(v))showMusLvl(v);}
+ const havBtn=$('havarieBtn');
+ havBtn.onclick=()=>{if(bed&&typeof bed.havarieArmed==='boolean'&&tech())send({type:'havarie',value:!bed.havarieArmed});};
  // ---- Einmessen (setup assistant) ----------------------------------------
- // The box listens and measures; the page only shows where it is. The buttons
- // are fixed elements switched by phase, and the step tiles are built once per
- // run and updated in place — rebuilding them per frame would pull a button
- // away from under a finger.
- const su={box:$('setupBox'),info:$('suInfo'),intro:$('suIntro'),steps:$('suSteps'),now:$('suNow'),sent:$('suSent'),
-  rows:$('suRows'),start:$('suStart'),cancel:$('suCancel'),finish:$('suFinish'),
-  apply:$('suApply'),discard:$('suDiscard'),chip:$('setupChip'),line:$('setupLine')};
- let suKey=null,suTileKey='',suTiles=[];
+ // The assistant itself (and Vorrang, Musik-Lautstärke) lives on the
+ // technician's own page, /einstellungen. Here: the header chip while it runs
+ // or a result waits (a link there, with this page's token), and for the host
+ // one line on who is up and what to read.
+ const su={chip:$('setupChip'),line:$('setupLine')};
+ su.chip.href='/einmessen'+(location.search||'');
+ $('setBtn').href='/einstellungen'+(location.search||'');
+ $('mesBtn').href='/einmessen'+(location.search||'');
  const put=(el,t)=>{if(el.textContent!==t)el.textContent=t;};
- const pctTxt=p=>Math.round(Math.max(0,Math.min(1,p))*100)+' %';
- function suTile(name){const li=document.createElement('li'),sn=document.createElement('span'),
-  b=document.createElement('b'),sd=document.createElement('span');
-  sn.className='sn';sd.className='sd';b.textContent=name;
-  li.appendChild(sn);li.appendChild(b);li.appendChild(sd);su.steps.appendChild(li);
-  return {li:li,sn:sn,sd:sd,state:''};}
- // A tile's state is a word (ERLEDIGT / JETZT / OFFEN), not only its frame.
- function suSet(i,state,detail){const t=suTiles[i];if(!t)return;
-  if(t.state!==state){t.state=state;t.li.className=state;
-   t.sn.textContent=(i+1)+' · '+(state==='done'?'ERLEDIGT':state==='now'?'JETZT':'OFFEN');}
-  put(t.sd,detail);}
- const VERD={'gut':'ok','zu leise':'warn','rauscht':'warn','übersteuert':'bad','kein Signal':'bad'};
- // One setting as "vorher → nachher". Only a change gets the arrow: a value
- // the assistant leaves alone (or a mic without a usable measurement) just
- // shows what it is.
- function suCell(name,a,b,unit,f,d){
-  const was=f(a,d),now=b===null||b===undefined?was:f(b,d);
-  return '<div><dt>'+name+'</dt><dd>'+(was===now?was+' '+unit:'<span class="was">'+was+' →</span> <b>'+now+' '+unit+'</b>')+'</dd></div>';}
- // One card per mic. What studiobox cannot set itself — the analog gain — is
- // a concrete instruction, with the way to check it again right beside it.
- function suResult(st){
-  su.rows.innerHTML='';
-  st.results.forEach(r=>{const a=r.after||{},b=r.before,notes=r.notes||[];
-   const li=document.createElement('li');
-   li.innerHTML='<div class="srh"><b>'+esc(r.label)+'</b><span class="was">Kanal '+r.channel+' · '+
-    (r.speechDb===null?'keine Sprache':'Sprache '+fmt(r.speechDb)+' dB'+(r.snrDb===null?'':' · Abstand '+fmt(r.snrDb,0)+' dB'))+'</span>'+
-    '<span class="verd '+(VERD[r.verdict]||'warn')+'">'+esc(r.verdict)+'</span></div>'+
-    '<dl class="sset">'+suCell('Trim',b.trimDb,a.trimDb,'dB',sgn)+suCell('Hochpass',b.hpfHz,a.hpfHz,'Hz',fmt,0)+
-    suCell('Gate',b.gateThresholdDb,a.gateThresholdDb,'dB',fmt)+suCell('Comp',b.compThresholdDb,a.compThresholdDb,'dB',fmt)+
-    suCell('De-Esser',b.deessThresholdDb,a.deessThresholdDb,'dB',fmt)+suCell('Leveler-Start',b.seedDb,a.seedDb,'dB',sgn)+'</dl>';
-   if(r.advice||notes.length){
-    const adv=document.createElement('div'),btn=document.createElement('button');
-    adv.className='adv';
-    adv.innerHTML='<span>'+(r.advice?'<b>'+esc(r.advice)+'</b> ':'')+esc(notes.join(' '))+'</span>';
-    btn.textContent='Nur diesen Kanal neu messen';
-    btn.onclick=()=>send({type:'setupStart',value:{only:[r.label]}});
-    adv.appendChild(btn);li.appendChild(adv);}
-   su.rows.appendChild(li);});
- }
  function setSetup(s){
   const st=s.setup;
-  // No assistant on this box (playout mode): no panel, no chip.
-  if(!st){if(suKey!==''){suKey='';show(su.box,false);show(su.chip,false);show(su.line,false);}return;}
+  // No assistant on this box (playout mode): no chip, no line.
+  if(!st){show(su.chip,false);show(su.line,false);return;}
   const sil=st.phase==='silence',running=sil||st.phase==='speakers',result=st.phase==='result'&&!!st.results;
-  const key=st.phase+'|'+st.mics.map(m=>m.label).join('|')+'|'+
-   (result?st.results.map(r=>r.label+':'+r.verdict+':'+(r.after?r.after.trimDb:'')).join('|'):'');
-  if(key!==suKey){suKey=key;
-   show(su.box,true);show(su.chip,running);
-   su.box.classList.toggle('idle',!running&&!result);
-   show(su.start,!running&&!result);
-   show(su.steps,running);show(su.now,running);show(su.cancel,running);show(su.finish,st.phase==='speakers');
-   show(su.rows,result);show(su.apply,result);show(su.discard,result);
-   if(result)suResult(st);
-  }
-  // The tiles belong to a run, not to a phase: they stay put from the silence
-  // through the last speaker.
-  const tk=running?st.mics.map(m=>m.label).join('|'):'';
-  if(tk!==suTileKey||(running&&!suTiles.length)){suTileKey=tk;
-   su.steps.innerHTML='';
-   suTiles=running?['Stille'].concat(st.mics.map(m=>m.label),['Ergebnis']).map(suTile):[];}
-  put(su.info,running?'läuft …':result
-   ?'Ergebnis — noch nicht übernommen'+(st.automixFloorDb===null?'':' · Automix-Boden '+fmt(st.automixFloorDb,0)+' dB')
-   :s.setupApplied?'Eingemessen ✓':'Noch nicht eingemessen');
-  // What it does is only worth a paragraph until it has been done once.
-  show(su.intro,!running&&!result&&!s.setupApplied);
-  show(su.sent,running&&!sil&&!!st.current);
+  show(su.chip,running||(result&&tech()));
+  put(su.chip,running?'Einmessen läuft':'Einmessen: Ergebnis wartet');
+  // The page behind the chip is the technician's; for the host it is a word.
+  if(!tech()&&su.chip.href)su.chip.removeAttribute('href');
   // Everybody but the technician gets one line: who is up, what to read.
   show(su.line,running&&!tech());
-  if(!running)return;
-  suSet(0,sil?'now':'done',sil?'Raumgeräusch · '+pctTxt(st.silence):'gemessen');
-  st.mics.forEach((m,i)=>suSet(i+1,m.done?'done':!sil&&m.label===st.current?'now':'open','Kanal '+m.channel+' · '+pctTxt(m.progress)));
-  suSet(st.mics.length+1,'open','vorher / nachher');
-  // The order does not matter — whoever talks is recognised; "Jetzt" is just
-  // who is asked next.
-  const now=sil?'Jetzt: Stille — bitte 5 Sekunden nicht sprechen.'
-   :st.current?'Jetzt: '+st.current+' — bitte diesen Satz vorlesen:':'Auswertung …';
-  put(su.now,now);put(su.sent,st.sentence||'');
-  if(!tech())put(su.line,sil?'Einmessen: bitte kurz still sein.'
+  if(running&&!tech())put(su.line,sil?'Einmessen: bitte kurz still sein.'
    :st.current?'Einmessen — jetzt: '+st.current+'. Bitte vorlesen: „'+(st.sentence||'')+'“':'Einmessen: Auswertung …');
  }
- su.start.onclick=()=>send({type:'setupStart'});
- su.cancel.onclick=()=>send({type:'setupCancel'});
- su.finish.onclick=()=>send({type:'setupFinish'});
- su.apply.onclick=()=>send({type:'setupApply'});
- su.discard.onclick=()=>send({type:'setupDiscard'});
  // Connection state in words: a dead page must not look like a quiet studio.
  const conn=document.getElementById('conn'),connText=document.getElementById('connText');
  function setConn(state){conn.className='conn '+state;
@@ -2394,15 +2278,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    if(tt!==testTone){testTone=tt;setTone();}
    const qm=s.queueMode||null;
    if(qm!==queueMode){queueMode=qm;renderQueue();}
-   const bk=s.bed?(s.bed.on?'1':'0')+(s.bed.name||''):'';
+   const bk=s.bed?(s.bed.on?'1':'0')+(s.bed.havarie?'h':'')+(s.bed.havarieArmed===true?'a':s.bed.havarieArmed===false?'x':'')+(s.bed.name||''):'';
    if(bk!==bedKey){bedKey=bk;
     // Which file is the bed is marked in its folder's listing.
     const moved=(s.bed&&s.bed.at?s.bed.at.folder+':'+s.bed.at.name:'')!==(bed&&bed.at?bed.at.folder+':'+bed.at.name:'');
     bed=s.bed||null;setBed();if(moved)loadFiles();}
    setSetup(s);
-   setPrio(playoutOnly?null:s.priority||null);
-   setRetLvl(playoutOnly?null:s.returnGainDb);
-   setMusLvl(playoutOnly?null:s.musicGainDb);
    setAbh(s);
    // Two files in different folders can share a basename, so the location is
    // part of what makes the now-playing line stale, not just the name.
@@ -2437,7 +2318,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  }
  // ⋮ menu (top-right): local-playout toggle + scheduled-files modal; more to come.
  const menu=document.getElementById('menu'),menuBtn=document.getElementById('menuBtn');
- menuBtn.onclick=e=>{e.stopPropagation();menu.style.display=menu.style.display==='none'?'':'none';};
+ // A group whose switches this box doesn't have (playout: no outputs to
+ // switch) loses its heading too; decided when the menu opens.
+ function menuGroups(){menu.querySelectorAll('.mgrp').forEach(g=>{
+  const any=Array.prototype.some.call(g.children,c=>!c.classList.contains('mh')&&c.style.display!=='none');
+  g.style.display=any?'':'none';});}
+ menuBtn.onclick=e=>{e.stopPropagation();const open=menu.style.display==='none';if(open)menuGroups();menu.style.display=open?'':'none';};
  document.addEventListener('click',e=>{if(!menu.contains(e.target))menu.style.display='none';});
  // Scheduled-files modal: every future timestamped file across all folders.
  const modal=document.getElementById('modal'),mlist=document.getElementById('mlist');

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>studiobox – Einstellungen</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101214'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%237cc8ff'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<style>
+ /* Einstellungen (technician only): what is set once per session rather than
+    played during it — host priority, the music level on air and the music
+    level in the studio's headphones. None of the desk's playout is here. The
+    setup assistant has its own screen, /einmessen. */
+ body{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
+ .top{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;
+  padding:max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+  background:var(--surface);border-bottom:1px solid var(--line)}
+ .top h1{font-size:1.375rem}
+ /* The two technician screens, as tabs: where you are is filled. */
+ .tabs{display:flex;gap:4px;padding:4px;border-radius:10px;background:var(--raised)}
+ .tabs a{display:inline-flex;align-items:center;min-height:40px;padding:0 14px;border-radius:8px;
+  color:var(--text);font-weight:600;text-decoration:none}
+ .tabs a[aria-current="page"]{background:var(--surface);box-shadow:inset 0 0 0 2px var(--accent)}
+ .back{margin-left:auto;display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:8px;
+  background:var(--raised);color:var(--text);font-weight:600;text-decoration:none}
+ main{flex:1 1 auto;display:flex;flex-direction:column;gap:16px;width:100%;max-width:1100px;margin:0 auto;
+  padding:16px max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+ .conn{align-self:flex-start}
+ .panel{display:flex;flex-direction:column;gap:12px;padding:16px;border-radius:12px;background:var(--surface)}
+ .panel h2{font-size:1.125rem}
+ .hint{color:var(--muted);font-size:.9375rem}
+ button{min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--border);background:var(--raised);
+  color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+ button:active{background:var(--pressed)}
+ button.go{border:2px solid var(--ok);font-weight:700}
+ /* ---- sliders (Vorrang, Musik-Lautstärke, Musik im Kopfhörer) ---------- */
+ .sl{display:flex;align-items:center;gap:12px}
+ .sl input{flex:1 1 auto;min-width:0;height:44px;margin:0;accent-color:var(--accent)}
+ .sl output{flex:0 0 auto;min-width:5ch;text-align:right;font-size:1.125rem;font-weight:700}
+ .act{padding:2px 8px;border-radius:8px;background:var(--duck);color:var(--on-duck);font-size:.8125rem;font-weight:700}
+ .help ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;color:var(--muted)}
+ .help b{color:var(--text)}
+ @media (prefers-contrast:more){
+  .panel{border:1px solid var(--text)}
+ }
+</style>
+</head>
+<body class="wait">
+<header class="top">
+ <h1>Einstellungen</h1>
+ <nav class="tabs" aria-label="Technik-Seiten"><a id="tabSet" href="/einstellungen" aria-current="page">⚙ Einstellungen</a><a id="tabMes" href="/einmessen">🎤 Einmessen</a></nav>
+ <a id="back" class="back" href="/tech">← Zum Pult</a>
+</header>
+<main>
+ <div id="conn" class="conn" role="status">Verbinde …</div>
+ <p id="denied" class="panel" hidden>Diese Seite ist nur für die Technik. Öffne sie über ⋮ → Einstellungen auf der Technik-Seite.</p>
+
+ <section class="panel stale" id="prioBox" hidden>
+  <h2><label for="prio">Moderations-Vorrang</label></h2>
+  <div class="sl"><input id="prio" type="range" min="0" max="24" step="1" value="0"><output id="prioVal" for="prio"></output></div>
+  <p class="hint">So viel leiser werden die anderen Mikrofone, solange <b id="prioWho">die Moderation</b> spricht.
+  „aus“ ist der Normalfall; nur für jemanden, der allen ins Wort fällt. <span class="act" id="prioAct" hidden>wirkt gerade</span></p>
+ </section>
+
+ <section class="panel stale" id="musLvlBox" hidden>
+  <h2><label for="musLvl">Musik-Lautstärke</label></h2>
+  <div class="sl"><input id="musLvl" type="range" min="-12" max="6" step="1" value="0"><output id="musLvlVal" for="musLvl"></output>
+   <button id="musLvlReset" hidden>Zurücksetzen</button></div>
+  <p class="hint">Wie laut Musik, Jingles und Bett auf Sendung neben den Stimmen stehen. 0 dB = automatisch eingepegelt.</p>
+ </section>
+
+ <section class="panel stale" id="retLvlBox" hidden>
+  <h2><label for="retLvl">Musik im Kopfhörer</label></h2>
+  <div class="sl"><input id="retLvl" type="range" min="-40" max="6" step="1" value="0"><output id="retLvlVal" for="retLvl"></output></div>
+  <p class="hint">Wie laut die Musik im Studio-Kopfhörer neben den eigenen Mikrofonen ist (der Musik-Rückweg ins Pult).
+  Die Sendung bleibt davon unberührt. Zu laut? So weit herunter, bis man sich selbst wieder gut hört.</p>
+ </section>
+
+ <p class="hint">Alles hier übersteht einen Neustart des Geräts. Die Mikrofone stellt
+ <a id="mesLink" href="/einmessen">🎤 Einmessen</a> ein.</p>
+</main>
+<script>
+(function(){
+ 'use strict';
+ var $=function(id){return document.getElementById(id);};
+ var put=function(el,t){if(el.textContent!==t)el.textContent=t;};
+ $('back').href='/tech'+location.search;
+ $('tabSet').href='/einstellungen'+location.search;
+ $('tabMes').href='/einmessen'+location.search;
+ $('mesLink').href='/einmessen'+location.search;
+
+ var ws=null,role=null;
+ function send(cmd){if(ws&&ws.readyState===1)ws.send(JSON.stringify(cmd));}
+
+ // ---- sliders: dragging sends at most every 150 ms, letting go always sends
+ // the final value, and for 1.5 s after a touch the echo of an older value
+ // does not pull the thumb back.
+ function slider(id,type,toWire,text,onShow){
+  var el=$(id),out=$(id+'Val'),at=0,sentAt=0;
+  function sendNow(){sentAt=Date.now();send({type:type,value:toWire(Number(el.value))});}
+  function paint(v){put(out,text(v));if(onShow)onShow(v);}
+  el.oninput=function(){at=Date.now();paint(el.value);if(at-sentAt>=150)sendNow();};
+  el.onchange=function(){at=Date.now();sendNow();};
+  return {set:function(v){if(Date.now()-at<1500)return;v=String(v);if(el.value!==v)el.value=v;paint(v);},
+   reset:function(v){el.value=String(v);at=Date.now();paint(el.value);sendNow();}};
+ }
+ var dbText=function(v){return Number(v)>0?'+'+v+' dB':Number(v)<0?'−'+(-Number(v))+' dB':'0 dB';};
+ // Host priority: the slider is the depth as a positive number of dB.
+ var prio=slider('prio','priorityDepth',function(v){return -v;},function(v){return Number(v)>0?'−'+v+' dB':'aus';});
+ var musLvl=slider('musLvl','musicGain',function(v){return v;},dbText,function(v){$('musLvlReset').hidden=Number(v)===0;});
+ $('musLvlReset').onclick=function(){musLvl.reset(0);};
+ // Music in the headphones: the music return's own level, not the programme.
+ var retLvl=slider('retLvl','returnGain',function(v){return v;},dbText);
+ function setSliders(s){
+  var p=s.priority||null;
+  $('prioBox').hidden=!p;
+  if(p){put($('prioWho'),p.label);$('prioAct').hidden=!p.active;prio.set(Math.round(-p.depthDb));}
+  var m=typeof s.musicGainDb==='number';
+  $('musLvlBox').hidden=!m;
+  if(m)musLvl.set(Math.round(s.musicGainDb));
+  var r=typeof s.returnGainDb==='number';
+  $('retLvlBox').hidden=!r;
+  if(r)retLvl.set(Math.round(s.returnGainDb));
+ }
+
+ function onSnapshot(s){
+  if(role!=='tech')return;
+  setSliders(s);
+ }
+
+ // Same socket as every view: the token in the link decides the role, the
+ // server drops whatever this role may not send.
+ function connect(){
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/'+(location.search||''));
+  ws.onopen=function(){document.body.className='ok';};
+  ws.onmessage=function(e){var s=JSON.parse(e.data);
+   if(s.type==='hello'){role=s.role;$('denied').hidden=role==='tech';return;}
+   if(!s.type)onSnapshot(s);};
+  ws.onclose=function(){document.body.className='lost';
+   put($('conn'),'Verbindung weg – verbinde neu …');setTimeout(connect,1000);};
+ }
+ connect();
+})();
+</script>
+</body>
+</html>

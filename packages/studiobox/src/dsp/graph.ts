@@ -141,6 +141,9 @@ interface MusicNode {
   gain: number;
   ducked: boolean;
   leveler: MusicLeveler | null; // one gain per item, with the look-ahead (pre-duck)
+  // Programme path of the file player's crossfade tail (virtual source only).
+  tailDelayL: DelayLine | null;
+  tailDelayR: DelayLine | null;
   itemStart: boolean; // a new file starts with this block
   virtual: boolean; // true for the local file player (fed via setFileBlock)
   meter: EnvelopeFollower; // tracks the channel's post-leveler/gain peak level
@@ -243,9 +246,15 @@ export class Graph {
 
   // "music only" mode: mutes the mic bus (set live from the meters page)
   private micsMuted = false;
+  // Havarie watch, per block: an open mic gate, the loudest capture music.
+  private micOpen = false;
+  private capMusicPeak = 0;
 
   // Local file player: a virtual music source fed one block at a time.
   private fileL: Float32Array;
+  // The file player's crossfade tail (the file fading out under the new one).
+  private fileTailL: Float32Array;
+  private fileTailR: Float32Array;
   private fileR: Float32Array;
   private filePlaying: string | null = null;
   private filePlayingAt: { folder: number; name: string } | null = null;
@@ -364,6 +373,8 @@ export class Graph {
     }
     this.fileL = new Float32Array(cfg.capture.blockSize);
     this.fileR = new Float32Array(cfg.capture.blockSize);
+    this.fileTailL = new Float32Array(cfg.capture.blockSize);
+    this.fileTailR = new Float32Array(cfg.capture.blockSize);
 
     // The programme ducks on confirmed talk, planned in room time and acted
     // on when that talk reaches the programme (the mic path's latency). The
@@ -435,6 +446,8 @@ export class Graph {
       leveler: processing.leveler.enabled ? new MusicLeveler(processing.leveler, sr, delayN) : null,
       itemStart: false,
       virtual,
+      tailDelayL: virtual ? line(delayN) : null,
+      tailDelayR: virtual ? line(delayN) : null,
       meter: new EnvelopeFollower(sr, 1, 200),
       muted: false,
       delayL: line(delayN),
@@ -478,6 +491,8 @@ export class Graph {
     const nMics = mics.length;
     let lastAutomixGains: Float32Array | null = null;
     let lastDuck = 0;
+    this.micOpen = false;
+    this.capMusicPeak = 0;
 
     for (let n = 0; n < frames; n++) {
       // --- mic strips, first half (room time): trim .. compressor ---
@@ -509,6 +524,7 @@ export class Graph {
         const off = m.muted || this.micsMuted;
         const target = off ? 0 : 1;
         m.muteGain = this.muteCoef * (m.muteGain - target) + target;
+        if (!off && m.strip.gateIsOpen) this.micOpen = true;
         const talker = !off && m.strip.gateIsOpen && m.actEnv.value >= need;
         if (m.voice.process(m.strip.input, talker)) m.strip.setNoiseFloor(m.voice.floorDb);
         m.active = talker && m.voice.voiced;
@@ -588,9 +604,14 @@ export class Graph {
       for (const mu of this.music) {
         const rawL = mu.virtual ? this.fileL[n] : input[mu.left][n];
         const rawR = mu.virtual ? this.fileR[n] : input[mu.right][n];
+        // The file fading out under the one that took over (crossfade).
+        let tl = mu.virtual ? this.fileTailL[n] * mu.gain : 0;
+        let tr = mu.virtual ? this.fileTailR[n] * mu.gain : 0;
         if (dryTaps && taps) {
-          taps[tapIdx][n] = mu.dryL ? mu.dryL.process(rawL) : rawL;
-          taps[tapIdx + 1][n] = mu.dryR ? mu.dryR.process(rawR) : rawR;
+          const dl0 = mu.virtual ? rawL + this.fileTailL[n] : rawL;
+          const dr0 = mu.virtual ? rawR + this.fileTailR[n] : rawR;
+          taps[tapIdx][n] = mu.dryL ? mu.dryL.process(dl0) : dl0;
+          taps[tapIdx + 1][n] = mu.dryR ? mu.dryR.process(dr0) : dr0;
         }
         let l = rawL * mu.gain;
         let r = rawR * mu.gain;
@@ -599,31 +620,45 @@ export class Graph {
         // now; the programme gets the look-ahead gain where the music leaves
         // its delay. Both before ducking, so speech still pulls music down.
         let rg = 1;
+        let trg = 1;
         if (mu.leveler) {
           if (mu.itemStart && n === 0) mu.leveler.newItem();
           mu.leveler.process(l, r);
           rg = mu.leveler.roomGain;
+          trg = mu.leveler.tailRoomGain;
         }
         // Track this channel's own output level (post-leveler/gain, pre-duck)
         // so the meters page shows a real "out dB" for music/file sources.
-        mu.meter.process(Math.max(Math.abs(l), Math.abs(r)) * rg);
+        mu.meter.process(Math.max(Math.abs(l * rg + tl * trg), Math.abs(r * rg + tr * trg)));
         // Per-channel mute: meter still tracks the source, but it contributes
         // nothing to the mix.
         if (mu.muted) {
           l = 0;
           r = 0;
+          tl = 0;
+          tr = 0;
+        }
+        if (!mu.virtual) {
+          const p = Math.max(Math.abs(l), Math.abs(r));
+          if (p > this.capMusicPeak) this.capMusicPeak = p;
         }
         if (mu.ducked) {
-          retTgtL += l * rg;
-          retTgtR += r * rg;
+          retTgtL += l * rg + tl * trg;
+          retTgtR += r * rg + tr * trg;
         } else {
-          retOthL += l * rg;
-          retOthR += r * rg;
+          retOthL += l * rg + tl * trg;
+          retOthR += r * rg + tr * trg;
         }
-        // Programme path: the same music, delayed to line up with the mics.
+        // Programme path: the same music, delayed to line up with the mics;
+        // the tail with its own item's gain.
         const pg = (mu.leveler ? mu.leveler.programmeGain : 1) * mg;
-        const dl = (mu.delayL ? mu.delayL.process(l) : l) * pg;
-        const dr = (mu.delayR ? mu.delayR.process(r) : r) * pg;
+        const tpg = (mu.leveler ? mu.leveler.tailProgrammeGain : 1) * mg;
+        let dl = (mu.delayL ? mu.delayL.process(l) : l) * pg;
+        let dr = (mu.delayR ? mu.delayR.process(r) : r) * pg;
+        if (mu.virtual) {
+          dl += (mu.tailDelayL ? mu.tailDelayL.process(tl) : tl) * tpg;
+          dr += (mu.tailDelayR ? mu.tailDelayR.process(tr) : tr) * tpg;
+        }
         mu.progL = dl;
         mu.progR = dr;
         if (mu.ducked) {
@@ -759,6 +794,12 @@ export class Graph {
     return this.micsMuted;
   }
 
+  /** Last block, for the havarie watch: was a mic gate open (mics not
+   *  muted), and the peak of the music channels from the mixer (linear). */
+  get blockSound(): { micOpen: boolean; musicPeak: number } {
+    return { micOpen: this.micOpen, musicPeak: this.capMusicPeak };
+  }
+
   /** Mute/unmute a single channel (mic or music) by its label. */
   setChannelMuted(label: string, muted: boolean): void {
     const mic = this.mics.find((m) => m.label === label);
@@ -864,6 +905,13 @@ export class Graph {
    *  scheduler is disabled or nothing is pending). */
   setNextScheduled(next: { name: string; playAtMs: number } | null): void {
     this.nextScheduled = next;
+  }
+
+  /** Feed one block of the file player's crossfade tail: the file fading out
+   *  under the playing one, which keeps its own item's leveler gain. */
+  setFileTail(l: Float32Array, r: Float32Array): void {
+    this.fileTailL.set(l);
+    this.fileTailR.set(r);
   }
 
   /** Feed one block of the local file player into the virtual music source,

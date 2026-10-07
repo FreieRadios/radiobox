@@ -388,27 +388,55 @@ hidden where the box does not report it, so a playout box shows none of it):
   After a recording stop the box keeps writing for the look-ahead (~6 s) and
   reports `recording: true` that long; the chip reads "Aufnahme endet …"
   meanwhile (`recEnding`), so it does not look like a stop that failed.
-- **Moderations-Vorrang** panel (`setPrio`, shown when `snapshot.priority` is
-  set): a 0…24 slider sent as `priorityDepth` (negative dB, throttled while
-  dragging); a mic held back by it reads **LEISER** (`priorityDb < -1`,
-  `--duck`). **Trim** column: the value opens a ±1/±3 dB stepper (`trim`).
-- **Musik-Lautstärke** panel (`setMusLvl`, on `snapshot.musicGainDb`; tech
-  and host): −12…+6 dB sent as `musicGain`, one gain on every music source
-  after its leveler and before the duck (`Graph.setMusicGain`, slewed over
-  50 ms). Programme only: the return keeps its own `returnGain`. Kept in the
-  state file; "Zurücksetzen" goes back to 0 dB.
-- **Einmessen** panel (`setSetup`) on `snapshot.setup`: step tiles with their
-  state as a word (ERLEDIGT / JETZT / OFFEN), who is up and the sentence to
-  read, then one card per mic (verdict, "vorher → nachher" per setting, the
-  gain advice with "Nur diesen Kanal neu messen") and Übernehmen / Verwerfen.
-  The buttons are fixed elements switched by phase and the tiles are updated
-  in place — nothing is rebuilt under a finger. Idle, the panel is one line
-  below the meters.
+- **Einstellungen** and **Einmessen** — the technician's own two screens,
+  `/einstellungen` (`public/einstellungen.html`, ⋮ → "⚙ Einstellungen") and
+  `/einmessen` (`public/einmessen.html`, ⋮ → "🎤 Einmessen"), with tabs
+  between them and "← Zum Pult"; both live mode only (`.liveonly` in the
+  menu). A host token gets the desk page there, guest/spectator their views.
+  What is set once per session rather than played during it, so nothing on
+  air can be pressed by mistake while the room reads its sentences.
+  `/einmessen`:
+  - **Einmessen** on `snapshot.setup`: step tiles with their state as a word
+    (ERLEDIGT / JETZT / OFFEN), who is up and the sentence to read, then one
+    card per mic (verdict, "vorher → nachher" per setting, the gain advice
+    with "Nur diesen Kanal neu messen") and Übernehmen / Verwerfen. The
+    buttons are fixed elements switched by phase and the tiles are updated
+    in place — nothing is rebuilt under a finger.
+  - **Mikrofone jetzt**: per mic the live level, the target zone and the
+    current speech level on one −60…0 dB bar, with a ±1 dB trim.
+
+  `/einstellungen` (three sliders, same drag rules: throttled while
+  dragging, the final value on release, stale echoes ignored for 1.5 s):
+  - **Moderations-Vorrang** (shown when `snapshot.priority` is set): a 0…24
+    slider sent as `priorityDepth` (negative dB, throttled while dragging);
+    0 = "aus", the session preset's default (only for a guest who talks
+    over everybody). A mic held back by it reads **LEISER** on the desk
+    (`priorityDb < -1`, `--duck`).
+  - **Musik-Lautstärke** (on `snapshot.musicGainDb`): −12…+6 dB sent as
+    `musicGain`, one gain on every music source after its leveler and
+    before the duck (`Graph.setMusicGain`, slewed over 50 ms). Programme
+    only: the return keeps its own `returnGain`. "Zurücksetzen" → 0 dB.
+  - **Musik im Kopfhörer** (on `snapshot.returnGainDb`, absent without a
+    return): −40…+6 dB sent as `returnGain`, the music return's level only.
+  All of it is kept in the state file. On the desk only a header chip
+  remains while a run is on or a result waits (a link to the page), and for
+  the host the one line on who is up. **Trim** column on the desk: the value
+  opens a ±1/±3 dB stepper (`trim`). Tested in `page-queue.test.ts`
+  (`boot(…, 'einstellungen' | 'einmessen')` runs that page's script with
+  `meter.js`).
 - **Bett** button in the footer (`snapshot.bed`, command `bed`; it follows the
   snapshot, no optimistic flip), and in the bed's own folder a 🛏 per file
-  (`bedSelect`). **einzeln | laufend** in the queue head (`queueMode`).
-- ⋮ menu (technician): local output, Musik-Rückweg with its level slider
-  ("Musik im Kopfhörer", `returnGain`), Testton, Sendung beenden,
+  (`bedSelect`). While the bed is on by itself (`bed.havarie`) the button
+  reads "⚠ Havarie — Bett läuft" in red; a click ends it. **einzeln |
+  laufend** in the queue head (`queueMode`).
+- ⋮ menu (technician), as rows in groups — **Ausgänge** (local output,
+  Ausgang ans Pult, Studio-Stream, Musik-Rückweg), **Sendung**, then the
+  ways to other screens; a switch says its state in words plus a dot on the
+  right (filled = on; `::before` is the hold fill), and a group whose
+  switches the box doesn't have is hidden with its heading when the menu
+  opens (`menuGroups`). Sendung: Testton, **Havarie-Bett** an/aus
+  (`havarie`; only where `bed.havarie` is configured, `bed.havarieArmed`
+  is `null` otherwise), Sendung beenden; then Geplante Sendungen,
   **Geräte verbinden** — the role links as QR codes (`/connect`, technician
   token only, 403 otherwise; SVGs rendered on the box with `qrcode`): one per
   role plus a guest link per mic (`&mic=<label>`, so the guest view opens with
@@ -562,6 +590,15 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   an entry is cued 3 s ahead (`FilePlayer.cue`: decodes ahead, starts on the
   sample that carries the timestamp), so a file stamped 13:00:00 _airs_ at
   13:00:00. `nextScheduled`/`/scheduled` times are therefore on-air times.
+- **Crossfade** (`filePlayer.fadeOutMs`, default 800): a file that takes over
+  from another — a cue on its second, ▶ while one plays, a bed switch —
+  doesn't cut it: the old one goes on as the player's _tail_, fading out
+  under the new one, which starts as it would have. In live mode the tail
+  reaches the graph separately (`FilePlayer.read(…, tailL, tailR)`,
+  `Graph.setFileTail`) and keeps the gain its item had
+  (`MusicLeveler.tailProgrammeGain` / `tailRoomGain`), so neither item's
+  level moves the other's. A track ending by itself in "durchlaufen" mode
+  still doesn't overlap the next.
 - **"Sendung beenden"** (`endShow`; `false` cancels): closes the mics in room
   time, lets the buffer (and a file still playing) air, then stops the
   recording; `air.state` goes `draining` → `ended`. The output keeps running;
@@ -602,6 +639,26 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
 - **Bed deck** (`filePlayer.bed`, `src/audio/bed.ts`): a second, looping
   `FilePlayer` summed into the file-player source (leveled and ducked with
   it); `bed` on/off with fades, `bedSelect {folder,name}`, snapshot `bed`.
+  **Havarie** (`bed.havarie`, off unless set; `afterSeconds` 10, `belowDb`
+  -50): `BedDeck.watch(sound, armed, ms)` is told per block whether anything
+  but the bed made a sound — live: an open, unmuted mic gate or a music
+  channel from the desk (`Graph.blockSound`) or the file player incl. its
+  crossfade tail above `belowDb`, measured before the bed is mixed in;
+  playout: the player's block. After `afterSeconds` of silence the bed fades
+  in by itself and `bed.havarie` is true; 250 ms of continuous sound (not a
+  click) fades it out again. Live mode is armed only while the recording runs
+  and the show is `live` (not draining/ended) — "Sendung beenden" ends a
+  havarie; playout mode is always armed, so with it on, the gaps between
+  scheduled files get the bed. Switching the bed by hand or the stream
+  fallback (`set`) turns a havarie into an ordinary bed. The technician's
+  switch (`havarie` command, `setHavarieWatch`) is kept in the state file;
+  `bedSelect`/`set` are untouched. Tests: `bed.test.ts` ("havarie").
+  Switched off and on, it resumes where it was (per file, in memory: the
+  position when the fade-out ends, wrapped into the file); choosing a file,
+  an unknown length or a dead decoder start it from the top. A mid-file
+  start plays the rest once (`-ss`, no `-stream_loop`: combined, ffmpeg cuts
+  into the second pass too), then the endless loop from the top takes over
+  when that decoder ends (`FilePlayer.play(…, {loop, startSec})`).
 - **Queue mode** `queueMode` `single`/`chain` ("einzeln / durchlaufen"); live
   mode starts in `single` (one track, then the talk), playout mode keeps
   chaining. **Test tone** `testTone`: 1 kHz at −18 dBFS on the local output

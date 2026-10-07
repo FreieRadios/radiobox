@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>studiobox – Einmessen</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101214'/%3E%3Ccircle cx='32' cy='40' r='7' fill='%237cc8ff'/%3E%3Cpath d='M19 30a18 18 0 0 1 26 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M10 21a31 31 0 0 1 44 0' stroke='%237cc8ff' stroke-width='5' fill='none' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<style>
+ /* Einmessen (technician only): each mic's live level against its target
+    zone with its trim, and the setup assistant. None of the desk's playout
+    is here, so nothing on air can be pressed by mistake while the room reads
+    its sentences. The other technician screen is /einstellungen. */
+ body{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
+ .top{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;
+  padding:max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));
+  background:var(--surface);border-bottom:1px solid var(--line)}
+ .top h1{font-size:1.375rem}
+ .top .chip{padding:4px 10px;border-radius:12px;font-size:.875rem;font-weight:700;letter-spacing:.04em;background:var(--raised);color:var(--muted)}
+ .top .chip.run{background:var(--info);color:var(--on-info)}
+ .top .chip.done{color:var(--ok)}
+ /* The two technician screens, as tabs: where you are is filled. */
+ .tabs{display:flex;gap:4px;padding:4px;border-radius:10px;background:var(--raised)}
+ .tabs a{display:inline-flex;align-items:center;min-height:40px;padding:0 14px;border-radius:8px;
+  color:var(--text);font-weight:600;text-decoration:none}
+ .tabs a[aria-current="page"]{background:var(--surface);box-shadow:inset 0 0 0 2px var(--accent)}
+ .back{margin-left:auto;display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:8px;
+  background:var(--raised);color:var(--text);font-weight:600;text-decoration:none}
+ main{flex:1 1 auto;display:flex;flex-direction:column;gap:16px;width:100%;max-width:1100px;margin:0 auto;
+  padding:16px max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+ .conn{align-self:flex-start}
+ .panel{display:flex;flex-direction:column;gap:12px;padding:16px;border-radius:12px;background:var(--surface)}
+ .panel h2{font-size:1.125rem}
+ .hint{color:var(--muted);font-size:.9375rem}
+ button{min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--border);background:var(--raised);
+  color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+ button:active{background:var(--pressed)}
+ button.go{border:2px solid var(--ok);font-weight:700}
+ /* ---- live mics: one row each, level against the zone, trim beside it --- */
+ .mics{display:flex;flex-direction:column;gap:8px}
+ .mic{display:grid;grid-template-columns:minmax(7em,10em) minmax(0,1fr) auto;align-items:center;gap:8px 16px;
+  padding:10px 12px;border-radius:8px;background:var(--raised)}
+ .mic .who b{display:block;font-size:1rem;overflow-wrap:anywhere}
+ .mic .who span{font-size:.8125rem;color:var(--muted)}
+ .lv{display:flex;flex-direction:column;gap:4px;min-width:0}
+ .lv .meter{height:18px}
+ /* The target band of the speech level, drawn on the same −60…0 dB scale. */
+ .lv .band{position:absolute;top:0;bottom:0;border-left:2px solid var(--text);border-right:2px solid var(--text)}
+ .lv .sp{position:absolute;top:-2px;bottom:-2px;width:4px;margin-left:-2px;border-radius:2px;background:var(--text);display:none}
+ .lv .words{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;font-size:.875rem;color:var(--muted)}
+ .lv .z{font-weight:700}
+ .z-low .z{color:var(--warn)}
+ .z-ok .z{color:var(--ok)}
+ .z-high .z{color:var(--onair)}
+ .trim{display:flex;align-items:center;gap:6px}
+ .trim button{min-width:44px;padding:0 8px}
+ .trim output{min-width:5.5ch;text-align:center;font-weight:700}
+ @media (max-width:640px){
+  .mic{grid-template-columns:1fr auto}
+  .mic .lv{grid-column:1 / -1;grid-row:2}
+ }
+ /* ---- the assistant (as it was on the desk page) ------------------------ */
+ .suhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+ .steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+ .steps li{display:flex;flex-direction:column;gap:2px;min-width:0;padding:8px 12px;border-radius:8px;background:var(--raised)}
+ .steps .sn{font-size:.8125rem;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+ .steps b{font-size:.9375rem;overflow-wrap:anywhere}
+ .steps .sd{font-size:.8125rem;color:var(--muted)}
+ .steps li.done .sn{color:var(--ok)}
+ .steps li.now{box-shadow:inset 0 0 0 2px var(--accent)}
+ .steps li.now .sn{color:var(--accent)}
+ .sunow{font-size:1.25rem;font-weight:600}
+ .susent{margin:0;padding:16px 20px;border-radius:8px;background:var(--raised);font-size:1.5rem;line-height:1.4}
+ .subtns{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px}
+ .sures{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+ .sures li{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:8px;background:var(--raised)}
+ .srh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+ .srh b{font-size:.9375rem}
+ .sures .was{font-size:.8125rem;color:var(--muted)}
+ .verd{margin-left:auto;font-size:.8125rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+ .verd.ok{color:var(--ok)}
+ .verd.warn{color:var(--warn)}
+ .verd.bad{color:var(--onair)}
+ .sset{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;font-size:.875rem}
+ .sset div{display:flex;gap:6px;white-space:nowrap}
+ .sset dt{color:var(--muted)}
+ .sset dd{margin:0}
+ .sures .adv{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:6px;border-top:1px solid var(--line)}
+ .sures .adv span{flex:1 1 220px;min-width:0}
+ .sures .adv button{background:var(--pressed)}
+ .help ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;color:var(--muted)}
+ .help b{color:var(--text)}
+ @media (prefers-contrast:more){
+  .panel,.mic,.steps li,.sures li{border:1px solid var(--text)}
+ }
+</style>
+</head>
+<body class="wait">
+<header class="top">
+ <h1>Einmessen</h1>
+ <span id="chip" class="chip" title="Einmessen">–</span>
+ <nav class="tabs" aria-label="Technik-Seiten"><a id="tabSet" href="/einstellungen">⚙ Einstellungen</a><a id="tabMes" href="/einmessen" aria-current="page">🎤 Einmessen</a></nav>
+ <a id="back" class="back" href="/tech">← Zum Pult</a>
+</header>
+<main>
+ <div id="conn" class="conn" role="status">Verbinde …</div>
+ <div id="say" class="sr" role="status"></div>
+ <p id="denied" class="panel" hidden>Diese Seite ist nur für die Technik. Öffne sie über ⋮ → Einmessen auf der Technik-Seite.</p>
+
+ <section class="panel stale" id="micBox" aria-labelledby="micTitle" hidden>
+  <div class="suhead"><h2 id="micTitle">Mikrofone jetzt</h2>
+   <span class="hint">Balken: Pegel · Rahmen: Zielbereich der Sprache · Strich: Sprachpegel</span></div>
+  <div class="mics" id="mics"></div>
+  <p class="hint">Liegt ein Mikro dauerhaft daneben, zuerst den Gain am Mischpult stellen, dann hier
+  den Trim; das Einmessen stellt Trim, Filter und Regelung für alle auf einmal ein.</p>
+ </section>
+
+ <section class="panel stale" id="setupBox" aria-labelledby="suTitle" hidden>
+  <div class="suhead"><h2 id="suTitle">Einmessen</h2><span class="hint" id="suInfo"></span></div>
+  <p class="hint" id="suIntro" hidden>Misst alle Mikrofone in etwa einer Minute: erst 5 Sekunden Stille, dann liest
+  jede Person kurz einen Satz vor. Am Programm ändert sich nichts, bis du „Übernehmen“ drückst.</p>
+  <ol class="steps" id="suSteps" hidden></ol>
+  <div id="suNow" class="sunow" hidden></div>
+  <blockquote id="suSent" class="susent" hidden></blockquote>
+  <ul class="sures" id="suRows" hidden></ul>
+  <div class="subtns">
+   <button id="suCancel" hidden>Abbrechen</button>
+   <button id="suFinish" hidden>Fertig – auswerten</button>
+   <button id="suDiscard" hidden>Verwerfen</button>
+   <button id="suApply" class="go" hidden>Übernehmen</button>
+   <button id="suStart" class="go">Einmessen starten</button>
+  </div>
+ </section>
+
+ <section class="panel help" aria-labelledby="hTitle">
+  <h2 id="hTitle">Einmessen — so geht's</h2>
+  <ul>
+   <li><b>Einmessen starten:</b> erst 5 Sekunden Stille, dann liest jede Person den angezeigten Satz vor.
+   Die Reihenfolge ist egal — wer spricht, wird erkannt; die Gast-Ansichten zeigen, wer dran ist.</li>
+   <li>Das Ergebnis zeigt pro Mikro ein Urteil und jede Einstellung als <b>vorher → nachher</b>.
+   Erst <b>Übernehmen</b> stellt die Kanäle ein; <b>Verwerfen</b> lässt alles, wie es war.</li>
+   <li>Was studiobox nicht selbst stellen kann — den Gain am Mischpult — steht als Anweisung dabei.
+   Danach <b>Nur diesen Kanal neu messen</b>.</li>
+   <li>Das Ergebnis übersteht einen Neustart des Geräts.</li>
+  </ul>
+ </section>
+</main>
+<script src="meter.js"></script>
+<script>
+(function(){
+ 'use strict';
+ var $=function(id){return document.getElementById(id);};
+ var put=function(el,t){if(el.textContent!==t)el.textContent=t;};
+ var esc=function(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+ var fmt=SB.fmt,pct=SB.pct;
+ var sgn=function(v,d){return (v>=0.05?'+':'')+fmt(v,d);};
+ var calm=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches),drawnAt=0;
+ $('back').href='/tech'+location.search;
+ $('tabSet').href='/einstellungen'+location.search;
+ $('tabMes').href='/einmessen'+location.search;
+
+ var ws=null,role=null;
+ function send(cmd){if(ws&&ws.readyState===1)ws.send(JSON.stringify(cmd));}
+
+ // One polite live region, at most one message every 2 s (the newest wins).
+ var sayAt=0,sayNext=null,sayTimer=0;
+ function announce(t){var now=Date.now();
+  if(now-sayAt>=2000){sayAt=now;$('say').textContent=t;return;}
+  sayNext=t;
+  if(!sayTimer)sayTimer=setTimeout(function(){sayTimer=0;sayAt=Date.now();$('say').textContent=sayNext;},2000-(now-sayAt));}
+
+ // ---- live mics: rows built once per set of mics, updated in place --------
+ var rows=[],rowKey=null;
+ var ZW={low:'zu leise',ok:'passt',high:'zu laut'};
+ function buildMics(mics){
+  rowKey=mics.map(function(c){return c.label;}).join('|');
+  var box=$('mics');box.innerHTML='';
+  rows=mics.map(function(c){
+   var el=document.createElement('div');el.className='mic';
+   el.innerHTML='<div class="who"><b></b><span>Trim</span></div>'+
+    '<div class="lv"><div class="meter" role="meter" aria-valuemin="-60" aria-valuemax="0"><div class="fill"></div><div class="cover"></div>'+
+    '<div class="band"></div><div class="sp"></div></div>'+
+    '<div class="words"><span class="z">—</span><span class="n"></span></div></div>'+
+    '<div class="trim"><button data-d="-1" aria-label="Trim 1 dB leiser">−1</button><output></output>'+
+    '<button data-d="1" aria-label="Trim 1 dB lauter">+1</button></div>';
+   var q=function(s){return el.querySelector(s);};
+   q('.who b').textContent=c.label;
+   q('.meter').setAttribute('aria-label','Pegel '+c.label);
+   var r={label:c.label,lv:q('.lv'),meter:q('.meter'),cover:q('.cover'),band:q('.band'),sp:q('.sp'),
+    z:q('.z'),n:q('.n'),out:q('output'),trim:0,zk:null};
+   Array.prototype.forEach.call(el.querySelectorAll('.trim button'),function(b){
+    b.onclick=function(){send({type:'trim',value:{label:c.label,trimDb:r.trim+Number(b.dataset.d)}});};});
+   box.appendChild(el);
+   return r;});
+ }
+ function updateMic(r,c){
+  r.cover.style.width=(100-pct(c.outDb))+'%';
+  r.meter.setAttribute('aria-valuenow',String(Math.round(isFinite(c.outDb)?c.outDb:-60)));
+  if(typeof c.zoneCenterDb==='number'){
+   var lo=pct(c.zoneCenterDb-c.zoneWidthDb),hi=pct(c.zoneCenterDb+c.zoneWidthDb);
+   r.band.style.left=lo+'%';r.band.style.width=Math.max(0,hi-lo)+'%';}
+  var sp=typeof c.speechDb==='number';
+  r.sp.style.display=sp?'block':'none';
+  if(sp)r.sp.style.left=pct(c.speechDb)+'%';
+  var zk=sp&&c.zone?c.zone:'none';
+  if(zk!==r.zk){r.zk=zk;r.lv.className='lv z-'+zk;
+   put(r.z,zk==='none'?'keine Sprache':ZW[zk]);
+   if(zk!=='none')announce(r.label+': '+ZW[zk]);}
+  put(r.n,sp?'Sprache '+fmt(c.speechDb)+' dB · Ziel '+fmt(c.zoneCenterDb,0)+' ± '+fmt(c.zoneWidthDb,0)+' dB':'');
+  r.trim=typeof c.trimDb==='number'?c.trimDb:0;
+  put(r.out,sgn(r.trim)+' dB');
+ }
+
+ // ---- the assistant -------------------------------------------------------
+ // The box listens and measures; the page only shows where it is. The buttons
+ // are fixed elements switched by phase, and the step tiles are built once per
+ // run and updated in place — rebuilding them per frame would pull a button
+ // away from under a finger.
+ var su={box:$('setupBox'),info:$('suInfo'),intro:$('suIntro'),steps:$('suSteps'),now:$('suNow'),sent:$('suSent'),
+  rows:$('suRows'),start:$('suStart'),cancel:$('suCancel'),finish:$('suFinish'),
+  apply:$('suApply'),discard:$('suDiscard'),chip:$('chip')};
+ var suKey=null,suTileKey='',suTiles=[];
+ var show=function(el,on){el.hidden=!on;};
+ var pctTxt=function(p){return Math.round(Math.max(0,Math.min(1,p))*100)+' %';};
+ function suTile(name){var li=document.createElement('li'),sn=document.createElement('span'),
+  b=document.createElement('b'),sd=document.createElement('span');
+  sn.className='sn';sd.className='sd';b.textContent=name;
+  li.appendChild(sn);li.appendChild(b);li.appendChild(sd);su.steps.appendChild(li);
+  return {li:li,sn:sn,sd:sd,state:''};}
+ // A tile's state is a word (ERLEDIGT / JETZT / OFFEN), not only its frame.
+ function suSet(i,state,detail){var t=suTiles[i];if(!t)return;
+  if(t.state!==state){t.state=state;t.li.className=state;
+   t.sn.textContent=(i+1)+' · '+(state==='done'?'ERLEDIGT':state==='now'?'JETZT':'OFFEN');}
+  put(t.sd,detail);}
+ var VERD={'gut':'ok','zu leise':'warn','rauscht':'warn','übersteuert':'bad','kein Signal':'bad'};
+ // One setting as "vorher → nachher". Only a change gets the arrow.
+ function suCell(name,a,b,unit,f,d){
+  var was=f(a,d),now=b===null||b===undefined?was:f(b,d);
+  return '<div><dt>'+name+'</dt><dd>'+(was===now?was+' '+unit:'<span class="was">'+was+' →</span> <b>'+now+' '+unit+'</b>')+'</dd></div>';}
+ // One card per mic. What studiobox cannot set itself — the analog gain — is
+ // a concrete instruction, with the way to check it again right beside it.
+ function suResult(st){
+  su.rows.innerHTML='';
+  st.results.forEach(function(r){var a=r.after||{},b=r.before,notes=r.notes||[];
+   var li=document.createElement('li');
+   li.innerHTML='<div class="srh"><b>'+esc(r.label)+'</b><span class="was">Kanal '+r.channel+' · '+
+    (r.speechDb===null?'keine Sprache':'Sprache '+fmt(r.speechDb)+' dB'+(r.snrDb===null?'':' · Abstand '+fmt(r.snrDb,0)+' dB'))+'</span>'+
+    '<span class="verd '+(VERD[r.verdict]||'warn')+'">'+esc(r.verdict)+'</span></div>'+
+    '<dl class="sset">'+suCell('Trim',b.trimDb,a.trimDb,'dB',sgn)+suCell('Hochpass',b.hpfHz,a.hpfHz,'Hz',fmt,0)+
+    suCell('Gate',b.gateThresholdDb,a.gateThresholdDb,'dB',fmt)+suCell('Comp',b.compThresholdDb,a.compThresholdDb,'dB',fmt)+
+    suCell('De-Esser',b.deessThresholdDb,a.deessThresholdDb,'dB',fmt)+suCell('Leveler-Start',b.seedDb,a.seedDb,'dB',sgn)+'</dl>';
+   if(r.advice||notes.length){
+    var adv=document.createElement('div'),btn=document.createElement('button');
+    adv.className='adv';
+    adv.innerHTML='<span>'+(r.advice?'<b>'+esc(r.advice)+'</b> ':'')+esc(notes.join(' '))+'</span>';
+    btn.textContent='Nur diesen Kanal neu messen';
+    btn.onclick=function(){send({type:'setupStart',value:{only:[r.label]}});};
+    adv.appendChild(btn);li.appendChild(adv);}
+   su.rows.appendChild(li);});
+ }
+ function setSetup(s){
+  var st=s.setup;
+  show(su.box,!!st);
+  if(!st){put(su.chip,'nicht verfügbar');su.chip.className='chip';return;}
+  var sil=st.phase==='silence',running=sil||st.phase==='speakers',result=st.phase==='result'&&!!st.results;
+  var key=st.phase+'|'+st.mics.map(function(m){return m.label;}).join('|')+'|'+
+   (result?st.results.map(function(r){return r.label+':'+r.verdict+':'+(r.after?r.after.trimDb:'');}).join('|'):'');
+  if(key!==suKey){suKey=key;
+   show(su.start,!running&&!result);
+   show(su.steps,running);show(su.now,running);show(su.cancel,running);show(su.finish,st.phase==='speakers');
+   show(su.rows,result);show(su.apply,result);show(su.discard,result);
+   if(result)suResult(st);
+   announce(running?'Einmessen läuft':result?'Ergebnis da — noch nicht übernommen':'');
+  }
+  var chip=running?'LÄUFT':result?'ERGEBNIS WARTET':s.setupApplied?'EINGEMESSEN ✓':'NOCH NICHT EINGEMESSEN';
+  put(su.chip,chip);
+  su.chip.className='chip'+(running||result?' run':s.setupApplied?' done':'');
+  // The tiles belong to a run, not to a phase: they stay put from the silence
+  // through the last speaker.
+  var tk=running?st.mics.map(function(m){return m.label;}).join('|'):'';
+  if(tk!==suTileKey||(running&&!suTiles.length)){suTileKey=tk;
+   su.steps.innerHTML='';
+   suTiles=running?['Stille'].concat(st.mics.map(function(m){return m.label;}),['Ergebnis']).map(suTile):[];}
+  put(su.info,running?'läuft …':result
+   ?'Ergebnis — noch nicht übernommen'+(st.automixFloorDb===null?'':' · Automix-Boden '+fmt(st.automixFloorDb,0)+' dB')
+   :s.setupApplied?'Eingemessen ✓':'Noch nicht eingemessen');
+  // What it does is only worth a paragraph until it has been done once.
+  show(su.intro,!running&&!result&&!s.setupApplied);
+  show(su.sent,running&&!sil&&!!st.current);
+  if(!running)return;
+  suSet(0,sil?'now':'done',sil?'Raumgeräusch · '+pctTxt(st.silence):'gemessen');
+  st.mics.forEach(function(m,i){suSet(i+1,m.done?'done':!sil&&m.label===st.current?'now':'open','Kanal '+m.channel+' · '+pctTxt(m.progress));});
+  suSet(st.mics.length+1,'open','vorher / nachher');
+  // The order does not matter — whoever talks is recognised; "Jetzt" is just
+  // who is asked next.
+  put(su.now,sil?'Jetzt: Stille — bitte 5 Sekunden nicht sprechen.'
+   :st.current?'Jetzt: '+st.current+' — bitte diesen Satz vorlesen:':'Auswertung …');
+  put(su.sent,st.sentence||'');
+ }
+ su.start.onclick=function(){send({type:'setupStart'});};
+ su.cancel.onclick=function(){send({type:'setupCancel'});};
+ su.finish.onclick=function(){send({type:'setupFinish'});};
+ su.apply.onclick=function(){send({type:'setupApply'});};
+ su.discard.onclick=function(){send({type:'setupDiscard'});};
+
+
+ function onSnapshot(s){
+  if(role!=='tech')return;
+  var mics=(s.channels||[]).filter(function(c){return c.role==='mic';});
+  show($('micBox'),mics.length>0);
+  if(mics.map(function(c){return c.label;}).join('|')!==rowKey)buildMics(mics);
+  var now=Date.now();
+  if(!calm||now-drawnAt>=200){drawnAt=now;
+   mics.forEach(function(c,i){updateMic(rows[i],c);});}
+  setSetup(s);
+ }
+
+ // Same socket as every view: the token in the link decides the role, the
+ // server drops whatever this role may not send.
+ function connect(){
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/'+(location.search||''));
+  ws.onopen=function(){document.body.className='ok';};
+  ws.onmessage=function(e){var s=JSON.parse(e.data);
+   if(s.type==='hello'){role=s.role;$('denied').hidden=role==='tech';return;}
+   if(!s.type)onSnapshot(s);};
+  ws.onclose=function(){document.body.className='lost';
+   put($('conn'),'Verbindung weg – verbinde neu …');setTimeout(connect,1000);};
+ }
+ connect();
+})();
+</script>
+</body>
+</html>

@@ -31,7 +31,7 @@ const DEFAULT_PREBUFFER_MS = 250;
 // discontinuity (a click), independent of where the file's first sample sits.
 const FADE_IN_MS = 12;
 // Ramp applied to whatever is playing just before a cued file takes over, so
-// the cut onto the second doesn't click.
+// the cut onto the second doesn't click (only without a crossfade).
 const CUE_FADE_MS = 8;
 
 /** A file decoding ahead of its start time (see `FilePlayer.cue`). */
@@ -40,6 +40,17 @@ interface Cue {
   startAtMs: number;
   proc: ChildProcessWithoutNullStreams | null;
   chunks: Buffer[];
+}
+
+/** The file that was playing when another one took over: it plays on, fading
+ *  out under the new one (see `FilePlayer` crossfade). */
+interface Tail {
+  proc: ChildProcessWithoutNullStreams | null;
+  stream: StreamPlayer | null;
+  chunks: Buffer[];
+  buf: Buffer;
+  total: number; // ramp length (samples)
+  remaining: number; // samples left of the ramp
 }
 
 /**
@@ -58,6 +69,13 @@ interface Cue {
  * says 'streamLost' / 'streamBack' when its audio drops out and returns, and
  * 'streamEnd' when it is stopped.
  *
+ * With a **crossfade** (`crossfadeMs` > 0) a file that takes over — a cue on
+ * its second, or `play()` while something plays — doesn't cut the old one
+ * off: the old one plays on as the *tail*, fading out over the crossfade
+ * while the new one starts as it would have. `read()` returns the tail
+ * separately when asked (the graph keeps the old item's leveler gain on it),
+ * else mixed in.
+ *
  * Events: 'ended' (playback finished and buffer drained).
  */
 export class FilePlayer extends EventEmitter {
@@ -71,6 +89,11 @@ export class FilePlayer extends EventEmitter {
   private fadeRemaining = 0;
   // Playback position: real (non-padded) audio frames delivered via read().
   private playedFrames = 0;
+  // Where in the file playback started (s), for a resumed loop.
+  private startSec = 0;
+  // A loop that started mid-file: once the decoder of the rest of the file
+  // ends, the endless loop from the top takes over (see `play`).
+  private loopFile: string | null = null;
   // Total file duration in seconds, probed async via ffprobe; null until known
   // (or if ffprobe is unavailable / the probe fails).
   private durationSec: number | null = null;
@@ -89,11 +112,17 @@ export class FilePlayer extends EventEmitter {
   private streamLookup: ((file: string) => StreamSpec | null) | null = null;
   private streamOpts: StreamPlayerOptions = {};
   private stream: StreamPlayer | null = null;
+  // The file fading out under the one that took over, or null.
+  private tail: Tail | null = null;
+  private readonly xfadeSamples: number;
+  private tailL = new Float32Array(0);
+  private tailR = new Float32Array(0);
 
   constructor(
     private sampleRate: number,
     private log: Log,
-    prebufferMs: number = DEFAULT_PREBUFFER_MS
+    prebufferMs: number = DEFAULT_PREBUFFER_MS,
+    crossfadeMs = 0
   ) {
     super();
     const preMs =
@@ -102,6 +131,10 @@ export class FilePlayer extends EventEmitter {
     this.defaultFadeIn = Math.max(1, Math.ceil((sampleRate * FADE_IN_MS) / 1000));
     this.fadeInSamples = this.defaultFadeIn;
     this.cueFadeSamples = Math.max(1, Math.ceil((sampleRate * CUE_FADE_MS) / 1000));
+    this.xfadeSamples =
+      Number.isFinite(crossfadeMs) && crossfadeMs > 0
+        ? Math.ceil((sampleRate * crossfadeMs) / 1000)
+        : 0;
   }
 
   /** Let `play()` take stream tokens (see `FileDirs.resolve`). */
@@ -125,9 +158,11 @@ export class FilePlayer extends EventEmitter {
     return this.current;
   }
 
-  /** Elapsed playback position in seconds (real audio delivered so far). */
+  /** Elapsed playback position in seconds (real audio delivered so far),
+   *  counted from the start of the file (a resumed loop starts mid-file and
+   *  goes on counting past its end). */
   get position(): number {
-    return this.playedFrames / this.sampleRate;
+    return this.startSec + this.playedFrames / this.sampleRate;
   }
 
   /** Total duration in seconds, or null when not yet probed / unknown. */
@@ -143,12 +178,14 @@ export class FilePlayer extends EventEmitter {
   }
 
   /**
-   * Start playing `file` (absolute path), replacing any current playback.
-   * `loop` repeats it without a gap until stopped (an audio bed); `fadeInMs`
-   * replaces the short anti-click ramp with a real fade-in.
+   * Start playing `file` (absolute path), replacing any current playback
+   * (which fades out under it with a crossfade). `loop` repeats it without a
+   * gap until stopped (an audio bed); `fadeInMs` replaces the short
+   * anti-click ramp with a real fade-in; `startSec` starts that far into the
+   * file (a bed resuming where it was switched off).
    */
-  play(file: string, opts: { loop?: boolean; fadeInMs?: number } = {}): void {
-    this.stop();
+  play(file: string, opts: { loop?: boolean; fadeInMs?: number; startSec?: number } = {}): void {
+    this.handOff();
     this.fadeTotal = 0;
     this.fadeRemaining = 0;
     this.playedFrames = 0;
@@ -172,18 +209,29 @@ export class FilePlayer extends EventEmitter {
       return;
     }
     this.probeDuration(file);
-    this.proc = this.spawnDecoder(file, !!opts.loop);
+    const at = Number.isFinite(opts.startSec) && opts.startSec! > 0 ? opts.startSec! : 0;
+    this.startSec = at;
+    if (opts.loop && at > 0) {
+      // ffmpeg's -ss with -stream_loop skips into the second pass as well, so
+      // the rest of the file plays once, then the loop from the top follows
+      // (spawned when this decoder ends; the jitter buffer covers the seam).
+      this.loopFile = file;
+      this.proc = this.spawnDecoder(file, false, at);
+    } else {
+      this.proc = this.spawnDecoder(file, !!opts.loop, at);
+    }
   }
 
   /** Spawn the ffmpeg decode of `file`. Its output lands in the playing queue
    *  or in the cue, whichever the process belongs to when the data arrives. */
-  private spawnDecoder(file: string, loop = false): ChildProcessWithoutNullStreams {
+  private spawnDecoder(file: string, loop = false, startSec = 0): ChildProcessWithoutNullStreams {
     const args = [
       '-hide_banner',
       '-loglevel',
       'error',
       // Loop the input endlessly (decoder-side, so there is no gap at the seam).
       ...(loop ? ['-stream_loop', '-1'] : []),
+      ...(startSec > 0 ? ['-ss', startSec.toFixed(3)] : []),
       // Decode in real time (pace input to native rate) so ffmpeg trickles the
       // audio out one block at a time instead of dumping the whole file at
       // once. The burst would flood the event loop at playback start and starve
@@ -206,6 +254,7 @@ export class FilePlayer extends EventEmitter {
     proc.stdout.on('data', (chunk: Buffer) => {
       if (this.proc === proc) this.queue.push(chunk);
       else if (this.pending?.proc === proc) this.pending.chunks.push(chunk);
+      else if (this.tail?.proc === proc) this.tail.chunks.push(chunk);
     });
     proc.stderr.on('data', (d: Buffer) => {
       const s = d.toString().trim();
@@ -213,9 +262,16 @@ export class FilePlayer extends EventEmitter {
     });
     proc.on('error', (err) => this.log.error('file player spawn error:', err.message));
     proc.on('close', () => {
-      // Decode finished; remaining audio still drains via read().
-      if (this.proc === proc) this.proc = null;
-      else if (this.pending?.proc === proc) this.pending.proc = null;
+      // Decode finished; remaining audio still drains via read(). A resumed
+      // loop goes on from the top of the file.
+      if (this.proc === proc) {
+        this.proc = null;
+        if (this.loopFile === file && this.current === file) {
+          this.loopFile = null;
+          this.proc = this.spawnDecoder(file, true);
+        }
+      } else if (this.pending?.proc === proc) this.pending.proc = null;
+      else if (this.tail?.proc === proc) this.tail.proc = null;
     });
     return proc;
   }
@@ -223,8 +279,8 @@ export class FilePlayer extends EventEmitter {
   /**
    * Cue `file` to start at `startAtMs` on the clock `read()` is called with.
    * Decoding starts now, so the audio is ready; playback switches over inside
-   * the block that carries the start time, cutting off whatever is playing
-   * then (no 'ended' for it — same as `play()`). A later `cue()` replaces an
+   * the block that carries the start time; whatever is playing then fades out
+   * under it (crossfade) or is cut off (no 'ended' for it — same as `play()`). A later `cue()` replaces an
    * earlier one; `play()` and `stop()` leave a cue alone, so an operator
    * click before the second can't cancel a scheduled item.
    */
@@ -242,11 +298,92 @@ export class FilePlayer extends EventEmitter {
     c?.proc?.kill('SIGKILL');
   }
 
+  /** Move what is playing to the tail, where it fades out under the file that
+   *  takes over; without a crossfade (or with nothing audible yet) just stop. */
+  private handOff(): void {
+    this.dropTail();
+    const audible =
+      this.current !== null &&
+      !this.buffering &&
+      (this.proc !== null ||
+        this.stream !== null ||
+        this.queue.length > 0 ||
+        this.leftover.length >= FRAME_BYTES);
+    if (this.xfadeSamples > 0 && audible) {
+      // An operator fade in progress goes on from where it is.
+      const g = this.fadeTotal > 0 ? this.fadeRemaining / this.fadeTotal : 1;
+      const st = this.stream;
+      if (st) {
+        st.removeAllListeners('lost');
+        st.removeAllListeners('back');
+      }
+      this.tail = {
+        proc: this.proc,
+        stream: st,
+        chunks: this.queue,
+        buf: this.leftover,
+        total: this.xfadeSamples,
+        remaining: Math.round(this.xfadeSamples * g),
+      };
+      this.proc = null;
+      this.stream = null;
+      this.queue = [];
+      this.leftover = Buffer.alloc(0);
+      if (st) this.emit('streamEnd');
+    }
+    this.stop();
+  }
+
+  /** Stop the tail at once. */
+  private dropTail(): void {
+    const t = this.tail;
+    this.tail = null;
+    t?.proc?.kill('SIGKILL');
+    t?.stream?.stop();
+  }
+
+  /** Fill `outL`/`outR` with the tail's next samples, faded (silence when
+   *  there is no tail). The tail ends with its ramp. */
+  private readTail(outL: Float32Array, outR: Float32Array, frames: number): void {
+    const t = this.tail;
+    if (!t) {
+      outL.fill(0, 0, frames);
+      outR.fill(0, 0, frames);
+      return;
+    }
+    if (t.stream) {
+      t.stream.read(outL, outR, frames);
+    } else {
+      if (t.chunks.length) {
+        t.buf = Buffer.concat([t.buf, ...t.chunks]);
+        t.chunks = [];
+      }
+      const have = Math.min(frames, Math.floor(t.buf.length / FRAME_BYTES));
+      for (let n = 0; n < frames; n++) {
+        outL[n] = n < have ? t.buf.readFloatLE(n * FRAME_BYTES) : 0;
+        outR[n] = n < have ? t.buf.readFloatLE(n * FRAME_BYTES + BYTES_PER_SAMPLE) : 0;
+      }
+      t.buf = t.buf.subarray(have * FRAME_BYTES);
+    }
+    for (let n = 0; n < frames; n++) {
+      const g = t.remaining > 0 ? t.remaining / t.total : 0;
+      outL[n] *= g;
+      outR[n] *= g;
+      if (t.remaining > 0) t.remaining--;
+    }
+    if (t.remaining <= 0) this.dropTail();
+  }
+
+  /** Whether a file is fading out under the playing one. */
+  get fadingOut(): boolean {
+    return this.tail !== null;
+  }
+
   /** Make the cued file the playing one (its decoder keeps running). */
   private adoptCue(): void {
     const c = this.pending!;
     this.pending = null;
-    this.stop();
+    this.handOff();
     this.fadeInSamples = this.defaultFadeIn;
     this.current = c.file;
     this.proc = c.proc;
@@ -266,30 +403,79 @@ export class FilePlayer extends EventEmitter {
    * `blockTimeMs` is the time of the block's first sample on the caller's
    * clock (the on-air time in live mode); a cued file starts on the sample
    * that carries its start time. Defaults to the wall clock.
+   *
+   * With `tailL`/`tailR` the file fading out under the playing one (the
+   * crossfade tail) goes there, the old file's samples before a cue's start
+   * included, so `outL`/`outR` hold only the playing item; without them the
+   * tail is mixed into `outL`/`outR`.
    */
-  read(outL: Float32Array, outR: Float32Array, frames: number, blockTimeMs?: number): void {
+  read(
+    outL: Float32Array,
+    outR: Float32Array,
+    frames: number,
+    blockTimeMs?: number,
+    tailL?: Float32Array,
+    tailR?: Float32Array
+  ): void {
+    const split = !!tailL && !!tailR;
+    if (!split && this.tailL.length < frames) {
+      this.tailL = new Float32Array(frames);
+      this.tailR = new Float32Array(frames);
+    }
+    const tl = split ? tailL : this.tailL;
+    const tr = split ? tailR! : this.tailR;
+    this.readBlock(outL, outR, tl, tr, frames, blockTimeMs);
+    if (!split) {
+      for (let i = 0; i < frames; i++) {
+        outL[i] += tl[i];
+        outR[i] += tr[i];
+      }
+    }
+  }
+
+  private readBlock(
+    outL: Float32Array,
+    outR: Float32Array,
+    tl: Float32Array,
+    tr: Float32Array,
+    frames: number,
+    blockTimeMs?: number
+  ): void {
     if (this.pending) {
       const t = blockTimeMs ?? Date.now();
       const at = Math.round(((this.pending.startAtMs - t) * this.sampleRate) / 1000);
       if (at < frames) {
         // The start falls into this block (or is already past): the old
-        // playback gets the samples before it, faded out, the cue the rest.
+        // playback gets the samples before it, the cue the rest; with a
+        // crossfade the old one goes on in the tail, else it is cut.
         const k = Math.max(0, at);
         if (k > 0) {
+          this.readTail(tl.subarray(0, k), tr.subarray(0, k), k);
           this.readCurrent(outL.subarray(0, k), outR.subarray(0, k), k);
-          const fade = Math.min(k, this.cueFadeSamples);
-          for (let i = 0; i < fade; i++) {
-            const g = (fade - 1 - i) / fade;
-            outL[k - fade + i] *= g;
-            outR[k - fade + i] *= g;
+          if (this.xfadeSamples > 0) {
+            for (let i = 0; i < k; i++) {
+              tl[i] += outL[i];
+              tr[i] += outR[i];
+              outL[i] = 0;
+              outR[i] = 0;
+            }
+          } else {
+            const fade = Math.min(k, this.cueFadeSamples);
+            for (let i = 0; i < fade; i++) {
+              const g = (fade - 1 - i) / fade;
+              outL[k - fade + i] *= g;
+              outR[k - fade + i] *= g;
+            }
           }
         }
         this.adoptCue();
         this.readCurrent(outL.subarray(k), outR.subarray(k), frames - k);
+        this.readTail(tl.subarray(k), tr.subarray(k), frames - k);
         return;
       }
     }
     this.readCurrent(outL, outR, frames);
+    this.readTail(tl, tr, frames);
   }
 
   private readCurrent(outL: Float32Array, outR: Float32Array, frames: number): void {
@@ -422,6 +608,8 @@ export class FilePlayer extends EventEmitter {
     this.queue = [];
     this.leftover = Buffer.alloc(0);
     this.current = null;
+    this.loopFile = null;
+    this.startSec = 0;
     this.fadeTotal = 0;
     this.fadeRemaining = 0;
     this.playedFrames = 0;
@@ -430,9 +618,11 @@ export class FilePlayer extends EventEmitter {
     this.fadeInRemaining = 0;
   }
 
-  /** Stop everything, including a cued file (service shutdown). */
+  /** Stop everything, including a cued file and a fading tail (service
+   *  shutdown). */
   shutdown(): void {
     this.cancelCue();
+    this.dropTail();
     this.stop();
   }
 
