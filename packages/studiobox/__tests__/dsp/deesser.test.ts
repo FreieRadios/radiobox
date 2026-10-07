@@ -45,4 +45,14 @@ describe('Deesser', () => {
     const outRms = toneRms((x) => de.process(x), 9000, 0.8);
     expect(outRms).toBeLessThan(inRms * 0.9);
   });
+
+  it('is flat at the split frequency while it does not compress', () => {
+    // Regression: a low-pass + high-pass pair summed to a -40 dB notch here.
+    for (const freq of [CUTOFF / 2, CUTOFF, CUTOFF * 1.1, CUTOFF * 1.5]) {
+      const de = new Deesser(params({ thresholdDb: 0 }), SR);
+      const inRms = 0.01 / Math.SQRT2;
+      const outRms = toneRms((x) => de.process(x), freq, 0.01);
+      expect(20 * Math.log10(outRms / inRms)).toBeCloseTo(0, 1);
+    }
+  });
 });
