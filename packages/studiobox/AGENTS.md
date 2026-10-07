@@ -70,6 +70,15 @@ Live meters: `http://localhost:4445`.
 - **Live settings never go into the YAML.** What the setup assistant measured
   and what was trimmed by hand lives in `session-state.json` next to the config
   (`src/setup/state.ts`; git-ignored, restored at start, ignored after 12 h).
+- **`hasScheduled` arms every box that reads the folder.** It is scanned
+  *recursively* (`FileDirs.scheduled()`), so putting it on a shared sync root
+  arms every timestamped file anywhere beneath it — and when two boxes sync the
+  same share (the desk box and a playout Pi both pulling the station's
+  Nextcloud audio folder), both fire the same file at the same second. Point
+  `hasScheduled` at the one subfolder a box is responsible for and give it its
+  own `dirs` entry; the share itself stays browsable with `hasScheduled: false`.
+  Seen on z-studiobox 2026-10-07: `hasScheduled` on the whole rclone target
+  made the Pi play the show folder's intro alongside the studio box.
 
 ## Hardware / runtime (the non-inferable bits)
 

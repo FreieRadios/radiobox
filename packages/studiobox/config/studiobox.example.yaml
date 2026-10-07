@@ -237,7 +237,11 @@ filePlayer:
   # dropdown, or a bare path string (the folder's basename becomes the label).
   # hasScheduled marks a dir (recursively) scanned for timestamped auto-play
   # files; leave it off for e.g. music libraries so stray filenames can never
-  # preempt the program.
+  # preempt the program. Because the scan recurses, never set it on a whole
+  # synced share that several boxes read: every box would fire the same
+  # timestamped file at the same second. Give the one subfolder this box is
+  # responsible for its own entry with hasScheduled, and leave the share
+  # itself browsable with hasScheduled off.
   # Subfolders with no audio anywhere beneath them are hidden by default so the
   # browser only shows useful folders; set `hideEmpty: false` on a dir to list
   # every subfolder unconditionally (e.g. if the probe is too costly on a share).
