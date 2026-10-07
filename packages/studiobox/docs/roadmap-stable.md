@@ -678,6 +678,8 @@ Items:
      PCM over the WebSocket into Web Audio (well under a second).
      _Done when:_ on an iPad in the tech role with Bluetooth headphones,
      Aufnahme and Roh switch without a gap at the same moment of the show,
+     (2026-10-06: also on playout boxes, "Auf Sendung" only, and as
+     Reinhören for a playing stream — asked for for the Pi at the desk.)
      a guest or spectator token gets 403 on the listen URLs, and an idle box
      runs no listen encoder.
 
@@ -772,7 +774,44 @@ Items:
     click-free in room time; a mute/unmute of all mics leaves the flag as it
     was; the config loader accepts and validates `internal`.
 
-14. **Definition of stable**: three real sessions in a row without a restart;
+14. **Talkback from the phone ("Sprechen")**: for a technician who has no
+    mic on the Flow 8, e.g. behind the studio window (asked for 2026-10-07).
+    A hold-to-talk button in the technician view sends the phone's mic to
+    the headphones only, so the technician can say "closer to the mic"
+    without being recorded, broadcast or interrupting anything.
+
+    - **Path.** The browser takes the mic (`getUserMedia`, an AudioWorklet,
+      48 kHz mono) and sends PCM frames as binary messages over the existing
+      WebSocket. The server keeps a small jitter buffer and mixes it into
+      the **music return** (Flow 8 USB playback 1/2, room time) after the
+      return's `gainDb`, with its own `return.talkbackGainDb`. It never
+      enters `graph.ts`, the programme, the recorders or the stream. The
+      music in the return dips while the button is held.
+    - **Safety.** Only the `tech` role may send (`src/meters/roles.ts`). The
+      voice is cut on release, on a closed socket and when no frame
+      arrives for 300 ms. One talker at a time; an underrun plays silence.
+      If the return is off or its device fails, the button says so.
+    - **HTTPS.** Phones only grant the mic in a secure context, so this
+      needs item 6 (or a self-signed HTTPS port, accepted once on the
+      phone). Until then the button is hidden on plain HTTP.
+    - **Bleed.** The headphones leak into the mics (the condensers most),
+      so a faint copy of the talkback lands on the dry multitrack and, with
+      an open gate, on air. Say it in the UI hint: talk during music or
+      pauses, keep it short. Measure the level of the bleed in a rehearsal.
+    - **Latency.** About 0.2–0.3 s over the Wi-Fi is fine for talkback;
+      keep the jitter buffer small rather than smooth.
+    - _No-code fallback:_ a "mic to Bluetooth speaker" app into the Flow 8's
+      Bluetooth input (channel 7/8), sent to the headphones only and kept
+      off main L/R. Check on the desk whether the headphone hub follows
+      main or a monitor bus first.
+
+    _Done when:_ in a pipeline test talkback frames reach the return's
+    output and are absent from the programme, the stereo and multitrack
+    recordings and `/stream`; frames from a non-`tech` token are dropped;
+    the voice stops within 300 ms of the last frame; on a phone over HTTPS
+    in the tech role, holding the button is heard on the Flow 8 headphones.
+
+15. **Definition of stable**: three real sessions in a row without a restart;
     a 4-hour soak without underrun; all four views pass the design checklist;
     tests green; a README that describes the product as it is.
 
