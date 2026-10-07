@@ -59,6 +59,7 @@ sudo systemctl restart studiobox
 | `journal`   | persistent journal, at most 1 GB                                                                                                                                              |
 | `wifi`      | the Wi-Fi card becomes the access point `AP_SSID` at every boot; other Wi-Fi profiles stop joining by themselves                                                              |
 | `lan`       | a second Ethernet port hands out addresses to a playout box on a cable                                                                                                        |
+| `mdns`      | `<host>.local` resolves to the real network ports only, not to Docker's bridges (`MDNS_IFACES`, default: every port with hardware behind it)                                  |
 | `desktop`   | only with a desktop: PipeWire leaves the studio cards alone                                                                                                                   |
 | `nextcloud` | only with `NEXTCLOUD_ENABLED=yes`: asks for address, user and app password, then keeps `NEXTCLOUD_PATH` in sync with `NEXTCLOUD_DIR` every 5 minutes (`nextcloud-sync.timer`) |
 | `card`      | `STATE_DIR/station-card.html`: QR codes for the WLAN, the technician and the host view — print it                                                                             |
@@ -132,6 +133,12 @@ sudo station/install.sh --env pi.env relay
 reconnects by itself and replaces `studiobox.service` on that box (both want
 the card). Back to playout:
 `sudo systemctl disable --now stream-relay && sudo systemctl enable --now studiobox`.
+
+Before a show, `station/bin/stream-test.sh` on the station checks this path:
+`status` (format, listeners, the desk path), `beep [seconds]` drops a
+timestamped beep into the scheduled folder to hear at the desk next to a
+reference clock, `latency <ms>` sets `output.serve.latencyMs` from that and
+restarts, `flac` / `mp3` switch the stream format, `cleanup` removes the beeps.
 
 The two machines' clocks differ slightly; the Icecast burst (~1.6 s at
 320 kbit/s) covers that for many hours. Over a long day an occasional

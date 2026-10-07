@@ -5,13 +5,13 @@
 #   sudo station/install.sh --env … wifi service        # single steps
 #
 # Steps (all = in this order): packages node repo build icecast config service
-# power usb journal wifi lan desktop nextcloud card. Not in `all`: relay (the
+# power usb journal wifi lan mdns desktop nextcloud card. Not in `all`: relay (the
 # receiving box at the desk).
 # Every step can be run again; it converges instead of piling up.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ALL_STEPS=(packages node repo build icecast config service power usb journal wifi lan desktop nextcloud card)
+ALL_STEPS=(packages node repo build icecast config service power usb journal wifi lan mdns desktop nextcloud card)
 
 say() { printf '\033[1;32m[station]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[station]\033[0m %s\n' "$*" >&2; }
@@ -91,7 +91,7 @@ step_packages() {
   say "packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq ffmpeg alsa-utils git curl ca-certificates network-manager dnsmasq-base iw rfkill
+  apt-get install -y -qq ffmpeg alsa-utils git curl ca-certificates network-manager dnsmasq-base iw rfkill avahi-daemon
   timedatectl set-timezone "$TIMEZONE" || true
   timedatectl set-ntp true || true
 }
@@ -345,8 +345,39 @@ step_lan() {
   nmcli con up studiobox-lan >/dev/null 2>&1 && say "lan: up" || say "lan: waits for a cable"
 }
 
+# <host>.local answers only on the real network ports. Without this avahi also
+# publishes on Docker's bridges, and the name can point at 172.x.
+step_mdns() {
+  local conf=/etc/avahi/avahi-daemon.conf ifcs="${MDNS_IFACES:-}" n
+  [ -f "$conf" ] || die "mdns: no $conf (run the packages step)"
+  if [ -z "$ifcs" ]; then
+    for n in /sys/class/net/*; do
+      [ -e "$n/device" ] || continue # lo, bridges, veth: no hardware behind them
+      ifcs="${ifcs:+$ifcs,}$(basename "$n")"
+    done
+  fi
+  [ -n "$ifcs" ] || die "mdns: no network port found (set MDNS_IFACES)"
+  say "mdns: $(hostname).local on $ifcs"
+  sed -i -E '/^\[server\]/,/^\[/{/^#?allow-interfaces=/d}' "$conf"
+  sed -i -E "/^\[server\]/a allow-interfaces=$ifcs" "$conf"
+  systemctl enable avahi-daemon >/dev/null 2>&1 || true
+  systemctl restart avahi-daemon
+}
+
 # A desktop session's PipeWire must not hold the studio cards.
 step_desktop() {
+  # KDE's crash dialog aborts without a display, and its own crash is handed
+  # to it again: on a box nobody logs in to graphically, an endless loop.
+  if [ -f /usr/lib/systemd/user/drkonqi-coredump-launcher@.service ]; then
+    say "desktop: DrKonqi only with a display (no crash loop when headless)"
+    install -d /etc/systemd/user/drkonqi-coredump-launcher@.service.d
+    cat >/etc/systemd/user/drkonqi-coredump-launcher@.service.d/50-studiobox-headless.conf <<'EOF'
+# studiobox station: start the crash dialog only in a graphical session.
+[Unit]
+ConditionEnvironment=|DISPLAY
+ConditionEnvironment=|WAYLAND_DISPLAY
+EOF
+  fi
   command -v wireplumber >/dev/null || {
     say "desktop: no WirePlumber, nothing to do"
     return
