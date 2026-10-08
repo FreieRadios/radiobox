@@ -46,6 +46,20 @@ describe('filePlayer dirs resolution', () => {
     ]);
   });
 
+  it('marks a folder musicFree only when asked', () => {
+    const { configPath, profilesPath } = writeConfig(
+      [
+        'filePlayer:',
+        '  enabled: true',
+        '  dirs:',
+        '    - { path: "./jingles", label: Jingles, musicFree: true }',
+        '    - { path: "./music", label: Music, musicFree: "yes" }',
+      ].join('\n')
+    );
+    const cfg = loadConfig({ configPath, profilesPath });
+    expect(cfg.filePlayer?.dirs.map((d) => d.musicFree)).toEqual([true, undefined]);
+  });
+
   it('accepts bare path strings and defaults the label to the basename', () => {
     const { configPath, profilesPath } = writeConfig(
       ['filePlayer:', '  enabled: true', '  dirs:', '    - "/srv/audio/beds/"'].join('\n')

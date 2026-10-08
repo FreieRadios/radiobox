@@ -23,6 +23,8 @@ export interface SessionState {
   queueMode?: 'single' | 'chain';
   /** The havarie watch, as the technician last switched it. */
   havarie?: boolean;
+  /** Mics whose trim is the technician's (Auto-Pegel off for them). */
+  manualTrim?: string[];
 }
 
 /** State older than this is last week's guests: start from the config. */
@@ -76,6 +78,7 @@ export function loadState(
   if (Number.isFinite(r.musicGainDb)) out.musicGainDb = Number(r.musicGainDb);
   if (r.queueMode === 'single' || r.queueMode === 'chain') out.queueMode = r.queueMode;
   if (typeof r.havarie === 'boolean') out.havarie = r.havarie;
+  if (Array.isArray(r.manualTrim)) out.manualTrim = r.manualTrim.map(String);
   return out;
 }
 

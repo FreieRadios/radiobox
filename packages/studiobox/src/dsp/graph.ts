@@ -11,6 +11,8 @@ import { DelayLine } from './delay-line';
 import { dbToGain, gainToDb, msToCoef } from './dsp-math';
 import { EnvelopeFollower } from './envelope';
 import { DuckPlanner, FRAME_MS, VoiceDetector } from './voice';
+import { ArrivalHop, ArrivalTalker, SPEECH_SNR_DB } from './arrival';
+import { AutoTrim } from './auto-trim';
 import type { StreamStatus } from '../audio/stream-player';
 
 export interface ChannelMeter extends StripMeters {
@@ -27,6 +29,9 @@ export interface ChannelMeter extends StripMeters {
   priorityDb: number;
   /** Mics: the input trim in force (dB). */
   trimDb: number;
+  /** Mics: Auto-Pegel sets this mic's trim (false: the technician's hand
+   *  trim). Null where Auto-Pegel is not configured, and for music. */
+  autoTrim?: boolean | null;
 }
 
 /** Air-delay state, filled in by the pipeline (the graph has no clock). */
@@ -144,6 +149,11 @@ interface MusicNode {
   // Programme path of the file player's crossfade tail (virtual source only).
   tailDelayL: DelayLine | null;
   tailDelayR: DelayLine | null;
+  // Whether the playing file / its crossfade tail come from a `musicFree`
+  // folder, delayed with the audio (virtual source with a talk stem only).
+  freeTrack: boolean;
+  freeDelay: DelayLine | null;
+  tailFreeDelay: DelayLine | null;
   itemStart: boolean; // a new file starts with this block
   virtual: boolean; // true for the local file player (fed via setFileBlock)
   meter: EnvelopeFollower; // tracks the channel's post-leveler/gain peak level
@@ -171,6 +181,11 @@ export interface GraphAux {
   /** One per mic: the raw input, sample-aligned with outL/outR (listening,
    *  "Roh"). Only written when the graph was built with `dryTaps`. */
   dry?: Float32Array[];
+  /** The talk without the music, sample-aligned with outL/outR: the mic bus
+   *  and files from `musicFree` folders, through the master and their own
+   *  limiter. Only written when the graph was built with `talkStem`. */
+  talkL?: Float32Array;
+  talkR?: Float32Array;
 }
 
 export interface GraphOptions {
@@ -182,6 +197,8 @@ export interface GraphOptions {
   /** Keep a dry tap per mic, aligned with the programme, whether or not the
    *  multitrack is on (listening on the tablet compares the two). */
   dryTaps?: boolean;
+  /** Produce the talk stem (`GraphAux.talkL/R`) for the music-free export. */
+  talkStem?: boolean;
 }
 
 /** A mic counts as the talker only within this many dB of the loudest mic … */
@@ -196,6 +213,10 @@ const PRIORITY_ACTIVE_DB = -0.5;
 const MUSIC_GAIN_MIN_DB = -12;
 const MUSIC_GAIN_MAX_DB = 6;
 const MUSIC_GAIN_SLEW_MS = 50;
+/** Music in the room above this peak (linear; -45 dBFS) holds Auto-Pegel … */
+const ROOM_MUSIC_PEAK = 0.0056;
+/** … and for this long after it (s): the room still rings. */
+const ROOM_MUSIC_HOLD_SEC = 1;
 
 /**
  * The full studiobox processing graph. Stateful; one instance per run.
@@ -279,6 +300,21 @@ export class Graph {
 
   private snapshot: MeterSnapshot;
 
+  // Auto-Pegel: arrival-time talker detection and one trim controller per mic.
+  private arrival: ArrivalTalker | null = null;
+  private autoTrims: AutoTrim[] | null = null;
+  private arrivalIn: Float32Array[] = [];
+  private trimChanges = 0;
+  // Music playing in the room (the return mix, before its gain): its peak in
+  // the last block, and how long Auto-Pegel still holds still after it.
+  private roomMusicPeak = 0;
+  private musicHoldSec = 0;
+
+  // Talk stem (music-free export): own limiter; file flags set per block.
+  private talkLimiter: Limiter | null = null;
+  private fileFree = false;
+  private fileTailFree = false;
+
   /** Samples the mic path runs behind the room before the limiter. */
   private readonly mixLatency: number;
   /** Samples the programme output runs behind the room (mic path). */
@@ -355,6 +391,12 @@ export class Graph {
       this.automix = new Automix(members.length, sr, cfg.automix.responseMs, cfg.automix.floorDb);
     }
     this.automixBuf = new Float32Array(members.length);
+    const at = cfg.autoTrim;
+    if (at?.enabled && this.mics.length > 0) {
+      this.arrival = new ArrivalTalker(this.mics.length, sr, { maxLagMs: at.maxLagMs });
+      this.autoTrims = this.mics.map((m) => new AutoTrim(at, m.processing.trimDb ?? 0));
+      this.arrivalIn = this.mics.map(() => new Float32Array(0));
+    }
     this.micOut = new Float32Array(this.mics.length);
 
     if (priOn) {
@@ -365,6 +407,14 @@ export class Graph {
       }
     }
 
+    if (opts.talkStem) {
+      this.talkLimiter = new Limiter(
+        sr,
+        cfg.master.truePeakDb,
+        cfg.master.limiterLookaheadMs,
+        cfg.master.limiterReleaseMs
+      );
+    }
     if (cfg.filePlayer?.enabled) {
       const fp = cfg.filePlayer;
       this.music.push(
@@ -448,6 +498,9 @@ export class Graph {
       virtual,
       tailDelayL: virtual ? line(delayN) : null,
       tailDelayR: virtual ? line(delayN) : null,
+      freeTrack: virtual && !!this.talkLimiter,
+      freeDelay: virtual && this.talkLimiter ? line(delayN) : null,
+      tailFreeDelay: virtual && this.talkLimiter ? line(delayN) : null,
       meter: new EnvelopeFollower(sr, 1, 200),
       muted: false,
       delayL: line(delayN),
@@ -493,6 +546,20 @@ export class Graph {
     let lastDuck = 0;
     this.micOpen = false;
     this.capMusicPeak = 0;
+    const talkStem = this.talkLimiter && aux.talkL && aux.talkR ? this.talkLimiter : null;
+    const talkOut: [number, number] = [0, 0];
+
+    // Auto-Pegel: who talks (arrival time) and the trims that follow from it.
+    if (this.arrival) {
+      // Music from the room's speakers reaches one mic first, too: no
+      // learning while music plays (and a moment after), nor while muted.
+      const blockSec = frames / this.cfg.capture.sampleRate;
+      if (this.roomMusicPeak > ROOM_MUSIC_PEAK) this.musicHoldSec = ROOM_MUSIC_HOLD_SEC;
+      else this.musicHoldSec = Math.max(0, this.musicHoldSec - blockSec);
+      for (let i = 0; i < nMics; i++) this.arrivalIn[i] = input[mics[i].source];
+      this.arrival.push(this.arrivalIn, frames, this.onArrivalHop);
+    }
+    this.roomMusicPeak = 0;
 
     for (let n = 0; n < frames; n++) {
       // --- mic strips, first half (room time): trim .. compressor ---
@@ -594,7 +661,11 @@ export class Graph {
         tgtL = 0,
         tgtR = 0,
         othL = 0,
-        othR = 0;
+        othR = 0,
+        freeTgtL = 0,
+        freeTgtR = 0,
+        freeOthL = 0,
+        freeOthR = 0;
       let tapIdx = nMics;
       // Music on air: one gain for every music source, after its leveler and
       // before the duck (the room's return keeps its own level).
@@ -655,9 +726,29 @@ export class Graph {
         const tpg = (mu.leveler ? mu.leveler.tailProgrammeGain : 1) * mg;
         let dl = (mu.delayL ? mu.delayL.process(l) : l) * pg;
         let dr = (mu.delayR ? mu.delayR.process(r) : r) * pg;
+        let fl = 0;
+        let fr = 0;
         if (mu.virtual) {
-          dl += (mu.tailDelayL ? mu.tailDelayL.process(tl) : tl) * tpg;
-          dr += (mu.tailDelayR ? mu.tailDelayR.process(tr) : tr) * tpg;
+          const xl = (mu.tailDelayL ? mu.tailDelayL.process(tl) : tl) * tpg;
+          const xr = (mu.tailDelayR ? mu.tailDelayR.process(tr) : tr) * tpg;
+          if (mu.freeTrack) {
+            // The talk stem keeps files from musicFree folders (own jingles).
+            const f0 = this.fileFree ? 1 : 0;
+            const t0 = this.fileTailFree ? 1 : 0;
+            const fm = mu.freeDelay ? mu.freeDelay.process(f0) : f0;
+            const ft = mu.tailFreeDelay ? mu.tailFreeDelay.process(t0) : t0;
+            fl = dl * fm + xl * ft;
+            fr = dr * fm + xr * ft;
+          }
+          dl += xl;
+          dr += xr;
+        }
+        if (mu.ducked) {
+          freeTgtL += fl;
+          freeTgtR += fr;
+        } else {
+          freeOthL += fl;
+          freeOthR += fr;
         }
         mu.progL = dl;
         mu.progR = dr;
@@ -670,6 +761,9 @@ export class Graph {
         }
         tapIdx += 2;
       }
+
+      const rm = Math.max(Math.abs(retTgtL + retOthL), Math.abs(retTgtR + retOthR));
+      if (rm > this.roomMusicPeak) this.roomMusicPeak = rm;
 
       // --- music return for the room: ducked like on air, but now ---
       if (aux.retL && aux.retR) {
@@ -711,6 +805,13 @@ export class Graph {
         taps[tapIdx][n] = stereoOut[0];
         taps[tapIdx + 1][n] = stereoOut[1];
       }
+      if (talkStem) {
+        const fL = (freeTgtL * duckGain + freeOthL) * bg;
+        const fR = (freeTgtR * duckGain + freeOthR) * bg;
+        talkStem.process(talkOut, micBus * tg + fL, micBus * tg + fR);
+        aux.talkL![n] = talkOut[0];
+        aux.talkR![n] = talkOut[1];
+      }
       this.outMeter.process(stereoOut[0], stereoOut[1]);
       this.outPeak.process(Math.max(Math.abs(stereoOut[0]), Math.abs(stereoOut[1])));
     }
@@ -733,6 +834,7 @@ export class Graph {
         active: m.active,
         priorityDb: m.prioritised ? this.priorityDb : 0,
         trimDb: m.processing.trimDb ?? 0,
+        autoTrim: this.autoTrims ? this.autoTrims[this.mics.indexOf(m)].on : null,
       });
     }
     for (const mu of this.music) {
@@ -827,16 +929,78 @@ export class Graph {
   }
 
   /** Retune a running mic strip (setup assistant, live trims). `seedDb`
-   *  restarts its leveler from that gain. Returns false for an unknown label. */
-  retune(label: string, processing: ChannelProcessing, seedDb?: number): boolean {
-    const mic = this.mics.find((m) => m.label === label);
-    if (!mic) return false;
+   *  restarts its leveler from that gain. With Auto-Pegel the new trim is its
+   *  starting point, trusted like `trimTrustSec` seconds of measured speech
+   *  (0: the next voice decides). Returns false for an unknown label. */
+  retune(label: string, processing: ChannelProcessing, seedDb?: number, trimTrustSec = 0): boolean {
+    const i = this.mics.findIndex((m) => m.label === label);
+    if (i < 0) return false;
+    const mic = this.mics[i];
     mic.processing = processing;
     mic.strip.retune(processing, seedDb);
+    this.autoTrims?.[i].seed(processing.trimDb ?? 0, trimTrustSec);
     // Visible at once, not only with the next audio block.
     const ch = this.snapshot.channels.find((c) => c.role === 'mic' && c.label === label);
     if (ch) Object.assign(ch, mic.strip.meters(), { trimDb: processing.trimDb ?? 0 });
     return true;
+  }
+
+  /** One arrival hop: feed every mic's Auto-Pegel and apply what moved. */
+  private onArrivalHop = (h: ArrivalHop): void => {
+    const trims = this.autoTrims!;
+    const learn = this.musicHoldSec <= 0 && !this.micsMuted;
+    for (let i = 0; i < trims.length; i++) {
+      const t = trims[i];
+      const before = t.trimDb;
+      const talker =
+        learn &&
+        !this.mics[i].muted &&
+        h.talker === i &&
+        h.levelDb[i] - h.floorDb[i] >= SPEECH_SNR_DB;
+      const db = t.update(h.levelDb[i], talker, h.dtSec);
+      if (!t.on || db === before) continue;
+      const m = this.mics[i];
+      const shown = Math.round(db * 10) / 10;
+      if (shown !== m.processing.trimDb) {
+        m.processing = { ...m.processing, trimDb: shown };
+        this.trimChanges++;
+      }
+      m.strip.setTrim(db);
+    }
+  };
+
+  /** Whether Auto-Pegel is configured at all. */
+  get autoTrimEnabled(): boolean {
+    return this.autoTrims !== null;
+  }
+
+  /** Switch Auto-Pegel for one mic (a hand trim switches it off). Returns
+   *  false for an unknown label or without Auto-Pegel. */
+  setAutoTrim(label: string, on: boolean): boolean {
+    const i = this.mics.findIndex((m) => m.label === label);
+    if (i < 0 || !this.autoTrims) return false;
+    this.autoTrims[i].on = on;
+    const ch = this.snapshot.channels.find((c) => c.role === 'mic' && c.label === label);
+    if (ch) ch.autoTrim = on;
+    return true;
+  }
+
+  /** Auto-Pegel state of one mic: true/false, or null (unknown / not configured). */
+  autoTrimOn(label: string): boolean | null {
+    const i = this.mics.findIndex((m) => m.label === label);
+    return i < 0 || !this.autoTrims ? null : this.autoTrims[i].on;
+  }
+
+  /** Counts the trims Auto-Pegel has changed (the pipeline persists on change). */
+  get autoTrimChanges(): number {
+    return this.trimChanges;
+  }
+
+  /** Whether the playing file and its crossfade tail come from `musicFree`
+   *  folders (they then stay in the talk stem). Set per block. */
+  setFileMusicFree(main: boolean, tail: boolean): void {
+    this.fileFree = main;
+    this.fileTailFree = tail;
   }
 
   /** Change the automix noise floor live (setup assistant). */

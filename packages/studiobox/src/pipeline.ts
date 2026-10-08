@@ -5,6 +5,7 @@ import { OutputTarget, StudioboxConfig } from './config/schema';
 import { Capture } from './audio/capture';
 import { Encoder } from './audio/encoder';
 import { Recorder, stamp } from './audio/recorder';
+import { TalkLog, exportMusicFree, planKeep } from './audio/music-free';
 import { Monitor, outputLatencyMs } from './audio/monitor';
 import { FilePlayer } from './audio/file-player';
 import { FileDirs } from './audio/file-dirs';
@@ -41,6 +42,10 @@ const TONE_HZ = 1000;
 const TONE_AMP = Math.pow(10, -18 / 20);
 /** Extra wait after the computed end of a drain, so the last block is out. */
 const DRAIN_MARGIN_MS = 500;
+/** A setup-assistant trim counts for Auto-Pegel like this much measured speech (s). */
+const SETUP_TRUST_SEC = 6;
+/** How often Auto-Pegel's trims are written to the state file (ms). */
+const TRIM_SAVE_MS = 30_000;
 /** The music return skips blocks once this much audio is stuck behind it. */
 const RETURN_BACKLOG_SEC = 0.5;
 
@@ -90,6 +95,19 @@ export class Pipeline {
   private encoder: Encoder;
   private recorder: Recorder | null;
   private multitrack: Recorder | null = null;
+  /** The talk stem for the music-free export (`output.musicFree`). */
+  private talkRecorder: Recorder | null = null;
+  private talkLog: TalkLog | null = null;
+  private talkTags: Record<string, string> = {};
+  private talkL: Float32Array;
+  private talkR: Float32Array;
+  // The playing file and whether it (and the one fading out under it) may
+  // stay in the music-free export.
+  private lastPlaying: string | null = null;
+  private lastPlayingFree = false;
+  private tailFree = false;
+  private trimTimer: NodeJS.Timeout | null = null;
+  private savedTrimChanges = 0;
   private monitor: Monitor | null;
   private ret: Monitor | null;
   private graph: Graph;
@@ -180,7 +198,12 @@ export class Pipeline {
     const returnMs = this.ret
       ? outputLatencyMs(cfg.output.return, sr, 'push') + (cfg.capture.latencyMs ?? 20)
       : 0;
-    this.graph = new Graph(cfg, { musicDelayMs: returnMs, dryTaps: cfg.meters.enabled });
+    const musicFree = cfg.output.backup.enabled && !!cfg.output.musicFree?.enabled;
+    this.graph = new Graph(cfg, {
+      musicDelayMs: returnMs,
+      dryTaps: cfg.meters.enabled,
+      talkStem: musicFree,
+    });
     this.capture = new Capture(cfg.capture, makeLog('capture'));
     this.encoder = new Encoder(cfg.output, cfg.capture, makeLog('encoder'));
     this.recorder = cfg.output.backup.enabled
@@ -191,6 +214,11 @@ export class Pipeline {
       this.multitrack = new Recorder(cfg.output.backup, cfg.capture, makeLog('multitrack'), {
         channels: layout.length,
         suffix: '.multitrack',
+      });
+    }
+    if (this.recorder && musicFree) {
+      this.talkRecorder = new Recorder(cfg.output.backup, cfg.capture, makeLog('wort'), {
+        suffix: '.wort',
       });
     }
     this.monitor = cfg.output.monitor.enabled
@@ -325,11 +353,7 @@ export class Pipeline {
         ? new Scheduler(
             cfg.filePlayer.autoPlay,
             () => this.fileDirs?.scheduled() ?? [],
-            (e) => {
-              const resolved = this.resolveFile(e.folder, e.name);
-              if (resolved) this.filePlayer?.cue(resolved, e.playAtMs);
-              else log.warn(`scheduled file vanished before start: ${e.name}`);
-            },
+            (e) => this.onScheduledStart(e),
             log,
             { now: () => Date.now() + this.musicDelayMs(), leadMs: CUE_LEAD_MS }
           )
@@ -348,6 +372,8 @@ export class Pipeline {
     this.fileR = block();
     this.fileTailL = block();
     this.fileTailR = block();
+    this.talkL = block();
+    this.talkR = block();
     this.taps = (layout ?? []).map(block);
     this.dry = this.listen ? this.graph.micLabels.map(block) : [];
     this.silence = Buffer.alloc(frames * 2 * BYTES_PER_SAMPLE);
@@ -433,6 +459,7 @@ export class Pipeline {
     if (s.musicGainDb !== undefined) this.graph.setMusicGain(s.musicGainDb);
     if (s.queueMode && this.playQueue) this.playQueue.autoAdvance = s.queueMode === 'chain';
     if (s.havarie !== undefined) this.bed?.setHavarieWatch(s.havarie);
+    for (const label of s.manualTrim ?? []) this.graph.setAutoTrim(label, false);
     this.state = s;
     this.setupApplied = n > 0;
     log.info(
@@ -538,6 +565,20 @@ export class Pipeline {
     } else if (type === 'trim') {
       const req = isObj(value) ? value : {};
       this.setTrim(String(req.label ?? ''), Number(req.trimDb));
+    } else if (type === 'autoTrim') {
+      // {label?, on}: one mic, or every mic without a label.
+      const req = isObj(value) ? value : { on: value };
+      const labels = req.label ? [String(req.label)] : this.graph.micLabels;
+      const on = req.on !== false;
+      const manual = new Set(this.state.manualTrim ?? []);
+      for (const l of labels) {
+        if (!this.graph.setAutoTrim(l, on)) continue;
+        if (on) manual.delete(l);
+        else manual.add(l);
+      }
+      this.state.manualTrim = [...manual];
+      this.persist();
+      log.info(`Auto-Pegel ${on ? 'on' : 'off'}: ${labels.join(', ')}`);
     } else if (type.startsWith('setup')) {
       this.onSetupCommand(type, value);
     } else if (type === 'playFile' && this.filePlayer) {
@@ -591,7 +632,8 @@ export class Pipeline {
       let n = 0;
       for (const r of results) {
         if (!r.processing || !r.after) continue;
-        if (this.graph.retune(r.label, r.processing, r.after.seedDb)) {
+        // Measured over seconds of speech: Auto-Pegel takes it as that good.
+        if (this.graph.retune(r.label, r.processing, r.after.seedDb, SETUP_TRUST_SEC)) {
           this.state.mics[r.label] = r.after;
           n++;
         }
@@ -612,6 +654,11 @@ export class Pipeline {
     const cur = this.graph.getProcessing(label);
     if (!cur || !Number.isFinite(trimDb)) return;
     const next = { ...cur, trimDb: Math.max(-20, Math.min(40, trimDb)) };
+    // A hand trim is the technician's call: Auto-Pegel leaves this mic alone
+    // until it is switched back on.
+    if (this.graph.setAutoTrim(label, false)) {
+      this.state.manualTrim = [...new Set([...(this.state.manualTrim ?? []), label])];
+    }
     this.graph.retune(label, next);
     this.state.mics[label] = settingsOf(next, this.graph.levelerDb(label) ?? 0);
     this.persist();
@@ -645,6 +692,14 @@ export class Pipeline {
         tags: { ...tags, COMMENT: `${tags.COMMENT}; ${source} multitrack: ${layout.join(' | ')}` },
       });
       this.writeChannelMap(startMs, layout);
+    }
+    if (this.talkRecorder) {
+      this.talkTags = { ...tags, TITLE: `${tags.TITLE} (ohne Musik)` };
+      this.talkRecorder.start({
+        startMs,
+        tags: { ...tags, COMMENT: `${tags.COMMENT}; talk only` },
+      });
+      this.talkLog = new TalkLog(this.sr);
     }
     this.graph.setRecording(this.recorder.active);
     log.info(`recording started${this.multitrack ? ' (stereo + multitrack)' : ''}`);
@@ -697,8 +752,34 @@ export class Pipeline {
     this.recordStopAt = null;
     this.recorder?.stop();
     this.multitrack?.stop();
+    this.finishTalk();
     this.graph.setRecording(this.recorder ? false : null);
     log.info('recording stopped');
+  }
+
+  /** Close the talk stem and, once ffmpeg has finalized it, cut and encode
+   *  the music-free MP3 beside it. */
+  private finishTalk(): void {
+    const rec = this.talkRecorder;
+    const talkLog = this.talkLog;
+    this.talkLog = null;
+    if (!rec || !rec.active) return;
+    const file = rec.currentFile;
+    rec.stop();
+    const cfg = this.cfg.output.musicFree;
+    if (!file || !talkLog || !cfg) return;
+    const tags = this.talkTags;
+    rec.once('exit', () => {
+      const plan = planKeep(talkLog.talkDb, talkLog.progDb, cfg.minCutSec);
+      void exportMusicFree({
+        input: file,
+        output: file.replace(/\.wort\.flac$/, '.ohne-musik.mp3'),
+        plan,
+        cfg,
+        tags,
+        log: makeLog('ohne-musik'),
+      });
+    });
   }
 
   // ---------------------------------------------------------------- end of show
@@ -740,6 +821,41 @@ export class Pipeline {
       this.finishRecording();
     }
     log.info('end of show: buffer played out');
+  }
+
+  /** The scheduler cues a file. A scheduled file opens the show: the
+   *  recording is armed with it, so its start is never lost because nobody
+   *  pressed the button (2026-10-07: the first 2 minutes). */
+  private onScheduledStart(e: { folder: number; name: string; playAtMs: number }): void {
+    const resolved = this.resolveFile(e.folder, e.name);
+    if (!resolved) {
+      log.warn(`scheduled file vanished before start: ${e.name}`);
+      return;
+    }
+    this.filePlayer?.cue(resolved, e.playAtMs);
+    if (this.cfg.output.backup.autoArm && this.recorder && !this.recordingArmed) {
+      log.info(`recording armed by the schedule (${e.name})`);
+      this.startRecording();
+    }
+  }
+
+  /** Whether a playing file comes from a folder marked `musicFree`. */
+  private isMusicFree(file: string): boolean {
+    const at = this.fileDirs?.locate(file);
+    return !!at && !!this.cfg.filePlayer?.dirs[at.folder]?.musicFree;
+  }
+
+  /** Keep what Auto-Pegel found, so a restart mid-show comes back with it. */
+  private persistAutoTrims(): void {
+    const n = this.graph.autoTrimChanges;
+    if (n === this.savedTrimChanges) return;
+    this.savedTrimChanges = n;
+    for (const label of this.graph.micLabels) {
+      if (!this.graph.autoTrimOn(label)) continue;
+      const p = this.graph.getProcessing(label);
+      if (p) this.state.mics[label] = settingsOf(p, this.graph.levelerDb(label) ?? 0);
+    }
+    this.persist();
   }
 
   /** Resolve a requested filename to an absolute path inside the folder at
@@ -809,11 +925,27 @@ export class Pipeline {
     if (this.setup.active) this.setup.feed(input, frames);
     this.tickShow(now);
 
+    if (this.talkRecorder && this.filePlayer) {
+      // Which of the player's two voices may stay in the music-free export:
+      // the playing file, and the one fading out under it (the one before).
+      const playing = this.filePlayer.playing;
+      if (playing !== this.lastPlaying) {
+        const prevFree = this.lastPlayingFree;
+        this.lastPlaying = playing;
+        this.lastPlayingFree = playing ? this.isMusicFree(playing) : false;
+        this.tailFree = prevFree;
+      }
+      this.graph.setFileMusicFree(this.lastPlayingFree, this.tailFree);
+    }
+
+    const talk = this.talkRecorder?.active;
     this.graph.process(input, this.outL, this.outR, frames, {
       retL: this.retL,
       retR: this.retR,
       taps: this.taps,
       dry: this.listen ? this.dry : undefined,
+      talkL: talk ? this.talkL : undefined,
+      talkR: talk ? this.talkR : undefined,
     });
     if (this.bed) {
       // Havarie: anything but the bed counts as sound; only while the show
@@ -844,6 +976,10 @@ export class Pipeline {
     if (this.recorder?.active) {
       this.recorder.write(out);
       if (this.multitrack?.active) this.multitrack.write(interleave(this.taps, frames));
+      if (talk) {
+        this.talkRecorder!.write(interleaveStereo(this.talkL, this.talkR, frames));
+        this.talkLog?.push(this.outL, this.outR, this.talkL, this.talkR, frames);
+      }
       if (this.recordStopAt !== null && this.samples >= this.recordStopAt) this.finishRecording();
     }
 
@@ -995,6 +1131,7 @@ export class Pipeline {
         log.warn(`recorder exited (code ${code}); restarting in 1s`);
         // Keep stereo and multitrack in step: both start over together.
         this.multitrack?.stop();
+        this.finishTalk();
         setTimeout(() => {
           if (this.stopping || !this.recordingArmed) return;
           this.startRecording();
@@ -1059,6 +1196,10 @@ export class Pipeline {
     this.autoStartStream?.();
     this.startHealthProbe();
     this.listeners?.start();
+    if (this.graph.autoTrimEnabled) {
+      this.trimTimer = setInterval(() => this.persistAutoTrims(), TRIM_SAVE_MS);
+      this.trimTimer.unref?.();
+    }
 
     if (this.meters) {
       this.meters.start();
@@ -1095,6 +1236,7 @@ export class Pipeline {
     this.stopping = true;
     if (this.metersTimer) clearInterval(this.metersTimer);
     if (this.healthTimer) clearInterval(this.healthTimer);
+    if (this.trimTimer) clearInterval(this.trimTimer);
     this.loopDelay?.disable();
     this.scheduler?.stop();
     this.listeners?.stop();
@@ -1107,6 +1249,7 @@ export class Pipeline {
     this.encoder.stop();
     this.recorder?.stop();
     this.multitrack?.stop();
+    this.talkRecorder?.stop();
     this.monitor?.stop();
     this.ret?.stop();
     if (this.returnDropped) log.warn(`music return skipped ${this.returnDropped} block(s)`);

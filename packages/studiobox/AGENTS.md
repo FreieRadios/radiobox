@@ -65,8 +65,10 @@ Live meters: `http://localhost:4445`.
   `lookahead`, `airDelay`, `automix.priority`, `output.multitrack`,
   `output.return` (music return), `meters.roles`, `filePlayer.bed`,
   `stateFile`, `listeners` (listener feedback and the episode guide from eve,
-  both modes). `config/studiobox.flow8-session.example.yaml` is the preset for
-  a talk session (4 mics, MAYA22 out, return, multitrack, roles, bed).
+  both modes), `autoTrim` (Auto-Pegel), `output.backup.autoArm`,
+  `output.musicFree` and `filePlayer.dirs[].musicFree`.
+  `config/studiobox.flow8-session.example.yaml` is the preset for a talk
+  session (4 mics, MAYA22 out, return, multitrack, roles, bed).
 - **Live settings never go into the YAML.** What the setup assistant measured
   and what was trimmed by hand lives in `session-state.json` next to the config
   (`src/setup/state.ts`; git-ignored, restored at start, ignored after 12 h).
@@ -134,10 +136,12 @@ halves: `pre()` up to the compressor, `level()` = keyed leveler + gain),
 look-ahead), `music-leveler` (one gain per item, with look-ahead),
 `master-leveler` (talk-keyed), `automix` (Dugan gain-share by power),
 `priority` (host priority), `voice` (per-mic voice detector and the duck
-planner), `duck` (glide and arming of the duck), `limiter`, `loudness`
-(BS.1770), `envelope`, `delay-line`, `dsp-math`. Audio I/O in `src/audio/`
-(`capture`, `encoder`, `recorder`, `monitor`, `format`, `file-player`, `bed`,
-`play-queue`, `air-fifo`, `sample-clock`); the setup assistant in `src/setup/`
+planner), `arrival` (who talks, by arrival time: GCC-PHAT on a 16 kHz copy),
+`auto-trim` (Auto-Pegel, one controller per mic), `fft`, `duck` (glide and
+arming of the duck), `limiter`, `loudness` (BS.1770), `envelope`,
+`delay-line`, `dsp-math`. Audio I/O in `src/audio/` (`capture`, `encoder`,
+`recorder`, `monitor`, `format`, `file-player`, `bed`, `play-queue`,
+`air-fifo`, `sample-clock`, `music-free`); the setup assistant in `src/setup/`
 (`measure` = the arithmetic, `session` = the state machine, `state` = the
 persisted live settings); config in `src/config/`; web views in `src/meters/`
 (`server.ts`, `roles.ts`, `public/`); preflight in `src/doctor.ts`;
@@ -535,6 +539,56 @@ the monitor process's stdin drain, so the sound card clocks playback and idle
 periods stream silence. Built for the memory/thermally constrained studiobox
 Pi 3, which runs this mode as `studiobox.service` (systemd) with the docker
 stack (liquidsoap/icecast/radiobox containers) disabled.
+
+### Auto-Pegel, auto-arm, music-free export (2026-10-08)
+
+Lessons of the show of 2026-10-07 (shows start on time without Einmessen;
+nobody can reach the Flow 8's gain knobs while people talk; the recording
+button was forgotten for 2 minutes; the Mediathek needed a version without
+music). All live mode, all on by default from the loader (tests build
+configs by hand, so absent = off there).
+
+- **Auto-Pegel** (`autoTrim`, `dsp/arrival.ts`, `dsp/auto-trim.ts`): every
+  mic's trim follows the voice in front of it. *Who talks* comes from arrival
+  time, not level: per 40 ms hop, GCC-PHAT (150 Hz–4 kHz, ±`maxLagMs`) between
+  every pair of mics with signal; the talker is a mic ≥ 12 dB over its floor
+  that leads every mic it correlates clearly with by ≥ 0.5 ms (zero-lag
+  crosstalk never leads). Only without any clear arrival order does a 6 dB SNR
+  lead decide — never against one (at a syllable's end the far mics' delayed
+  tail is the loudest thing left). Levels are Einmessen's: raw RMS, no trim,
+  frames ≥ 12 dB over the floor (10th percentile of 10 s). `AutoTrim`: power
+  mean over the last 10 s of that mic's talk (a sliding window, symmetric up
+  and down), a knob turn = last 2 s more than 6 dB off for 1 s → the window
+  keeps only those 2 s; trim moves only with ≥ 1.5 s of talk in the last 10 s,
+  glides `rateDbPerSec` (3× for a new voice, after a knob turn, or > 6 dB
+  off), deadband 0.5 dB, clamped `minDb`..`maxDb`. The graph applies it with
+  `ChannelStrip.setTrim` (50 ms glide, nothing rebuilt). **No learning while
+  music plays in the room** (the return mix above -45 dBFS, + 1 s) or the mics
+  are muted: room speakers reach one mic first too (in the replay a song
+  pulled a trim to +29.5 dB before this). A hand trim (`trim`) makes that mic
+  manual (`state.manualTrim`, survives a restart); `autoTrim {label?, on}`
+  switches back. An applied Einmessen seeds it as 6 s of measured talk.
+  Snapshot: per mic `autoTrim` (true/false, null without the feature); trims
+  are persisted every 30 s while they change. Validated by replaying the dry
+  multitrack of 2026-10-07: 95 % agreement with an offline (numpy) talker
+  labelling, trims G1 ≈ 12–22, G2 ≈ 10–25, Host ≈ 15–26 dB over the show
+  (the hand trims had ended at 14 / 15.4 / 19), < 1 % of a core for 4 mics.
+- **Auto-arm** (`output.backup.autoArm`): `Pipeline.onScheduledStart` arms
+  the recording when the scheduler cues a file and nobody has armed it.
+- **Music-free export** (`output.musicFree`, `audio/music-free.ts`): the graph
+  writes a **talk stem** (`GraphOptions.talkStem`, `aux.talkL/R`): mic bus ×
+  master talk gain plus the file player's audio while it plays a file from a
+  `musicFree` dir (flag delayed with the audio; the crossfade tail has its
+  own flag), through its own limiter — sample-identical to the programme
+  where no music plays. Recorded as `<name>.wort.flac`; `TalkLog` keeps
+  programme and stem level per 100 ms; after the stop `planKeep` cuts every
+  talk-free stretch with ≥ `minCutSec` of music-only frames (programme ≥ 10 dB
+  over the stem; 0.3 s kept each side), dead air over 4 s (to 1 s), and
+  everything before the first / after the last talk; `exportMusicFree` runs
+  ffmpeg (nice 10) twice — loudnorm measure, then linear loudnorm + MP3 —
+  into `<name>.ohne-musik.mp3` with a `.json` of the cuts. Talk over music
+  stays (the stem has no music under it). The bed rides on the file source,
+  so a bed under a musicFree jingle would stay in too.
 
 ### Buffered live chain (roadmap M1, backend — 2026-09-30)
 

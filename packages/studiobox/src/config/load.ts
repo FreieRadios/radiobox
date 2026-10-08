@@ -5,6 +5,7 @@ import {
   AirDelayConfig,
   AutomixConfig,
   AutoPlayConfig,
+  AutoTrimConfig,
   BackupConfig,
   BedConfig,
   ChannelConfig,
@@ -18,6 +19,7 @@ import {
   Mode,
   MonitorConfig,
   MultitrackConfig,
+  MusicFreeConfig,
   ServeConfig,
   StreamFormatName,
   StreamSourceConfig,
@@ -185,6 +187,7 @@ function resolveFilePlayerDirs(raw: Dict): FilePlayerDir[] {
         label,
         hasScheduled: entry.hasScheduled === true,
         hideEmpty: entry.hideEmpty !== false,
+        ...(entry.musicFree === true ? { musicFree: true } : {}),
         icon:
           typeof entry.icon === 'string' && entry.icon.trim()
             ? entry.icon.trim()
@@ -375,7 +378,35 @@ function resolveBackup(raw: unknown): BackupConfig {
   };
   if (typeof r.station === 'string' && r.station.trim()) out.station = r.station.trim();
   if (typeof r.title === 'string' && r.title.trim()) out.title = r.title.trim();
+  out.autoArm = r.autoArm !== false;
   return out;
+}
+
+/** Music-free export: on unless set to `enabled: false` (it only acts while
+ *  a recording runs). */
+function resolveMusicFree(raw: unknown): MusicFreeConfig {
+  const r = isObj(raw) ? raw : {};
+  return {
+    enabled: r.enabled !== false,
+    targetLufs: Math.min(-10, Math.max(-30, finite(r.targetLufs, -16))),
+    truePeakDb: Math.min(0, Math.max(-6, finite(r.truePeakDb, -1.5))),
+    mp3Kbps: Math.min(320, Math.max(64, finite(r.mp3Kbps, 192))),
+    minCutSec: Math.min(30, Math.max(0.5, finite(r.minCutSec, 2))),
+  };
+}
+
+/** Auto-Pegel: on unless set to `enabled: false`. */
+function resolveAutoTrim(raw: unknown): AutoTrimConfig {
+  const r = isObj(raw) ? raw : {};
+  const minDb = Math.min(40, Math.max(-20, finite(r.minDb, -10)));
+  return {
+    enabled: r.enabled !== false,
+    targetDb: Math.min(-6, Math.max(-40, finite(r.targetDb, -20))),
+    minDb,
+    maxDb: Math.min(40, Math.max(minDb, finite(r.maxDb, 30))),
+    rateDbPerSec: Math.min(20, Math.max(0.1, finite(r.rateDbPerSec, 2))),
+    maxLagMs: Math.min(30, Math.max(1, finite(r.maxLagMs, 10))),
+  };
 }
 
 function resolveServe(raw: unknown): ServeConfig {
@@ -404,6 +435,7 @@ function resolveOutput(raw: unknown): OutputConfig {
     target: r.target === 'usb' || r.target === 'stream' ? r.target : 'both',
     backup: resolveBackup(r.backup),
     multitrack: resolveMultitrack(r.multitrack),
+    musicFree: resolveMusicFree(r.musicFree),
     monitor: resolveMonitor(r.monitor),
     return: resolveMonitor(r.return),
   };
@@ -577,6 +609,7 @@ export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
     filePlayer,
     output,
     automix: resolveAutomix(root.automix),
+    autoTrim: resolveAutoTrim(root.autoTrim),
     lookahead: resolveLookahead(root.lookahead),
     airDelay: resolveAirDelay(root.airDelay),
     meters: resolveMeters(root.meters, path.dirname(configPath)),

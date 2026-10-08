@@ -84,6 +84,21 @@ automix:
   #   attenuate: [Guest, Phone]
   #   depthDb: -8
 
+# Auto-Pegel (live mode): every mic's input trim follows the voice in front
+# of it during the show, so a session can start without "Einmessen". Who is
+# talking comes from arrival time (the voice reaches its own mic first), not
+# from levels, so wrong gain knobs can't mislead it. Learns nothing while
+# music plays in the room or the mics are muted. A hand trim on the page
+# makes that mic manual; "Auto-Pegel" in the trim stepper switches it back.
+# On unless `enabled: false`; the values below are the defaults.
+# autoTrim:
+#   enabled: true
+#   targetDb: -20 # speech level per mic, dBFS RMS (Einmessen's reference)
+#   minDb: -10
+#   maxDb: 30 # never more digital gain than this
+#   rateDbPerSec: 2 # glide (3x for a new voice or more than 6 dB off)
+#   maxLagMs: 10 # farthest two mics apart, as a delay (10 ms = 3.4 m)
+
 # Sidechain ducking: mic activity attenuates the music buses.
 # Per spec, only armed while a music channel is actually playing.
 duck:
@@ -136,6 +151,21 @@ output:
     # segments of that length instead (an always-on safety copy).
     segmentSeconds: 0
     # station: 'Radio Z' # Vorbis comment ORGANIZATION
+    # Arm the recording when a scheduled file (the show's opening jingle)
+    # starts and nobody has pressed the button. Default true.
+    # autoArm: true
+  # A music-free version of every recording, for podcast platforms: the talk
+  # is recorded beside the programme (<name>.wort.flac: mics after leveler,
+  # automix and master, plus files from dirs marked `musicFree: true`), and
+  # after the stop the music-only stretches are cut out and the rest is
+  # normalised into <name>.ohne-musik.mp3 (+ .json listing every cut). On by
+  # default whenever backup is on; the values below are the defaults.
+  # musicFree:
+  #   enabled: true
+  #   targetLufs: -16
+  #   truePeakDb: -1.5
+  #   mp3Kbps: 192
+  #   minCutSec: 2 # music-only stretches at least this long are cut
   # Multitrack next to the stereo file, written from the same blocks so both
   # are sample-aligned: every mic, every stereo music source, the programme.
   # One FLAC holds at most 8 channels (e.g. 4 mics + file player + programme).
@@ -250,7 +280,8 @@ filePlayer:
   # (jingles -> 🔔, musik/mp3 -> 🎵, wiederholung -> 🔁, archiv -> 📦, …).
   dirs:
     - { path: './music', label: Music }
-    - { path: './jingles', label: Jingles }
+    # musicFree: the show's own jingles may stay in the music-free export.
+    - { path: './jingles', label: Jingles, musicFree: true }
     - { path: './repeat', label: Repeat, hasScheduled: true, icon: '🔁' }
     # A network share (SMB/CIFS) works too: mount it first, then point at the
     # mountpoint. Mount read-only via /etc/fstab so the OS owns it, e.g.:

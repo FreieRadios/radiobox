@@ -26,6 +26,8 @@ interface Internals {
   encoder: { write(buf: Buffer): boolean };
   recorder: { active: boolean; once(e: 'exit', f: () => void): void } | null;
   multitrack: { active: boolean; once(e: 'exit', f: () => void): void } | null;
+  talkRecorder: { active: boolean; once(e: 'exit', f: () => void): void } | null;
+  onScheduledStart(e: { folder: number; name: string; playAtMs: number }): void;
 }
 
 let now = 0;
@@ -51,7 +53,13 @@ function make(over: Partial<StudioboxConfig> = {}, mics = [mic(1, 'Gast'), mic(2
     output: {
       ...base.output,
       ...(over.output ?? {}),
-      backup: { enabled: true, dir, segmentSeconds: 0, station: 'Radio Z' },
+      backup: {
+        enabled: true,
+        dir,
+        segmentSeconds: 0,
+        station: 'Radio Z',
+        ...(over.output?.backup?.autoArm ? { autoArm: true } : {}),
+      },
     },
   };
   const pipeline = new Pipeline(cfg);
@@ -279,6 +287,158 @@ describe('Pipeline: recording (roadmap M1.6)', () => {
     expect(tags.COMMENT).toMatch(/^processed by studiobox \d+\.\d+\.\d+$/);
     expect(tags.TITLE).toMatch(/^studiobox 20261005-1900\d\d$/);
   }, 20000);
+});
+
+const player = (dirs: { path: string; label: string; hasScheduled: boolean }[]) => ({
+  enabled: true,
+  dirs,
+  label: 'Zuspieler',
+  ducked: true,
+  fadeOutMs: 0,
+  prebufferMs: 0,
+  autoPlay: { enabled: false, scanSeconds: 10, graceSeconds: 30 },
+  bed: {
+    enabled: false,
+    dir: '',
+    gainDb: -6,
+    fadeInMs: 1500,
+    fadeOutMs: 2500,
+    havarie: { enabled: false, afterSeconds: 10, belowDb: -50 },
+  },
+  streams: [],
+  processing: bypass(),
+});
+
+const until = async (ok: () => boolean, ms: number) => {
+  const end = performance.now() + ms;
+  while (!ok() && performance.now() < end) await new Promise((r) => setTimeout(r, 50));
+};
+
+describe('Pipeline: auto-arm and the music-free export', () => {
+  it('a scheduled file arms the recording when nobody has (backup.autoArm)', async () => {
+    const jdir = tmp();
+    const name = '20261005-190010 Intro.wav';
+    spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=d=1', path.join(jdir, name)]);
+    const filePlayer = player([{ path: jdir, label: 'Jingles', hasScheduled: true }]);
+    const off = make({ filePlayer });
+    off.p.onScheduledStart({ folder: 0, name, playAtMs: now + 3000 });
+    expect(off.p.recorder!.active).toBe(false);
+    off.pipeline.stop();
+
+    const on = make({
+      filePlayer,
+      output: { ...config([]).output, backup: { autoArm: true } as never },
+    });
+    on.p.onScheduledStart({ folder: 0, name, playAtMs: now + 3000 });
+    expect(on.pipeline.snapshot().recording).toBe(true);
+    // A missing file arms nothing (and nothing breaks).
+    const again = make({
+      filePlayer,
+      output: { ...config([]).output, backup: { autoArm: true } as never },
+    });
+    again.p.onScheduledStart({ folder: 0, name: 'gone.wav', playAtMs: now + 3000 });
+    expect(again.p.recorder!.active).toBe(false);
+    const done = exited(on.p.recorder);
+    on.p.onCommand('recording', false);
+    on.quiet(1.5);
+    await done;
+    on.pipeline.stop();
+    again.pipeline.stop();
+  }, 30000);
+
+  it('writes the talk stem and, after the stop, an MP3 without the music', async () => {
+    const musicCh = {
+      source: [3, 4] as [number, number],
+      role: 'music' as const,
+      label: 'Musik',
+      processing: bypass(),
+    };
+    const { p, dir, feed } = make(
+      {
+        output: {
+          ...config([]).output,
+          musicFree: {
+            enabled: true,
+            targetLufs: -16,
+            truePeakDb: -1.5,
+            mp3Kbps: 128,
+            minCutSec: 2,
+          },
+        },
+      },
+      [mic(1, 'Gast'), mic(2, 'Host'), musicCh]
+    );
+    p.onCommand('recording', true);
+    expect(p.talkRecorder!.active).toBe(true);
+    const talk = voice({ seconds: 3, rmsDb: -20 });
+    // Talk, a 4 s song with nobody talking, talk again.
+    feed([silence(3), talk, silence(3), silence(3)]);
+    feed([silence(4), silence(4), tone(-20, 4, 440), tone(-20, 4, 440)]);
+    feed([silence(3), talk, silence(3), silence(3)]);
+    const done = Promise.all([exited(p.recorder), exited(p.talkRecorder)]);
+    p.onCommand('recording', false);
+    feed([silence(1.5), silence(1.5), silence(1.5), silence(1.5)]);
+    await done;
+    const mp3 = () => fs.readdirSync(dir).find((f) => f.endsWith('.ohne-musik.mp3'));
+    const json = () => fs.readdirSync(dir).find((f) => f.endsWith('.ohne-musik.json'));
+    await until(() => !!json(), 20000);
+    const files = fs.readdirSync(dir);
+    expect(files.some((f) => f.endsWith('.wort.flac'))).toBe(true);
+    expect(mp3()).toBeDefined();
+    const sidecar = JSON.parse(fs.readFileSync(path.join(dir, json()!), 'utf8'));
+    const music = sidecar.cuts.filter((c: { why: string }) => c.why === 'music');
+    expect(music.length).toBe(1);
+    expect(music[0].to - music[0].from).toBeGreaterThan(3);
+    const probe = spawnSync('ffprobe', [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration:format_tags=title',
+      '-of',
+      'json',
+      path.join(dir, mp3()!),
+    ]);
+    const info = JSON.parse(probe.stdout.toString());
+    // 3 s + 3 s of talk, the song gone.
+    expect(Number(info.format.duration)).toBeGreaterThan(5.5);
+    expect(Number(info.format.duration)).toBeLessThan(8);
+    expect(info.format.tags.title).toMatch(/ohne Musik/);
+  }, 40000);
+});
+
+describe('Pipeline: Auto-Pegel', () => {
+  it('a hand trim switches the mic to manual; autoTrim switches it back; both persist', () => {
+    const { pipeline, p, cfg } = make({
+      autoTrim: {
+        enabled: true,
+        targetDb: -20,
+        minDb: -10,
+        maxDb: 30,
+        rateDbPerSec: 2,
+        maxLagMs: 10,
+      },
+    });
+    const ch = (l: string) => pipeline.snapshot().channels.find((c) => c.label === l)!;
+    expect(ch('Gast').autoTrim).toBe(true);
+    p.onCommand('trim', { label: 'Gast', trimDb: 6 });
+    expect(ch('Gast').autoTrim).toBe(false);
+    expect(ch('Gast').trimDb).toBe(6);
+    expect(ch('Host').autoTrim).toBe(true);
+    let saved = JSON.parse(fs.readFileSync(cfg.stateFile, 'utf8'));
+    expect(saved.manualTrim).toEqual(['Gast']);
+    // After a restart the hand trim is still the technician's.
+    const again = new Pipeline(cfg);
+    const ch2 = again.snapshot().channels.find((c) => c.label === 'Gast')!;
+    expect(ch2.autoTrim).toBe(false);
+    expect(ch2.trimDb).toBe(6);
+    p.onCommand('autoTrim', { label: 'Gast', on: true });
+    expect(ch('Gast').autoTrim).toBe(true);
+    saved = JSON.parse(fs.readFileSync(cfg.stateFile, 'utf8'));
+    expect(saved.manualTrim).toEqual([]);
+    // Without a label: every mic.
+    p.onCommand('autoTrim', { on: false });
+    expect([ch('Gast').autoTrim, ch('Host').autoTrim]).toEqual([false, false]);
+  });
 });
 
 describe('Pipeline: setup assistant and live settings (roadmap M1.1)', () => {

@@ -54,6 +54,8 @@ export interface StripLookahead {
  */
 export class ChannelStrip {
   private trim!: number;
+  private trimTarget!: number; // `setTrim` glides `trim` here (click-free)
+  private trimCoef: number;
   private hpf!: Biquad | null;
   private gate!: Gate;
   private gateDelay: DelayLine | null;
@@ -87,6 +89,7 @@ export class ChannelStrip {
     this.leveler = new SpeechLeveler(p.leveler, sampleRate, look.leveler);
     this.outEnv = new EnvelopeFollower(sampleRate, 1, 150);
     this.speechCoef = msToCoef(300, sampleRate);
+    this.trimCoef = msToCoef(50, sampleRate);
     this.speechHold = Math.round(SPEECH_HOLD_SEC * sampleRate);
     this.latency = look.gate + look.leveler;
     this.configure(p);
@@ -98,6 +101,7 @@ export class ChannelStrip {
   private configure(p: ChannelProcessing): void {
     const sr = this.sampleRate;
     this.trim = dbToGain(p.trimDb ?? 0);
+    this.trimTarget = this.trim;
     this.hpf = p.hpfHz > 0 ? Biquad.design('highpass', sr, p.hpfHz, 0.707, 0) : null;
     // The gate's decision leads the audio by the look-ahead, so it would also
     // close that much early: give the hold the same head start back.
@@ -116,9 +120,21 @@ export class ChannelStrip {
     if (seedDb !== undefined) this.leveler.seed(seedDb);
   }
 
+  /** Change only the input trim, gliding there over ~50 ms. Unlike
+   *  `retune` nothing is rebuilt, so it may be called many times a second
+   *  (Auto-Pegel). */
+  setTrim(db: number): void {
+    this.trimTarget = dbToGain(db);
+  }
+
   /** First half: trim -> HPF -> gate -> EQ -> de-esser -> compressor.
    *  The result runs `look.gate` samples behind the input. */
   pre(x: number): number {
+    if (this.trim !== this.trimTarget) {
+      this.trim = this.trimCoef * (this.trim - this.trimTarget) + this.trimTarget;
+      if (Math.abs(this.trim - this.trimTarget) < 1e-7 * this.trimTarget)
+        this.trim = this.trimTarget;
+    }
     let y = x * this.trim;
     if (this.hpf) y = this.hpf.process(y);
     this.lastIn = y;

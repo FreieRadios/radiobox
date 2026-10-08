@@ -1561,6 +1561,33 @@ describe('meters page — trim', () => {
     expect(p.byId('trimVal').textContent).toBe('+11,0 dB');
     p.byId('trimClose').click();
     expect(p.byId('trimEd').style.display).toBe('none');
+    // Without Auto-Pegel on the box there is no switch for it.
+    btn.click();
+    expect(p.byId('trimAuto').style.display).toBe('none');
+  });
+
+  it('marks a mic on Auto-Pegel and switches it from the stepper', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const f = liveFrame();
+    Object.assign(f.channels[0] as Record<string, unknown>, { trimDb: 21.4, autoTrim: true });
+    p.push(f);
+    const btn = p.byId('rows').children[0].querySelector('.trimbtn');
+    expect(btn.attrs['aria-label']).toContain('Auto-Pegel');
+    btn.click();
+    const sw = p.byId('trimAuto');
+    expect(sw.style.display).toBe('');
+    expect(sw.attrs['aria-pressed']).toBe('true');
+    expect(sw.textContent).toBe('Auto-Pegel an');
+    sw.click();
+    expect(p.sent).toEqual([{ type: 'autoTrim', value: { label: 'Host', on: false } }]);
+    // The box answers: manual now.
+    (f.channels[0] as Record<string, unknown>).autoTrim = false;
+    p.push(f);
+    expect(sw.attrs['aria-pressed']).toBe('false');
+    expect(btn.attrs['aria-label']).not.toContain('Auto-Pegel');
+    sw.click();
+    expect(p.sent[1]).toEqual({ type: 'autoTrim', value: { label: 'Host', on: true } });
   });
 });
 

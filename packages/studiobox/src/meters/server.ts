@@ -146,7 +146,8 @@ export function isPreviewable(name: string): boolean {
  *   - { type: 'testTone', value: boolean }    1 kHz alignment tone on the monitor
  *   - { type: 'havarie', value: boolean }     havarie watch (bed after silence)
  *   - { type: 'priorityDepth', value: dB }    host-priority depth
- *   - { type: 'trim', value: { label, trimDb } } one mic's input trim
+ *   - { type: 'trim', value: { label, trimDb } } one mic's input trim (manual from then on)
+ *   - { type: 'autoTrim', value: { label?, on } } Auto-Pegel for one mic (or all)
  *   - { type: 'setupStart', value?: { only: [label] } } start "Einmessen"
  *   - { type: 'setupFinish' | 'setupApply' | 'setupDiscard' | 'setupCancel' }
  *  Every connection has a role (tech | host | guest | spectator), taken from
@@ -856,6 +857,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  .trimrow .who{flex:1 1 120px;min-width:0}
  .trimrow output{min-width:7ch;text-align:center;font-size:1.125rem;font-weight:700}
  .trimrow button{min-width:56px;padding:0 8px}
+ .trimbtn small{display:block;font-size:.6875rem;font-weight:400;color:var(--muted);line-height:1}
  .stage{display:flex;flex-direction:column;gap:4px;min-width:0}
  .stage .val{font-size:.8125rem;color:var(--muted);white-space:nowrap;overflow:hidden}
  /* Level meter, −60…0 dB: the zones (ok below −10, attention to −3, too loud
@@ -1256,6 +1258,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    <output id="trimVal"></output>
    <button id="trimUp" aria-label="Trim 1 dB lauter">+1</button>
    <button id="trimUp3" aria-label="Trim 3 dB lauter">+3</button>
+   <button id="trimAuto" aria-pressed="false" title="Auto-Pegel: der Trim folgt der Stimme an diesem Mikro">Auto-Pegel</button>
    <button id="trimClose" class="icon" aria-label="Trim schließen">✕</button>
   </div>
  </section>
@@ -1511,8 +1514,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     Taste nachfragt).</p>
     <ul>
      <li><span class="k">Aufnahme aus</span> / <span class="k">● AUFNAHME
-     LÄUFT</span> (oben links): die lokale Sicherheitsaufnahme (FLAC). Sie läuft
-     <b>nicht</b> automatisch.</li>
+     LÄUFT</span> (oben links): die lokale Sicherheitsaufnahme (FLAC). Sie
+     startet von selbst, sobald eine geplante Datei (der Anfangs-Jingle)
+     beginnt; sonst mit einem Klick. Nach dem Ende der Aufnahme legt die Box
+     daneben eine <b>Fassung ohne Musik</b> ab (<i>…ohne-musik.mp3</i>: Songs
+     und Bett herausgeschnitten, Sprache auf Podcast-Lautstärke) — für
+     Plattformen, auf denen keine Musik laufen darf. Eigene Jingles bleiben
+     drin, wenn ihr Ordner so eingestellt ist.</li>
      <li class="techonly"><span class="k">Stream aus</span> / <span class="k">STREAM LÄUFT</span>:
      schickt das fertige Programm an den Server (Icecast/Harbor).</li>
      <li class="techonly"><span class="k">⋮ → Lokale Ausgabe</span> gibt das Programm
@@ -1592,7 +1600,14 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
       nicht die Sendung).</li>
       <li class="liveonly"><span class="k">⋮ → 🎤 Einmessen</span> (nur Technik): der
       Pegel jedes Mikros gegen seinen Zielbereich samt Trim und der Assistent,
-      der alle Mikros in etwa einer Minute einmisst.</li>
+      der alle Mikros in etwa einer Minute einmisst. Es geht auch ohne:</li>
+      <li><b>Auto-Pegel</b>: der Trim jedes Mikros folgt während der Sendung
+      der Stimme davor — nach ein, zwei Sätzen sitzt er, auch wenn jemand weit
+      weg vom Mikro sitzt oder am Pult am Gain gedreht wurde. Wer gerade
+      spricht, erkennt die Box daran, an welchem Mikro die Stimme zuerst
+      ankommt. Während Musik läuft, lernt sie nichts. In der Spalte Trim steht
+      dann „auto“. Ein Klick auf ±1/±3 macht den Trim wieder zur Handsache;
+      <span class="k">Auto-Pegel</span> im selben Feld schaltet zurück.</li>
       <li>Läuft ein Einmessen oder wartet ein Ergebnis, steht oben ein Hinweis;
       ein Klick darauf führt zur Seite. Alles auf beiden Seiten übersteht einen
       Neustart.</li>
@@ -1717,7 +1732,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    lvl.el.setAttribute('aria-label','Pegel '+c.label);
    const trim=mic?q('.trimbtn'):null;
    if(trim)trim.onclick=()=>openTrim(trimLabel===c.label?null:c.label);
-   return {label:c.label,mic:mic,st:'',hi:{},fresh:true,state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,
+   return {label:c.label,mic:mic,st:'',hi:{},fresh:true,state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,auto:null,
     gate:q('.s-gate .cover'),gateVal:q('.s-gate .val'),comp:q('.s-comp .cover'),compVal:q('.s-comp .val'),
     mix:q('.s-mix .cover'),mixVal:q('.s-mix .val'),lev:q('.s-lev .fill'),levVal:q('.s-lev .val'),mbtn:q('.mtbtn')};});
  }
@@ -1737,8 +1752,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     if(n){r.compVal.textContent=fmtGr(compHi,0)+' dB';
      r.mixVal.textContent=fmt(c.automixGainDb,0)+' dB';}
     const t=typeof c.trimDb==='number'?c.trimDb:0;
-    if(t!==r.trimDb){r.trimDb=t;r.trim.textContent=sgn(t);
-     r.trim.setAttribute('aria-label','Trim '+c.label+': '+sgn(t)+' dB, ändern');
+    // Auto-Pegel: true/false per mic, null where the box doesn't have it.
+    const au=typeof c.autoTrim==='boolean'?c.autoTrim:null;
+    if(t!==r.trimDb||au!==r.auto){r.trimDb=t;r.auto=au;
+     r.trim.textContent=sgn(t);
+     if(au){const sm=document.createElement('small');sm.textContent='auto';r.trim.appendChild(sm);}
+     r.trim.setAttribute('aria-label','Trim '+c.label+': '+sgn(t)+' dB'+(au?' (Auto-Pegel)':'')+', ändern');
      if(trimLabel===c.label)showTrim();}
    }
    // Leveler gain goes both ways (±20 dB across the bar), out of the centre.
@@ -1768,7 +1787,10 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   show($('trimEd'),!!r);
   if(rowEls)rowEls.forEach(x=>{if(x.trim)x.trim.classList.toggle('on',x===r);});
   if(!r)return;
-  $('trimWho').textContent=r.label;$('trimVal').textContent=sgn(r.trimDb)+' dB';}
+  $('trimWho').textContent=r.label;$('trimVal').textContent=sgn(r.trimDb)+' dB';
+  // The switch only where the box has Auto-Pegel; a step makes the mic manual.
+  show($('trimAuto'),r.auto!==null);setPressed($('trimAuto'),r.auto===true);
+  $('trimAuto').textContent=r.auto?'Auto-Pegel an':'Auto-Pegel aus';}
  function openTrim(label){trimLabel=label;trimSent=null;showTrim();}
  function trimBy(d){const r=trimRow();if(!r||!tech())return;
   // Taps faster than the snapshot comes back build on what was just sent.
@@ -1777,6 +1799,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   send({type:'trim',value:{label:r.label,trimDb:trimSent}});}
  [['trimDn3',-3],['trimDn',-1],['trimUp',1],['trimUp3',3]].forEach(a=>{$(a[0]).onclick=()=>trimBy(a[1]);});
  $('trimClose').onclick=()=>openTrim(null);
+$('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)return;
+ send({type:'autoTrim',value:{label:r.label,on:!r.auto}});};
  // Programme peak meter and the master readouts.
  const pkmEl=document.getElementById('pkm');
  const pkm=levelMeter(pkmEl,pkmEl.querySelector('.cover'),pkmEl.querySelector('.peak'));

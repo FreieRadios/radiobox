@@ -154,7 +154,7 @@ filePlayer:
     # directory studiobox is started from.
     # Timestamped jingles (e.g. opener-20261007-190000.flac) start by
     # themselves, so only this folder is scanned for them.
-    - { path: './session/jingles', label: Jingles, hasScheduled: true }
+    - { path: './session/jingles', label: Jingles, hasScheduled: true, musicFree: true }
     # Number the files (01-…, 02-…) in playing order: "＋ alle" then rebuilds
     # the whole playlist in one tap after a restart.
     - { path: './session/playlist', label: Playlist }

@@ -212,6 +212,28 @@ export interface BackupConfig {
   /** Optional Vorbis comments written into the file. */
   station?: string;
   title?: string;
+  /** Arm the recording by itself when a scheduled file (the show's opening
+   *  jingle, `hasScheduled` folders) starts and nobody has armed it yet.
+   *  On unless set to `false`; live mode only. */
+  autoArm?: boolean;
+}
+
+/** A second version of every recording without the music, for platforms
+ *  that may carry no music (podcast hosters, GEMA): the talk is recorded on
+ *  its own (mics after leveler, automix and master, plus files from
+ *  `musicFree` folders such as the show's own jingles), and when the
+ *  recording stops the stretches where only music played are cut out and the
+ *  rest is normalised and encoded to `<recording>.ohne-musik.mp3`. */
+export interface MusicFreeConfig {
+  enabled: boolean;
+  /** Loudness of the export (LUFS integrated). */
+  targetLufs: number;
+  /** True-peak ceiling of the export (dBTP). */
+  truePeakDb: number;
+  /** MP3 bit rate of the export (kbit/s). */
+  mp3Kbps: number;
+  /** Music-only stretches at least this long are cut (seconds). */
+  minCutSec: number;
 }
 
 /** Multitrack recording next to the processed stereo file: one FLAC holding
@@ -286,6 +308,8 @@ export interface OutputConfig {
   target?: OutputTarget;
   backup: BackupConfig;
   multitrack: MultitrackConfig;
+  /** Talk-only export of every recording; see MusicFreeConfig. */
+  musicFree?: MusicFreeConfig;
   monitor: MonitorConfig;
   /** Music return to the room: the music/jingle/bed mix, ducked as on air but
    *  **without the mics**, in room time (no look-ahead, no air delay). Sent
@@ -338,6 +362,9 @@ export interface FilePlayerDir {
    *  config omits it — see `guessDirIcon`); optional so callers constructing a
    *  dir directly, e.g. tests, don't have to. */
   icon?: string;
+  /** Files from this folder carry no third-party music (the show's own
+   *  jingles): they stay in the music-free export. Off by default. */
+  musicFree?: boolean;
 }
 
 /** Scheduled auto-play by filename timestamp. Files named `*YYYYMMDD-HHMMSS*`
@@ -465,6 +492,21 @@ export interface ListenersConfig {
  *    only need scheduled playout. */
 export type Mode = 'live' | 'playout';
 
+/** "Auto-Pegel": the mic trims follow the speakers during the show, so a
+ *  session can start without the setup assistant (see `dsp/auto-trim.ts`). */
+export interface AutoTrimConfig {
+  enabled: boolean;
+  /** Speech level every mic is trimmed to (dBFS RMS; the setup assistant's). */
+  targetDb: number;
+  /** Trim limits (dB). */
+  minDb: number;
+  maxDb: number;
+  /** How fast a trim glides once it knows better (dB per second). */
+  rateDbPerSec: number;
+  /** Farthest two mics apart, as a delay (ms; 10 ms ≈ 3.4 m). */
+  maxLagMs: number;
+}
+
 export interface StudioboxConfig {
   mode: Mode;
   capture: CaptureConfig;
@@ -472,6 +514,8 @@ export interface StudioboxConfig {
   airDelay: AirDelayConfig;
   channels: ChannelConfig[];
   automix: AutomixConfig;
+  /** Off when absent (tests build configs by hand); the loader turns it on. */
+  autoTrim?: AutoTrimConfig;
   duck: DuckConfig;
   master: MasterConfig;
   output: OutputConfig;
