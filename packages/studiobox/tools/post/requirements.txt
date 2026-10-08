@@ -1,0 +1,4 @@
+numpy>=2
+scipy>=1.14
+pyloudnorm>=0.1
+faster-whisper>=1.2

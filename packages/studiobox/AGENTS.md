@@ -185,6 +185,21 @@ orchestration in `src/pipeline.ts` (live) and `src/playout.ts` (playout-only).
   `test-support/voice.ts`): under Jest's vm sandbox a `Math.x` lookup per
   sample makes the DSP suites several times slower.
 
+## Post-production (`tools/post/`, Python)
+
+After a show, `tools/post/post.py <name>.multitrack.json` makes the remaster
+(full / ohne Musik, mit Jingles / nur Wort; -16 LUFS), the per-speaker
+transcript (md/txt/vtt) and a Mediathek text draft from the dry multitrack
+alone — see `tools/post/README.md` for the steps, flags and timings. It is
+the hand-made post-production of 2026-10-07 (`recordings/remaster-20261007/`)
+as a tool: talker labels by GCC-PHAT like `dsp/arrival.ts`, offline
+(non-causal) leveler/automix, acoustic breath detection, faster-whisper per
+speaker on the gated dry mic, CrisperWhisper per token for the "äh" cuts
+(never words: fei, gell, halt stay), a timeline that maps recording time to
+every version. Own venv (`tools/post/setup.sh`), own tests
+(`python -m unittest discover -s tools/post/tests`); not part of the Node
+build. Runs on the workstation, not on the Pi.
+
 ## Status
 
 Implemented: capture, full per-mic DSP chain, gain-sharing automix, ducking,
