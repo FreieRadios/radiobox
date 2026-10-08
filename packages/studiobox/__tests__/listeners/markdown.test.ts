@@ -3,29 +3,29 @@ import { markdownToHtml } from '../../src/listeners/markdown';
 describe('markdownToHtml', () => {
   it('renders what the guides are written in', () => {
     const md = [
-      '*Jingle: TU WAS DU WILLST*',
+      '*Jingle: MEINE SENDUNG*',
       '',
       'Willkommen **zurück**,',
       'heute auf Radio Z.',
       '',
       '### Wie funktioniert das System?',
       '',
-      '> Wenn ich heute mit einem Kleidungsstück zu euch komme:',
+      '> Wenn ich heute mit einer Frage zu euch komme:',
       '> Was passiert dann?',
       '',
       '- Kann das gelingen?',
-      '- Beutet Ihr Euch',
-      '  selbst aus?',
+      '- Wie seid Ihr',
+      '  dazu gekommen?',
       '',
       '1. eins',
       '2. zwei',
     ].join('\n');
     expect(markdownToHtml(md)).toBe(
-      '<p><em>Jingle: TU WAS DU WILLST</em></p>' +
+      '<p><em>Jingle: MEINE SENDUNG</em></p>' +
         '<p>Willkommen <strong>zurück</strong>,<br>heute auf Radio Z.</p>' +
         '<h4>Wie funktioniert das System?</h4>' +
-        '<blockquote>Wenn ich heute mit einem Kleidungsstück zu euch komme:<br>Was passiert dann?</blockquote>' +
-        '<ul><li>Kann das gelingen?</li><li>Beutet Ihr Euch selbst aus?</li></ul>' +
+        '<blockquote>Wenn ich heute mit einer Frage zu euch komme:<br>Was passiert dann?</blockquote>' +
+        '<ul><li>Kann das gelingen?</li><li>Wie seid Ihr dazu gekommen?</li></ul>' +
         '<ol><li>eins</li><li>zwei</li></ol>'
     );
   });

@@ -2026,13 +2026,13 @@ describe('meters page — Hörer:innen (listener feedback)', () => {
 describe('meters page — Sendung (the episode guide from eve)', () => {
   const episode = {
     id: 'ep1',
-    title: 'Gentle Machine',
+    title: 'Folge 12',
     airMs: 0,
     status: 'entwurf',
     opening: '<p><em>Jingle</em></p>',
     closing: '',
     topics: [
-      { id: 't1', title: 'Die <Macherinnen>', cue: 'Wer seid ihr?', html: '<p>Notiz</p>' },
+      { id: 't1', title: 'Die <Gäste>', cue: 'Wer seid ihr?', html: '<p>Notiz</p>' },
       { id: 't2', title: 'Die Idee', cue: '', html: '' },
     ],
     questions: [
@@ -2043,7 +2043,7 @@ describe('meters page — Sendung (the episode guide from eve)', () => {
   const status = (over: Record<string, unknown> = {}) => ({
     show: {
       slug: 'tu',
-      name: 'Tu was Du willst',
+      name: 'Meine Sendung',
       startMs: Date.UTC(2026, 9, 5, 18),
       endMs: Date.UTC(2026, 9, 5, 19),
     },
@@ -2062,13 +2062,13 @@ describe('meters page — Sendung (the episode guide from eve)', () => {
     await p.flush();
     p.push({ type: 'listeners', status: status() });
     expect(p.byId('guidebox').style.display).toBe('');
-    expect(p.byId('gdShow').textContent).toBe('Tu was Du willst · 20:00–21:00');
+    expect(p.byId('gdShow').textContent).toBe('Meine Sendung · 20:00–21:00');
     expect(p.byId('gdBody').style.display).toBe('');
-    expect(p.byId('gdEp').textContent).toBe('Gentle Machine');
+    expect(p.byId('gdEp').textContent).toBe('Folge 12');
     expect(p.byId('gdState').style.display).toBe('none');
     const html = p.byId('gdParts').innerHTML;
     // Opening first, then the topics in order, then the questions.
-    const order = ['Anmoderation', 'Die &lt;Macherinnen&gt;', 'Die Idee', 'Was ist Erfolg?'];
+    const order = ['Anmoderation', 'Die &lt;Gäste&gt;', 'Die Idee', 'Was ist Erfolg?'];
     expect(order.map((w) => html.indexOf(w))).toEqual(
       [...order.map((w) => html.indexOf(w))].sort((a, b) => a - b)
     );
