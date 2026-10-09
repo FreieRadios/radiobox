@@ -87,7 +87,7 @@ output:
   # Keep the password out of any file you commit.
   harbor:
     enabled: false
-    url: 'icecast://source:CHANGEME@stream.example.org:4444/studio-lossless'
+    url: 'icecast://HARBOR_USER:HARBOR_PASSWORD@stream.example.org:4444/live' # liquidsoap harbor, see studiobox.example.yaml
     format: ogg-flac
     contentType: application/ogg
   # ADAPT: recording in one room and airing from another (roadmap M1c a):

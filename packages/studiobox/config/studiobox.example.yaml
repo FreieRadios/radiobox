@@ -120,9 +120,13 @@ master:
 
 output:
   harbor:
-    enabled: true
-    # ffmpeg icecast:// source URL. Use a mount configured for Ogg/FLAC.
-    url: 'icecast://source:hackme@stream.radio-z.net:4444/studio-lossless'
+    enabled: false
+    # ffmpeg icecast:// source URL. The radiobox Liquidsoap harbor has one
+    # mount, /live, with HARBOR_USER / HARBOR_PASSWORD from the root .env
+    # (liquidsoap/radiobox.liq); it airs only when MAIN_STREAM_URL fails,
+    # unless LIQ_LIVE_SOURCE_KIND=harbor. Not yet verified against studiobox
+    # (roadmap R17). Keep the password out of any file you commit.
+    url: 'icecast://HARBOR_USER:HARBOR_PASSWORD@stream.example.org:4444/live'
     format: ogg-flac # ogg-flac (lossless) | mp3 (fallback)
     contentType: application/ogg
   # The programme as a stream from studiobox itself, on the meters port:
