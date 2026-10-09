@@ -11,8 +11,13 @@
 #   enable_harbor             - accept a live harbor input on /live
 #   enable_repeat_schedule    - use the time-based switch repeat/live
 #   enable_repeat_crossfade   - apply a 2s crossfade on switch transitions
-#   live_source_kind          - "main_stream" or "silence"
-#                               source used during interval_live
+#   live_source_kind          - "main_stream", "harbor" or "silence":
+#                               source used during interval_live.
+#                               main_stream relays MAIN_STREAM_URL (the
+#                               harbor only steps in when it fails);
+#                               harbor puts the harbor first, falling
+#                               back to the main stream when nobody is
+#                               connected
 #   enable_mount_live         - publish 256 kbps MP3 on /live
 #   enable_mount_live_128k    - publish 128 kbps MP3 on /live-128k
 #   enable_mount_legacy       - publish legacy mount under radio_legacy_mount
@@ -85,10 +90,23 @@ main_stream = audio_to_stereo(input.http(main_stream_url, timeout=30.0))
 
 silence_source = blank(duration=1.0)
 
+if not list.mem(live_source_kind, ["main_stream", "harbor", "silence"]) then
+  log(level=2, "LIQ_LIVE_SOURCE_KIND=#{live_source_kind} is unknown, using main_stream")
+end
+if live_source_kind == "harbor" and not enable_harbor then
+  log(level=2, "LIQ_LIVE_SOURCE_KIND=harbor needs LIQ_ENABLE_HARBOR=true, using main_stream")
+end
+
 # Build the "live" branch depending on which sources are enabled.
 live_branch =
   if live_source_kind == "silence" then
     silence_source
+  elsif enable_harbor and live_source_kind == "harbor" then
+    fallback(
+        id="source_switcher_day",
+        track_sensitive=false,
+        [live_harbor, main_stream, security]
+    )
   elsif enable_harbor then
     fallback(
         id="source_switcher_day",
@@ -151,10 +169,20 @@ repeat_branch = fallback(
 # ---------------------------------------------------------------------------
 %include "tools/crossfade.liq"
 
+# One transition per case below: the old source fades out while the new one
+# fades in. Without the flag the switch cuts.
+switch_transitions =
+  if enable_repeat_crossfade then
+    [crossfade_transition, crossfade_transition]
+  else
+    []
+  end
+
 source_switcher =
   if enable_repeat_schedule then
     switch(
         track_sensitive=false,
+        transitions=switch_transitions,
         [
           (interval_repeat, repeat_branch),
           (interval_live, live_branch)

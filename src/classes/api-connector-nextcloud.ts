@@ -29,13 +29,10 @@ export default class ApiConnectorNextcloud {
   async upload(file: UploadFile) {
     console.log('[nextcloud] Upload started: ' + file.sourceFile);
 
-    await this.uploadToNextcloud(file.sourceFile)
-      .then((response) => {
-        console.log('[nextcloud] Upload finished: ' + file.sourceFile);
-      })
-      .catch((e) => {
-        console.error(e);
-      });
+    // Errors propagate: the autopilot deletes the source file only after
+    // every upload succeeded, so a swallowed failure here loses the recording.
+    await this.uploadToNextcloud(file.sourceFile);
+    console.log('[nextcloud] Upload finished: ' + file.sourceFile);
   }
 
   async uploadToNextcloud(filePath: string) {

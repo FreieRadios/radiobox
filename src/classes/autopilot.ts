@@ -138,7 +138,7 @@ export class Autopilot {
           }
           _unlinkFile(sourceFile);
         } catch (err) {
-          _logError('autopilot', 'finalize (copyRepeat/unlink) failed', err);
+          _logError('autopilot', `finalize (copyRepeat/unlink) failed, keeping ${sourceFile}`, err);
         }
       })();
       pendingJobs.push(job);

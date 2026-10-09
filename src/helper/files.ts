@@ -110,13 +110,10 @@ export const copyFile = (sourceFile: string, destinationPath: string, newName?: 
   const sourceFileName = path.basename(sourceFile);
   const targetFilePath = path.join(getPath(destinationPath), newName || sourceFileName);
 
-  try {
-    // Copy file to directory
-    fs.copyFileSync(sourceFile, targetFilePath);
-    console.log(`[autopilot] Copied ${sourceFile} to ${targetFilePath}`);
-  } catch (error) {
-    console.error(`[autopilot] Error copying file to directory:`, error);
-  }
+  // Throws on failure: the caller deletes the source afterwards, so a copy
+  // that failed silently would lose the repeat.
+  fs.copyFileSync(sourceFile, targetFilePath);
+  console.log(`[autopilot] Copied ${sourceFile} to ${targetFilePath}`);
 };
 
 export const moveFile = (sourceFile: string, destinationFile: string) => {

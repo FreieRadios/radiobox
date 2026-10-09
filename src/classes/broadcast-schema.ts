@@ -141,10 +141,12 @@ export default class BroadcastSchema {
   setWeekdayColIds(header: string[]) {
     const colIds = [];
     this.weekdayColNames.forEach((weekdayName) => {
-      if (!header.indexOf(weekdayName)) {
+      const colId = header.indexOf(weekdayName);
+      // Column 0 holds the show name, so a weekday can't be there either.
+      if (colId < 1) {
         throw "Can't find required weekday in xlsx row 1: " + weekdayName;
       }
-      colIds.push(header.indexOf(weekdayName));
+      colIds.push(colId);
     });
     this.weekdayColIds = colIds;
   }
