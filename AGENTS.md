@@ -52,7 +52,8 @@ details.
   green. Run the relevant workspace's `test` script before declaring done.
 - **Commits:** Conventional Commits with a scope, e.g.
   `feat(studiobox): …`, `fix(studiobox): …`. Co-authored commits append the
-  trailer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+  trailer naming the model that wrote them, e.g.
+  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
   Only commit/push when the user asks; branch first if on `main`.
 
 ## Layout
