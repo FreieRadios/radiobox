@@ -1,0 +1,13 @@
+[Unit]
+Description=studiobox access point on @AP_IFACE@, fallback @AP_FALLBACK_IFACE@
+Documentation=file://@APP_DIR@/station/README.md
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/bin/bash @APP_DIR@/station/bin/ap-watch.sh @AP_IFACE@ @AP_FALLBACK_IFACE@ @AP_COUNTRY@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

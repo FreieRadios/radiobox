@@ -7,10 +7,19 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=@RUN_USER@
-# NC_USER and NC_PASSWORD (an app password). Root-only; systemd reads it
-# before it drops to the user.
+# RCLONE_WEBDAV_USER and RCLONE_WEBDAV_PASS (an app password, obscured).
+# Root-only; systemd reads it before it drops to the user.
 EnvironmentFile=/etc/studiobox/nextcloud.env
-ExecStart=/usr/bin/nextcloudcmd --non-interactive --silent --exclude /etc/Nextcloud/sync-exclude.lst --path "@NEXTCLOUD_PATH@" "@NEXTCLOUD_DIR@" @NEXTCLOUD_URL@
+Environment=RCLONE_WEBDAV_URL=@NEXTCLOUD_URL@/remote.php/dav/files/@NEXTCLOUD_USER@
+Environment=RCLONE_WEBDAV_VENDOR=nextcloud
+# One-way, the server wins. Debian 13's rclone (1.60) writes a download under
+# its final name, so new and changed files go to a hidden folder beside the
+# synced one first and are renamed into place: studiobox never plays half a
+# file. The last sync only deletes what the server no longer has (and fetches,
+# in place, what changed in the seconds since the first).
+ExecStart=/usr/bin/rclone copy ":webdav:@NEXTCLOUD_PATH@" "@NC_INCOMING@" --compare-dest "@NEXTCLOUD_DIR@" --config "" --transfers 2 --log-level INFO --stats 0
+ExecStart=/usr/bin/rclone move "@NC_INCOMING@" "@NEXTCLOUD_DIR@" --delete-empty-src-dirs --config "" --log-level INFO --stats 0
+ExecStart=/usr/bin/rclone sync ":webdav:@NEXTCLOUD_PATH@" "@NEXTCLOUD_DIR@" --config "" --log-level INFO --stats 0
 # Never in the way of a show: lowest CPU and disk priority.
 Nice=19
 IOSchedulingClass=idle

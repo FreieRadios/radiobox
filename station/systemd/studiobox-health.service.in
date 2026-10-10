@@ -1,0 +1,18 @@
+[Unit]
+Description=studiobox health page (kiosk screen, http://<box>:@HEALTH_PORT@/)
+Documentation=file://@APP_DIR@/station/README.md
+After=network.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+EnvironmentFile=/etc/studiobox/station.env
+Environment=STUDIOBOX_CONFIG=@STATE_DIR@/studiobox.yaml
+ExecStart=@NODE_BIN@ @APP_DIR@/station/bin/health.js
+Restart=always
+RestartSec=3
+# Watching, never in the way of the show.
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

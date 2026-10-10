@@ -5,13 +5,13 @@
 #   sudo station/install.sh --env … wifi service        # single steps
 #
 # Steps (all = in this order): packages node repo build icecast config service
-# power usb journal wifi lan mdns desktop nextcloud card. Not in `all`: relay (the
-# receiving box at the desk).
+# power usb journal wifi lan mdns desktop nextcloud health kiosk card. Not in
+# `all`: relay (the receiving box at the desk).
 # Every step can be run again; it converges instead of piling up.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ALL_STEPS=(packages node repo build icecast config service power usb journal wifi lan mdns desktop nextcloud card)
+ALL_STEPS=(packages node repo build icecast config service power usb journal wifi lan mdns desktop nextcloud health kiosk card)
 
 say() { printf '\033[1;32m[station]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[station]\033[0m %s\n' "$*" >&2; }
@@ -58,6 +58,8 @@ load_env() {
   : "${NODE_BIN:=/usr/bin/node}" "${TIMEZONE:=Europe/Berlin}"
   : "${STREAM_ENABLED:=yes}" "${STREAM_SERVER:=local}" "${STREAM_MOUNT:=/studiobox}" "${STREAM_FORMAT:=mp3}"
   : "${AP_ENABLED:=yes}" "${AP_SSID:=studiobox}" "${AP_BAND:=bg}" "${AP_CHANNEL:=6}" "${AP_ADDRESS:=10.42.0.1/24}"
+  : "${AP_FALLBACK_IFACE:=}" "${AP_FALLBACK_BAND:=bg}" "${AP_FALLBACK_CHANNEL:=6}" "${AP_COUNTRY:=}"
+  : "${HEALTH_ENABLED:=yes}" "${HEALTH_PORT:=4446}" "${KIOSK_ENABLED:=no}"
   : "${LAN_SHARE_ENABLED:=no}" "${LAN_ADDRESS:=10.43.0.1/24}"
   : "${NEXTCLOUD_ENABLED:=no}" "${NEXTCLOUD_PATH:=/}" "${NEXTCLOUD_DIR:=$STATE_DIR/nextcloud}" "${NEXTCLOUD_LABEL:=Nextcloud}"
   NODE_DIR="$(dirname "$NODE_BIN")"
@@ -314,21 +316,56 @@ step_wifi() {
   install_env
   say "wifi: access point '$AP_SSID' on $ifc ($AP_BAND ch $AP_CHANNEL), box at ${AP_ADDRESS%/*}"
   rfkill unblock wifi || true
-  nmcli -t -f NAME con show | grep -qx studiobox-ap && nmcli con delete studiobox-ap >/dev/null
-  nmcli con add type wifi ifname "$ifc" con-name studiobox-ap autoconnect yes ssid "$AP_SSID" \
+  # Without a country the kernel's world domain forbids starting an AP on 5 GHz.
+  if [ -n "$AP_COUNTRY" ]; then
+    say "wifi: country $AP_COUNTRY"
+    echo "options cfg80211 ieee80211_regdom=$AP_COUNTRY" >/etc/modprobe.d/studiobox-wifi.conf
+    iw reg set "$AP_COUNTRY" || true
+  fi
+  # With a fallback card neither profile joins by itself: ap-watch decides,
+  # so the two never hold the same address at once.
+  local auto=yes
+  [ -n "$AP_FALLBACK_IFACE" ] && auto=no
+  ap_profile studiobox-ap "$ifc" "$AP_BAND" "$AP_CHANNEL" "$auto"
+  if [ -n "$AP_FALLBACK_IFACE" ]; then
+    say "wifi: fallback on $AP_FALLBACK_IFACE ($AP_FALLBACK_BAND ch $AP_FALLBACK_CHANNEL) while $ifc is missing or fails"
+    ap_profile studiobox-ap-fallback "$AP_FALLBACK_IFACE" "$AP_FALLBACK_BAND" "$AP_FALLBACK_CHANNEL" no
+  else
+    nmcli -t -f NAME con show | grep -qx studiobox-ap-fallback && nmcli con delete studiobox-ap-fallback >/dev/null
+  fi
+  # The card can only be one thing: other Wi-Fi profiles stay, but only by hand.
+  local name
+  while IFS=: read -r name type; do
+    [ "$type" = 802-11-wireless ] && [[ "$name" != studiobox-ap* ]] || continue
+    nmcli con modify "$name" connection.autoconnect no && say "wifi: '$name' no longer joins by itself"
+  done < <(nmcli -t -f NAME,TYPE con show)
+  if [ -n "$AP_FALLBACK_IFACE" ]; then
+    sed -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@AP_IFACE@|$ifc|g" -e "s|@AP_FALLBACK_IFACE@|$AP_FALLBACK_IFACE|g" -e "s|@AP_COUNTRY@|$AP_COUNTRY|g" \
+      "$HERE/systemd/studiobox-ap-watch.service.in" >/etc/systemd/system/studiobox-ap-watch.service
+    systemctl daemon-reload
+    systemctl enable studiobox-ap-watch.service >/dev/null
+    systemctl restart studiobox-ap-watch.service
+    say "wifi: studiobox-ap-watch picks the card (journalctl -u studiobox-ap-watch)"
+  else
+    if systemctl is-enabled studiobox-ap-watch.service >/dev/null 2>&1; then
+      systemctl disable --now studiobox-ap-watch.service >/dev/null
+    fi
+    rm -f /etc/systemd/system/studiobox-ap-watch.service
+    nmcli con up studiobox-ap >/dev/null && say "wifi: up"
+  fi
+}
+
+# ap_profile <name> <iface> <band> <channel> <autoconnect>: one AP profile,
+# recreated from the env file every time.
+ap_profile() {
+  nmcli -t -f NAME con show | grep -qx "$1" && nmcli con delete "$1" >/dev/null
+  nmcli con add type wifi ifname "$2" con-name "$1" autoconnect "$5" ssid "$AP_SSID" \
     connection.autoconnect-priority 100 \
-    802-11-wireless.mode ap 802-11-wireless.band "$AP_BAND" 802-11-wireless.channel "$AP_CHANNEL" \
+    802-11-wireless.mode ap 802-11-wireless.band "$3" 802-11-wireless.channel "$4" \
     802-11-wireless.powersave 2 \
     wifi-sec.key-mgmt wpa-psk wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp \
     wifi-sec.psk "$AP_PASSPHRASE" \
     ipv4.method shared ipv4.addresses "$AP_ADDRESS" ipv6.method disabled >/dev/null
-  # The card can only be one thing: other Wi-Fi profiles stay, but only by hand.
-  local name
-  while IFS=: read -r name type; do
-    [ "$type" = 802-11-wireless ] && [ "$name" != studiobox-ap ] || continue
-    nmcli con modify "$name" connection.autoconnect no && say "wifi: '$name' no longer joins by itself"
-  done < <(nmcli -t -f NAME,TYPE con show)
-  nmcli con up studiobox-ap >/dev/null && say "wifi: up"
 }
 
 step_lan() {
@@ -421,20 +458,20 @@ nextcloud_login_ok() {
 }
 
 # A Nextcloud folder kept on the box (music, jingles, pre-produced shows):
-# nextcloudcmd under a system timer, no desktop client, no login needed.
-# Two-way, so whatever is deleted on the server goes here too - record
-# elsewhere (RECORDINGS_DIR), never into this folder.
+# rclone under a system timer, no desktop client, no login needed. One-way:
+# the server's folder wins, files that are only here are deleted - record
+# elsewhere (RECORDINGS_DIR), never into this folder. Not nextcloudcmd: a
+# server may refuse older desktop clients (Nextcloud 33 can demand >= 4.0.1,
+# Debian 13 has 3.16), but never plain WebDAV.
 step_nextcloud() {
   [ "$NEXTCLOUD_ENABLED" = yes ] || {
     say "nextcloud: off"
     return
   }
-  command -v nextcloudcmd >/dev/null || {
-    say "nextcloud: apt nextcloud-desktop-cmd"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nextcloud-desktop-cmd
+  command -v rclone >/dev/null || {
+    say "nextcloud: apt rclone"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rclone
   }
-  nextcloudcmd --help 2>&1 | grep -q NC_PASSWORD ||
-    die "nextcloud: this nextcloudcmd does not read NC_PASSWORD from the environment - it is too old"
   [ -n "${NEXTCLOUD_URL:-}" ] || set_env NEXTCLOUD_URL "$(ask 'Nextcloud address (https://…)')"
   set_env NEXTCLOUD_URL "${NEXTCLOUD_URL%/}"
   [[ "$NEXTCLOUD_URL" == https://* ]] || die "nextcloud: NEXTCLOUD_URL must start with https://"
@@ -451,24 +488,33 @@ step_nextcloud() {
     say "           (Personal settings > Security > Devices & sessions)"
     for try in 1 2 3; do
       pw="$(ask "App password for $NEXTCLOUD_USER" secret)" || exit 1
-      [[ "$pw" != *"'"* ]] && nextcloud_login_ok "$NEXTCLOUD_USER" "$pw" && break
+      [[ "$pw" != *[\'[:space:]]* ]] && nextcloud_login_ok "$NEXTCLOUD_USER" "$pw" && break
       warn "nextcloud: login failed (attempt $try of 3)"
       pw=""
     done
     [ -n "$pw" ] || die "nextcloud: no working login - check address, user and app password"
-    install -d -m 0755 /etc/studiobox
-    (
-      umask 077
-      printf "NC_USER='%s'\nNC_PASSWORD='%s'\n" "$NEXTCLOUD_USER" "$pw" >"$cred"
-    )
     say "nextcloud: login saved to $cred (root only)"
   fi
+  # Written every time, so a box set up for nextcloudcmd gets rclone's lines.
+  # rclone takes the password only in its obscured form.
+  install -d -m 0755 /etc/studiobox
+  (
+    umask 077
+    printf "NC_USER='%s'\nNC_PASSWORD='%s'\nRCLONE_WEBDAV_USER='%s'\nRCLONE_WEBDAV_PASS='%s'\n" \
+      "$NEXTCLOUD_USER" "$pw" "$NEXTCLOUD_USER" "$(printf '%s' "$pw" | rclone obscure -)" >"$cred"
+  )
+  rm -rf /etc/studiobox/nextcloud
 
+  # Downloads land here first (see the unit); beside the folder, not in it,
+  # so it is on the same disk and rclone can rename them into place.
+  local incoming
+  incoming="$(dirname "$NEXTCLOUD_DIR")/.$(basename "$NEXTCLOUD_DIR").incoming"
   install -d -o "$RUN_USER" -m 0755 "$NEXTCLOUD_DIR"
+  install -d -o "$RUN_USER" -m 0755 "$incoming"
   say "nextcloud: $NEXTCLOUD_URL $NEXTCLOUD_PATH -> $NEXTCLOUD_DIR, every 5 minutes"
   sed -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@NEXTCLOUD_URL@|$NEXTCLOUD_URL|g" \
-    -e "s|@NEXTCLOUD_PATH@|$NEXTCLOUD_PATH|g" -e "s|@NEXTCLOUD_DIR@|$NEXTCLOUD_DIR|g" \
-    "$HERE/systemd/nextcloud-sync.service.in" >/etc/systemd/system/nextcloud-sync.service
+    -e "s|@NEXTCLOUD_USER@|$NEXTCLOUD_USER|g" -e "s|@NEXTCLOUD_PATH@|$NEXTCLOUD_PATH|g" -e "s|@NEXTCLOUD_DIR@|$NEXTCLOUD_DIR|g" \
+    -e "s|@NC_INCOMING@|$incoming|g" "$HERE/systemd/nextcloud-sync.service.in" >/etc/systemd/system/nextcloud-sync.service
   install -m 0644 "$HERE/systemd/nextcloud-sync.timer" /etc/systemd/system/nextcloud-sync.timer
   systemctl daemon-reload
   systemctl enable nextcloud-sync.timer >/dev/null
@@ -476,6 +522,47 @@ step_nextcloud() {
   systemctl start --no-block nextcloud-sync.service
   systemctl start nextcloud-sync.timer
   say "nextcloud: first sync running (journalctl -u nextcloud-sync -f)"
+}
+
+# The health page (station/bin/health.js): its own service, so it still
+# speaks when studiobox doesn't.
+step_health() {
+  if [ "$HEALTH_ENABLED" != yes ]; then
+    systemctl disable --now studiobox-health.service >/dev/null 2>&1 || true
+    say "health: off"
+    return
+  fi
+  install_env
+  sed -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@STATE_DIR@|$STATE_DIR|g" \
+    -e "s|@NODE_BIN@|$NODE_BIN|g" -e "s|@HEALTH_PORT@|$HEALTH_PORT|g" \
+    "$HERE/systemd/studiobox-health.service.in" >/etc/systemd/system/studiobox-health.service
+  systemctl daemon-reload
+  systemctl enable studiobox-health.service >/dev/null
+  systemctl restart studiobox-health.service
+  say "health: http://${AP_ADDRESS%/*}:$HEALTH_PORT/ (and http://localhost:$HEALTH_PORT/ on the box)"
+}
+
+# The health page full screen on the box's own display: cage (one Wayland
+# app, no desktop) + Chromium on tty1. Text login moves to tty2.
+step_kiosk() {
+  if [ "$KIOSK_ENABLED" != yes ]; then
+    if systemctl is-enabled studiobox-kiosk.service >/dev/null 2>&1; then
+      systemctl disable --now studiobox-kiosk.service >/dev/null
+    fi
+    say "kiosk: off"
+    return
+  fi
+  [ "$HEALTH_ENABLED" = yes ] || warn "kiosk: HEALTH_ENABLED is not yes - the screen will say so"
+  say "kiosk: apt cage chromium"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends cage chromium fonts-dejavu-core
+  install -d -o "$RUN_USER" -m 0700 "$STATE_DIR/kiosk"
+  sed -e "s|@RUN_USER@|$RUN_USER|g" -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@STATE_DIR@|$STATE_DIR|g" \
+    -e "s|@KIOSK_URL@|http://localhost:$HEALTH_PORT/|g" \
+    "$HERE/systemd/studiobox-kiosk.service.in" >/etc/systemd/system/studiobox-kiosk.service
+  systemctl daemon-reload
+  systemctl enable studiobox-kiosk.service >/dev/null
+  systemctl restart studiobox-kiosk.service
+  say "kiosk: health page on the display (tty1); text login on tty2 (Ctrl+Alt+F2)"
 }
 
 step_card() {

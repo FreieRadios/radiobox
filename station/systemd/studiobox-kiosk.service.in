@@ -1,0 +1,34 @@
+[Unit]
+Description=studiobox kiosk: health page full screen on the local display
+Documentation=file://@APP_DIR@/station/README.md
+After=systemd-user-sessions.service studiobox-health.service
+Wants=studiobox-health.service
+# The kiosk takes tty1; a text login stays on tty2 (Ctrl+Alt+F2).
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=@RUN_USER@
+# A real login session on seat0, so the compositor may open the display.
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+# cage: one full-screen app, no desktop. Chromium's own profile under
+# STATE_DIR, no restore bubbles, no first-run pages.
+ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --kiosk --ozone-platform=wayland \
+  --user-data-dir=@STATE_DIR@/kiosk --no-first-run --noerrdialogs --disable-infobars \
+  --disable-session-crashed-bubble --password-store=basic --disable-features=Translate --check-for-update-interval=31536000 \
+  @KIOSK_URL@
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>studiobox · Zustand</title>
+    <style>
+      /* Tokens as in packages/studiobox/src/meters/public/tokens.css (dark only:
+   the kiosk sits in a dim studio). */
+      :root {
+        color-scheme: dark;
+        --bg: #101214;
+        --surface: #1a1d21;
+        --raised: #24282e;
+        --line: #33383f;
+        --text: #e8eaed;
+        --muted: #a3aab3;
+        --ok: #5fd08a;
+        --warn: #ffc94d;
+        --onair: #ff5c5c;
+        --info: #7cc8ff;
+        --chip-red: #c62828;
+        --chip-green: #1e7d46;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          clamp(13px, 0.85vw, 17px) / 1.35 system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        font-variant-numeric: tabular-nums;
+        padding: 1.2em 1.4em;
+        display: flex;
+        flex-direction: column;
+        gap: 1em;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 1em;
+        flex-wrap: wrap;
+      }
+      #state {
+        flex: 1;
+        min-width: 12em;
+        padding: 0.55em 0.9em;
+        border-radius: 12px;
+        font-size: 1.6em;
+        font-weight: 700;
+        background: var(--surface);
+        border-left: 12px solid var(--muted);
+      }
+      #state.ok {
+        border-color: var(--ok);
+      }
+      #state.warn {
+        border-color: var(--warn);
+        color: var(--warn);
+      }
+      #state.fail {
+        border-color: var(--onair);
+        background: var(--chip-red);
+        color: #fff;
+      }
+      #state.lost {
+        border-color: var(--onair);
+        color: var(--onair);
+      }
+      #clock {
+        font-size: 2.2em;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      #host {
+        color: var(--muted);
+      }
+      /* Columns, not a grid: a short panel doesn't leave a hole beside a long
+         one, and on the kiosk everything has to fit one screen. */
+      main {
+        columns: 17em;
+        column-gap: 1em;
+      }
+      section {
+        background: var(--surface);
+        border-radius: 12px;
+        padding: 0.8em 1em;
+        break-inside: avoid;
+        margin-bottom: 1em;
+      }
+      h2 {
+        margin: 0 0 0.4em;
+        font-size: 0.9em;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .row {
+        display: grid;
+        /* A long value (an address) wraps instead of running over the edge. */
+        grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
+        column-gap: 0.8em;
+        padding: 0.45em 0;
+        border-top: 1px solid var(--line);
+      }
+      .row:first-of-type {
+        border-top: 0;
+      }
+      .label {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .value {
+        overflow-wrap: anywhere;
+        font-size: 1.2em;
+        font-weight: 600;
+        text-align: right;
+      }
+      .detail {
+        grid-column: 1/-1;
+        color: var(--muted);
+        font-size: 0.85em;
+      }
+      .word {
+        font-size: 0.7em;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        margin-left: 0.5em;
+        padding: 0.15em 0.45em;
+        border-radius: 6px;
+        vertical-align: middle;
+      }
+      .ok .value {
+        color: var(--ok);
+      }
+      .warn .value {
+        color: var(--warn);
+      }
+      .warn .word {
+        background: var(--warn);
+        color: #101214;
+      }
+      .fail .value {
+        color: var(--onair);
+      }
+      .fail .word {
+        background: var(--chip-red);
+        color: #fff;
+      }
+      .onair .value {
+        background: var(--chip-red);
+        color: #fff;
+        border-radius: 8px;
+        padding: 0 0.4em;
+      }
+      .rec .value {
+        color: var(--onair);
+      }
+      /* QR codes (/codes.json), folded into the WLAN panel. */
+      details.join {
+        border-top: 1px solid var(--line);
+        padding-top: 0.45em;
+      }
+      details.join summary {
+        cursor: pointer;
+        color: var(--muted);
+      }
+      .join .body {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(8em, 1fr));
+        gap: 0.8em;
+        margin-top: 0.5em;
+      }
+      .join .card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4em;
+        min-width: 0;
+      }
+      .join .name {
+        font-weight: 700;
+      }
+      .join .link {
+        color: var(--info);
+        font-size: 0.85em;
+      }
+      .join .code {
+        width: min(10em, 100%);
+        background: #fff;
+        border-radius: 8px;
+        line-height: 0;
+      }
+      .join .code svg {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .join dl {
+        margin: 0;
+        text-align: center;
+      }
+      .join dt {
+        color: var(--muted);
+        font-size: 0.85em;
+      }
+      .join dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+        font-size: 1.05em;
+        font-weight: 700;
+        user-select: all;
+      }
+      body.lost main {
+        opacity: 0.35;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div id="state" role="status" aria-live="polite">Verbinde …</div>
+      <div>
+        <div id="clock">--:--:--</div>
+        <div id="host"></div>
+      </div>
+    </header>
+    <main id="groups"></main>
+    <script>
+      'use strict';
+      const WORDS = { warn: 'ACHTUNG', fail: 'STÖRUNG' };
+      const TITLE = { ok: 'Alles in Ordnung', warn: 'Achtung – bitte prüfen', fail: 'Störung' };
+      const $ = (id) => document.getElementById(id);
+      const el = (tag, cls, text) => {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+      };
+      let skew = 0;
+      // Kept across renders, so it stays open or closed as the viewer left it.
+      const join = el('details', 'join');
+      join.hidden = true;
+      let page = null;
+
+      function render(h) {
+        // A new version of this page (an update): load it.
+        if (page && h.page && h.page !== page) return location.reload();
+        page = page || h.page;
+        document.body.classList.remove('lost');
+        const st = $('state');
+        st.className = h.state;
+        // Name what is wrong, so the screen answers "what?" from across the room.
+        const bad = h.groups.flatMap((g) =>
+          g.items.filter((i) => i.state === 'fail' || i.state === 'warn')
+        );
+        st.textContent =
+          (TITLE[h.state] || '…') + (bad.length ? ': ' + bad.map((i) => i.label).join(', ') : '');
+        $('host').textContent = h.host || '';
+        const main = $('groups');
+        main.replaceChildren(
+          ...h.groups.map((g) => {
+            const s = el('section');
+            s.append(el('h2', '', g.title));
+            for (const i of g.items) {
+              const r = el('div', 'row ' + i.state);
+              r.append(el('div', 'label', i.label));
+              const v = el('div', 'value', i.value);
+              if (WORDS[i.state]) v.append(el('span', 'word', WORDS[i.state]));
+              r.append(v);
+              if (i.detail) r.append(el('div', 'detail', i.detail));
+              s.append(r);
+            }
+            if (g.title === 'WLAN') s.append(join);
+            return s;
+          })
+        );
+        fit();
+      }
+
+      // The kiosk can't scroll: shrink the page until it fits the screen. Only
+      // on the box's own screen (it opens localhost); a tablet scrolls.
+      const kiosk = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+      function fit() {
+        if (!kiosk) return;
+        let z = 1;
+        document.body.style.zoom = '1';
+        while (z > 0.55 && document.documentElement.scrollHeight > innerHeight + 1) {
+          z -= 0.05;
+          document.body.style.zoom = String(z);
+        }
+      }
+      addEventListener('resize', fit);
+
+      function lost() {
+        document.body.classList.add('lost');
+        const st = $('state');
+        st.className = 'lost';
+        st.textContent = 'Keine Antwort vom Zustandsdienst – Werte veraltet';
+      }
+
+      async function poll() {
+        try {
+          const t0 = Date.now();
+          const r = await fetch('health.json', { cache: 'no-store' });
+          if (!r.ok) throw new Error(String(r.status));
+          const h = await r.json();
+          setSkew(h.now, t0, Date.now());
+          render(h);
+        } catch {
+          lost();
+        }
+        setTimeout(poll, 2000);
+      }
+
+      // The studio WLAN's and the technician's QR codes, folded in the WLAN
+      // panel; no fold without either.
+      function codeCard(title, svg, label) {
+        const c = el('div', 'card');
+        const code = el('div', 'code');
+        code.setAttribute('role', 'img');
+        code.setAttribute('aria-label', label);
+        code.innerHTML = svg; // our own server's qrcode output
+        c.append(el('div', 'name', title), code);
+        return c;
+      }
+      async function pollCodes() {
+        try {
+          const r = await fetch('codes.json', { cache: 'no-store' });
+          if (!r.ok) throw new Error(String(r.status));
+          const d = await r.json();
+          const box = el('div', 'body');
+          if (d.wifi) {
+            const c = codeCard('WLAN', d.wifi.svg, 'QR-Code: ins Studio-WLAN');
+            const dl = el('dl');
+            dl.append(el('dt', '', 'Name'), el('dd', '', d.wifi.ssid));
+            dl.append(el('dt', '', 'Passwort'), el('dd', '', d.wifi.password));
+            c.append(dl);
+            box.append(c);
+          }
+          if (d.tech) {
+            const c = codeCard('Technik', d.tech.svg, 'QR-Code: Technik-Ansicht');
+            const a = el('a', 'link', 'Technik-Ansicht öffnen');
+            a.href = d.tech.url;
+            c.append(a);
+            box.append(c);
+          }
+          join.replaceChildren(el('summary', '', 'QR-Codes & Passwort'), box);
+          // Open on the box's own screen: nobody can click there.
+          if (join.hidden && kiosk) join.open = true;
+          join.hidden = !box.childElementCount;
+          fit();
+          setTimeout(pollCodes, 60000);
+        } catch {
+          join.hidden = true;
+          setTimeout(pollCodes, 10000);
+        }
+      }
+
+      // The clock shows the box's time. The answer's `now` is from somewhere
+      // within the round trip, so take its middle, and only follow a real
+      // difference: small jitter would make the seconds skip or step back.
+      function setSkew(now, t0, t1) {
+        if (!now || t1 - t0 > 1000) return;
+        const s = now - (t0 + t1) / 2;
+        if (Math.abs(s - skew) > 500) skew = s;
+      }
+
+      function tick() {
+        const d = new Date(Date.now() + skew);
+        $('clock').textContent = d.toLocaleTimeString('de-DE', { hour12: false });
+        // Just past the next full second: a timer that fires a little early
+        // would show the same second twice and then skip one.
+        setTimeout(tick, 1020 - d.getMilliseconds());
+      }
+
+      poll();
+      pollCodes();
+      tick();
+    </script>
+  </body>
+</html>
