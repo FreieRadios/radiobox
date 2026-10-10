@@ -6,7 +6,7 @@ Wants=network-online.target docker.service
 
 [Service]
 Type=simple
-User=tsing
+User=radiobox
 Group=audio
 EnvironmentFile=/path/to/.env
 ExecStartPre=/bin/sleep 5

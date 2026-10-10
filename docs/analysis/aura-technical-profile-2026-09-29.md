@@ -64,7 +64,7 @@ Source: https://gitlab.servus.at/api/v4/groups/aura/projects?include_subgroups=t
 
 | Fact | Source | Date |
 |---|---|---|
-| Initiative started by five Austrian stations: Radiofabrik (Salzburg), Radio FRO (Linz), Freies Radio Freistadt, ORANGE 94.0 (Vienna), Radio Helsinki (Graz). Based on Radio Helsinki's programme management module and the playout software "Comba" by Michael Liebler (Radio Z, Nuremberg) | https://digital.danubestreamwaves.org/en/2020/11/automated-radio-en/ | published 2020-11-12 |
+| Initiative started by five Austrian stations: Radiofabrik (Salzburg), Radio FRO (Linz), Freies Radio Freistadt, ORANGE 94.0 (Vienna), Radio Helsinki (Graz). Based on Radio Helsinki's programme management module and the playout software "Comba" by a member of the partner station | https://digital.danubestreamwaves.org/en/2020/11/automated-radio-en/ | published 2020-11-12 |
 | "5 Radios im Jahr 2017" joined forces; developed as free software under (A)GPL | https://www.community-media.net/aura-ueberblick-und-ausblick-zum-automated-radio-projekt/ | published 2020-10-26 |
 | "In 2021 haben sich drei deutsche freie Radios dem österreichischen AuRa Konsortium angeschlossen." (names of the three are not given in this source) | https://www.community-media.net/aura-automated-radio/ | published 2022-10-23 |
 | Organisations listed as **financial** contributors in the docs: Radio FRO (Freies Radio Oberösterreich), Freies Radio Freistadt, Freies Radio Wüste Welle (DE, Tübingen), Freirad (Freies Radio Innsbruck), ORANGE 94.0 (Vienna), Proton - das Freie Radio, Radio Helsinki, Radio free FM (DE, Ulm), Radiofabrik | https://docs.aura.radio/en/latest/ (contributors table) | accessed 2026-09-29 |
@@ -94,7 +94,7 @@ Source: https://gitlab.servus.at/api/v4/groups/aura/projects?include_subgroups=t
 | Docs front page lists 51 contributor entries (all-contributors format); of these 12 are organisations (9 stations as "Financial", plus CBA, Jointech, servus.at as "Infrastructure") and 39 are individuals. README badge of aura/aura says "all_contributors-49" | https://docs.aura.radio/en/latest/ ; https://gitlab.servus.at/aura/aura/-/raw/main/README.md | accessed 2026-09-29 |
 | Commits on default branches, 2026-01-01 to 2026-09-29, counted via GitLab API over the 10 active code repos: **1,528 commits in total**. Per repo: aura 487, battery 320, steering 252, dashboard 202, dashboard-clock 110, engine 71, engine-core 37, engine-api 34, engine-recorder 11, can 4 | https://gitlab.servus.at/api/v4/projects/:id/repository/commits?since=2026-01-01 (own count) | accessed 2026-09-29 |
 | Per month 2026: Jan 15, Feb 297, Mar 328, Apr 301, May 174, Jun 147, Jul 104, Aug 88, Sep 74 | same | same |
-| Distinct commit author names in 2026: 11 strings, which correspond to about 8 persons. Four persons account for about 97 % of commits: Konrad Mohrfeldt 661, David Trattnig 477, Ernesto Rico Schmidt 188, Leon Faber approx. 156 (several name variants). Others: "kalipso" 36, David (Jointech) 5, Kay Effenberger 3, renatn oblak 2 | same | same |
+| Distinct commit author names in 2026: 11 strings, which correspond to about 8 persons. Four persons account for about 97 % of commits (about 661, 477, 188 and 156); the other four together for under 50 | same | same |
 | Issue tracker (group level): 270 open, 1,817 closed issues; 338 issues created since 2026-01-01 | https://gitlab.servus.at/api/v4/groups/aura/issues (x-total header) | accessed 2026-09-29 |
 
 Caveat: counts cover default branches only; merge commits are included; author-name variants were not deduplicated by e-mail.
@@ -447,7 +447,7 @@ Three separate PostgreSQL instances (one each for steering, battery, engine-api)
 | **Radio free FM**, Ulm | **DE** | Financial contributor; staff member listed for talks/promotion; ran project "danube streamwaves digital". **Production use: [NOT VERIFIED]** | docs contributors; danube streamwaves article | accessed 2026-09-29 |
 | **Querfunk**, Karlsruhe | **DE** | 2020: "probably" to be established. Host `aura.querfunk.de` exists and serves a page titled "AURA Dashboard", but `/steering/api/v1/...` returned HTTP 400 and `/engine/api/v1/playlog/current` returned 502. This shows an installation exists; it does **not** show production use | https://digital.danubestreamwaves.org/en/2020/11/automated-radio-en/ ; own probes | 2020-11-12; 2026-09-29 |
 | **bermudafunk**, Mannheim | **DE** | 2020: "probably". DNS record `aura.bermudafunk.org` exists; host did not answer. **[NOT VERIFIED]** | same | same |
-| Radio network in eastern Germany (unnamed) using calcms | DE | In Oct 2023 the collectives rokoli and UNI:CODE considered a commission of approx. EUR 35,000 gross to extend AURA for a "Radioverbund aus Ostdeutschland" (multi-tenancy, sharing content between stations). Outcome **[NOT VERIFIED]**; the multi-tenancy epic aura#239 is still open in the backlog. Note: the author of that issue, Konrad Mohrfeldt, is the most active committer in 2026 | https://gitlab.servus.at/aura/aura/-/work_items/235 | created 2023-10-11 |
+| Radio network in eastern Germany (unnamed) using calcms | DE | In Oct 2023 the collectives rokoli and UNI:CODE considered a commission of approx. EUR 35,000 gross to extend AURA for a "Radioverbund aus Ostdeutschland" (multi-tenancy, sharing content between stations). Outcome **[NOT VERIFIED]**; the multi-tenancy epic aura#239 is still open in the backlog. Note: the author of that issue is the most active committer in 2026 | https://gitlab.servus.at/aura/aura/-/work_items/235 | created 2023-10-11 |
 
 Historic status statements:
 - Nov 2020: test instance aura-test.o94.at; production testing planned for early 2021 (https://www.community-media.net/aura-ueberblick-und-ausblick-zum-automated-radio-projekt/).
@@ -460,14 +460,14 @@ Historic status statements:
 
 Two German stations (Wüste Welle, free FM) are listed as financial contributors, and installations or DNS entries exist for Querfunk and bermudafunk. **No verified evidence was found that any German station runs AURA in production as of 2026-09-29.**
 
-### 6.3 Radio Z Nürnberg
+### 6.3 The partner station
 
 | Fact | Source | Date |
 |---|---|---|
-| AURA's playout concept builds on **Comba**, written by **Michael Liebler (Radio Z, Nuremberg)**: "Das ursprüngliche Konzept von AuRa baut auf einer Idee aus BfR Tech Treffen auf, die von Michael Liebler - Radio Z im Projekt Comba umgesetzt wurde" (Comba: https://github.com/FreieRadios/comba) | https://www.community-media.net/aura-automated-radio/ ; https://digital.danubestreamwaves.org/en/2020/11/automated-radio-en/ | 2022-10-23; 2020-11-12 |
-| Michael Liebler is listed as code contributor in the AURA docs (gitlab.servus.at/michael) | https://docs.aura.radio/en/latest/ | accessed 2026-09-29 |
-| Radio Z is **not** listed as financial contributor or sponsor | same | same |
-| Radio Z running AURA: **[NOT VERIFIED] - no evidence found.** `aura.radio-z.net` has no DNS record (guessed name only). A GitLab issue search for "Radio Z" returns only fuzzy matches on "Radio". A dedicated web search could not be completed because the search quota was exhausted | own probes | 2026-09-29 |
+| AURA's playout concept builds on **Comba**, written by a member of the partner station: the original AuRa concept builds on an idea from a BfR tech meeting that was implemented in the Comba project (Comba: https://github.com/FreieRadios/comba) | https://www.community-media.net/aura-automated-radio/ ; https://digital.danubestreamwaves.org/en/2020/11/automated-radio-en/ | 2022-10-23; 2020-11-12 |
+| The author of Comba is listed as code contributor in the AURA docs | https://docs.aura.radio/en/latest/ | accessed 2026-09-29 |
+| The station is **not** listed as financial contributor or sponsor | same | same |
+| The station running AURA: **[NOT VERIFIED] - no evidence found.** A guessed AURA host name under the station's domain has no DNS record. A GitLab issue search for the station's name returns only fuzzy matches. A dedicated web search could not be completed because the search quota was exhausted | own probes | 2026-09-29 |
 
 ### 6.4 Migration stories and problems
 
@@ -559,7 +559,7 @@ Source: https://gitlab.servus.at/api/v4/groups/aura/issues?state=opened (270 ope
 | Financing after mid-2026 / long-term maintenance model | Docs, issue aura#621 (empty), station pages |
 | Production use at Radio Helsinki, FREIRAD, Proton, Freistadt, Radiofabrik | DNS/HTTP probes of guessed host names, web search, docs |
 | Production use at any German station | DNS/HTTP probes, conference pages, web search |
-| Radio Z Nürnberg using AURA | DNS probe of guessed host, GitLab search; only the Comba origin is documented |
+| The partner station using AURA | DNS probe of guessed host, GitLab search; only the Comba origin is documented |
 | Names of the "three German free radios" that joined in 2021 | Source gives no names; Wüste Welle and free FM are listed as financial contributors, the third is unknown |
 | Exact date and content of the ORANGE 94.0 switch-over announcement | Page returns 404; archive.org lookup was rate-limited (HTTP 429); only a search-engine snippet is available; year 2026 inferred from weekdays |
 | Content of the ZWCM 2025 talk (roll-out status AT/DE, transfer between instances) | Only the abstract was read; audio not evaluated |

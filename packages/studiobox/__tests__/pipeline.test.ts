@@ -57,7 +57,7 @@ function make(over: Partial<StudioboxConfig> = {}, mics = [mic(1, 'Gast'), mic(2
         enabled: true,
         dir,
         segmentSeconds: 0,
-        station: 'Radio Z',
+        station: 'Radio Beispiel',
         ...(over.output?.backup?.autoArm ? { autoArm: true } : {}),
       },
     },
@@ -282,7 +282,7 @@ describe('Pipeline: recording (roadmap M1.6)', () => {
     for (const [k, v] of Object.entries(JSON.parse(res.stdout.toString()).format.tags)) {
       tags[k.toUpperCase()] = String(v);
     }
-    expect(tags.ORGANIZATION).toBe('Radio Z');
+    expect(tags.ORGANIZATION).toBe('Radio Beispiel');
     expect(tags.DATE).toBe('2026-10-05');
     expect(tags.COMMENT).toMatch(/^processed by studiobox \d+\.\d+\.\d+$/);
     expect(tags.TITLE).toMatch(/^studiobox 20261005-1900\d\d$/);

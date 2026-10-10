@@ -13,7 +13,7 @@ const entry = (name: string, playAtMs: number, folder = 0): ScheduleEntry => ({
 
 describe('parsePlayAtMs', () => {
   it('parses a YYYYMMDD-HHMMSS timestamp as local time', () => {
-    const ms = parsePlayAtMs('radioz-stream-20260722-143000.flac');
+    const ms = parsePlayAtMs('station-stream-20260722-143000.flac');
     expect(ms).toBe(new Date(2026, 6, 22, 14, 30, 0).getTime());
   });
 

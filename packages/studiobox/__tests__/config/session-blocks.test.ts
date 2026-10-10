@@ -45,13 +45,22 @@ describe('config: buffered-design blocks and their defaults', () => {
     expect(c.airDelay.seconds).toBe(60);
   });
 
+  it('needs the eve app named once listener feedback is on', () => {
+    const eve = 'url: "http://eve:3000", username: studiobox, password: pw';
+    expect(load(['listeners: { enabled: false }']).cfg().listeners.app).toBe('');
+    expect(() => load([`listeners: { enabled: true, ${eve} }`]).cfg()).toThrow('listeners.app');
+    expect(
+      load([`listeners: { enabled: true, ${eve}, app: my-station }`]).cfg().listeners.app
+    ).toBe('my-station');
+  });
+
   it('records one continuous file unless segments are asked for', () => {
     expect(load().cfg().output.backup).toMatchObject({ enabled: true, segmentSeconds: 0 });
     const seg = load([], {
       output:
-        'output:\n  backup: { enabled: true, dir: "./rec", segmentSeconds: 3600, station: "Radio Z" }',
+        'output:\n  backup: { enabled: true, dir: "./rec", segmentSeconds: 3600, station: "Radio Beispiel" }',
     }).cfg();
-    expect(seg.output.backup).toMatchObject({ segmentSeconds: 3600, station: 'Radio Z' });
+    expect(seg.output.backup).toMatchObject({ segmentSeconds: 3600, station: 'Radio Beispiel' });
   });
 
   it('fills in every output so none is ever undefined', () => {
@@ -140,14 +149,17 @@ describe('config: buffered-design blocks and their defaults', () => {
 
   it('the header logo is a picture next to the config, checked at load', () => {
     const m = (logo: string) => ({
-      meters: `meters: { enabled: true, logo: "${logo}", logoAlt: Radio Z }`,
+      meters: `meters: { enabled: true, logo: "${logo}", logoAlt: Radio Beispiel }`,
     });
     const none = load().cfg().meters;
     expect(none.logo).toBeUndefined();
     expect(none.logoAlt).toBe('studiobox');
     const ok = load([], m('z.svg'));
     fs.writeFileSync(path.join(ok.dir, 'z.svg'), '<svg/>');
-    expect(ok.cfg().meters).toMatchObject({ logo: path.join(ok.dir, 'z.svg'), logoAlt: 'Radio Z' });
+    expect(ok.cfg().meters).toMatchObject({
+      logo: path.join(ok.dir, 'z.svg'),
+      logoAlt: 'Radio Beispiel',
+    });
     expect(load([], m('nowhere.svg')).cfg).toThrow(/does not exist/);
     expect(load([], m('z.gif')).cfg).toThrow(/not an \.svg/);
   });
@@ -199,12 +211,12 @@ describe('config: buffered-design blocks and their defaults', () => {
     ];
     expect(load(['filePlayer:', '  enabled: true']).cfg().filePlayer!.streams).toEqual([]);
     expect(
-      load(fp('{ label: Studio, url: "http://maik:4445/stream?format=flac&k=S" }')).cfg()
+      load(fp('{ label: Studio, url: "http://studio-pc:4445/stream?format=flac&k=S" }')).cfg()
         .filePlayer!.streams
     ).toEqual([
       {
         label: 'Studio',
-        url: 'http://maik:4445/stream?format=flac&k=S',
+        url: 'http://studio-pc:4445/stream?format=flac&k=S',
         bufferMs: 2000,
         fallback: 'bed',
         autoStart: false,
@@ -230,13 +242,13 @@ describe('config: buffered-design blocks and their defaults', () => {
   });
 
   it('streams: the container is named, or taken from the URL', () => {
-    expect(streamFormat(undefined, 'http://maik:4445/stream?format=flac&k=S')).toBe('ogg');
-    expect(streamFormat(undefined, 'http://maik:4445/stream?k=S')).toBe('ogg');
-    expect(streamFormat(undefined, 'http://maik:4445/stream?format=mp3&k=S')).toBe('mp3');
-    expect(streamFormat(undefined, 'https://streaming.fueralle.org/corax_192.mp3')).toBe('mp3');
+    expect(streamFormat(undefined, 'http://studio-pc:4445/stream?format=flac&k=S')).toBe('ogg');
+    expect(streamFormat(undefined, 'http://studio-pc:4445/stream?k=S')).toBe('ogg');
+    expect(streamFormat(undefined, 'http://studio-pc:4445/stream?format=mp3&k=S')).toBe('mp3');
+    expect(streamFormat(undefined, 'https://stream.example.org/radio_192.mp3')).toBe('mp3');
     expect(streamFormat(undefined, 'https://x/live.ogg')).toBe('ogg');
-    expect(streamFormat(undefined, 'https://stream.rdl.de/rdl')).toBeUndefined(); // ffmpeg probes
-    expect(streamFormat('mp3', 'https://stream.rdl.de/rdl')).toBe('mp3');
+    expect(streamFormat(undefined, 'https://stream.example.net/live')).toBeUndefined(); // ffmpeg probes
+    expect(streamFormat('mp3', 'https://stream.example.net/live')).toBe('mp3');
     expect(() => streamFormat('wav', 'http://x/y', 'A')).toThrow(/format must be one of/);
   });
 

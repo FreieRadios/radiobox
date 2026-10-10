@@ -34,7 +34,7 @@ function setup(bufferMs = 500) {
   let now = 1_000_000;
   const decoders: FakeDecoder[] = [];
   const sp = new StreamPlayer(
-    { label: 'Studio', url: 'http://maik:4445/stream', bufferMs },
+    { label: 'Studio', url: 'http://studio-pc:4445/stream', bufferMs },
     SR,
     quiet,
     {
@@ -73,7 +73,7 @@ describe('StreamPlayer', () => {
   it('decodes the URL to 48 kHz stereo float and waits for the buffer', () => {
     const { sp, decoders, out, read } = setup(500);
     sp.start();
-    expect(decoders[0].args.join(' ')).toContain('-i http://maik:4445/stream');
+    expect(decoders[0].args.join(' ')).toContain('-i http://studio-pc:4445/stream');
     expect(decoders[0].args.join(' ')).toContain('-ar 48000 -ac 2 -f f32le');
     const ph = { v: 0 };
     decoders[0].sine(SR / 4, ph); // 250 ms: not enough yet

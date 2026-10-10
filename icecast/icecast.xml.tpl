@@ -2,8 +2,8 @@
     <!-- location and admin are two arbitrary strings that are e.g. visible
          on the server info page of the icecast web interface
          (server_version.xsl). -->
-    <location>Nuremberg/Germany</location>
-    <admin>thomas@singer-software.de</admin>
+    <location>Earth</location>
+    <admin>icemaster@localhost</admin>
 
     <!-- IMPORTANT!
          Especially for inexperienced users:

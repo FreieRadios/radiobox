@@ -69,7 +69,7 @@ def main(argv=None):
     ap.add_argument("--date", help="YYYY-MM-DD (default: from the recording's name)")
     ap.add_argument("--speaker", action="append", metavar="CHANNEL=NAME", help="person at a mic, e.g. 'Gast 1=Maria' (repeatable)")
     ap.add_argument("--mics", help="comma-separated channel names to use (default: every mic with a signal)")
-    ap.add_argument("--vocab", action="append", default=[], help="vocabulary file, one term per line (repeatable; vocab/radioz.txt is always used)")
+    ap.add_argument("--vocab", action="append", default=[], help="vocabulary file, one term per line (repeatable; vocab/default.txt and, if present, vocab/local.txt are always used)")
     ap.add_argument("--fix", action="append", metavar="FROM=TO", help="text replacement in the transcript (repeatable)")
     ap.add_argument("--music", action="append", metavar="N=LABEL", help="label for music item N of work/items.json, e.g. '2=David Bowie – Changes'")
     ap.add_argument("--jingle-max-sec", type=float, default=30.0, help="music shorter than this is a jingle (default 30; the .ohne-musik.json sidecar wins)")
@@ -213,7 +213,8 @@ def main(argv=None):
         log(f"mix: done ({time.time() - t0:.0f} s)")
         del mx, bus
 
-    vocab = asr.load_vocab([os.path.join(HERE, "vocab", "radioz.txt")] + args.vocab)
+    base_vocab = [os.path.join(HERE, "vocab", f) for f in ("default.txt", "local.txt")]
+    vocab = asr.load_vocab([f for f in base_vocab if os.path.exists(f)] + args.vocab)
     hotwords = ", ".join(dict.fromkeys(list(speakers.values()) + ([title] if args.title else []) + vocab)) or None
 
     # ---------------------------------------------------------------- asr

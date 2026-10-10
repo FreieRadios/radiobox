@@ -87,7 +87,7 @@ export function config(
     listeners: {
       enabled: false,
       url: '',
-      app: 'radio-z',
+      app: 'station',
       username: '',
       password: '',
       pollSeconds: 45,

@@ -165,7 +165,7 @@ const recorder = new BroadcastRecorder({
   dateEnd: "2024-07-13T05:00:00",
   ignoreRepeats: false,
   streamUrl: process.env.RECORDER_STREAM_URL,
-  filenamePrefix: "radioz-stream",
+  filenamePrefix: "station-stream",
 });
 
 recorder.start().then((resp) => {

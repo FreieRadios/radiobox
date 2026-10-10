@@ -5,7 +5,7 @@
 This document records a comparison of radiobox (including studiobox) with
 [AURA](https://aura.radio), the open-source suite for community radios, and
 the discussion that followed: whether radiobox stays necessary, what a move to
-AURA would cost Radio Z, whether AURA can express Radio Z's scheduling rules,
+AURA would cost the station, whether AURA can express the station's scheduling rules,
 how eve fits in, and how studiobox could relate to AURA.
 
 **How to read it.** Statements are marked by how they were established:
@@ -24,7 +24,7 @@ Nothing here was tested on a running AURA installation.
 
 ## 1. Summary
 
-1. **radiobox stays necessary** for Radio Z and for any station that does not
+1. **radiobox stays necessary** for the station and for any station that does not
    replace its whole setup with AURA. The two are different kinds of thing:
    AURA is a full station suite a station migrates to; radiobox is lightweight
    tooling around a setup that already exists. **[judgement]**
@@ -37,7 +37,7 @@ Nothing here was tested on a running AURA installation.
 4. **AURA can express the scheduling edge cases asked about**, including
    "fifth Sunday of odd-numbered months" **[checked]**, but with limits: one
    position per rule, no month lists, no override or no-merge flags.
-5. **AURA has no overwhelming advantage for Radio Z.** **[judgement]**
+5. **AURA has no overwhelming advantage for the station.** **[judgement]**
 6. **studiobox is unlikely to be accepted into AURA's core** (estimated below
    10 %). It can work as a companion without any change to AURA.
    **[judgement]**
@@ -97,13 +97,13 @@ All **[researched]** unless marked.
 - **Acknowledged problems.** Installation is a "frequently reported
   pain-point" (epic aura#641). Schedules must be prolonged by hand once a year.
   A playout re-architecture is planned for 2.0.
-- **Link to Radio Z.** AURA's playout concept builds on _Comba_, written by
-  Michael Liebler of Radio Z, who is listed as a code contributor. No evidence
-  was found that Radio Z runs AURA.
+- **Link to the station.** AURA's playout concept builds on _Comba_, written by
+  a member of the station, who is listed as a code contributor. No evidence
+  was found that the station runs AURA.
 
 ---
 
-## 4. Scheduling: can AURA express Radio Z's rules?
+## 4. Scheduling: can AURA express the station's rules?
 
 ### 4.1 AURA's recurrence model [checked]
 
@@ -168,11 +168,11 @@ Months without a fifth Sunday are skipped, and the two-month interval stays
 anchored to the first date. This tests the library AURA uses with AURA's
 parameters, not AURA itself.
 
-### 4.4 Radio Z's actual patterns [checked]
+### 4.4 The station's actual patterns [checked]
 
-[`checks/radio-z-pattern-tally.py`](./checks/radio-z-pattern-tally.py) was run
-against eve's transcription of the Radio Z sheet
-(`eve/packages/backend/src/scripts/radio-z-programm.ts`, 106 patterns).
+[`checks/pattern-tally.py`](./checks/pattern-tally.py) was run
+against eve's transcription of the station's sheet
+(a script in eve's backend, 106 patterns).
 
 | Property                           | Count  | Consequence in AURA                             |
 | ---------------------------------- | ------ | ----------------------------------------------- |
@@ -188,7 +188,7 @@ against eve's transcription of the Radio Z sheet
 Repeat offsets in use are 17 h (60 patterns), 5 h (27), 12 h (17), 7 h (1) and
 16 h (1).
 
-So every Radio Z pattern can be represented in AURA, but not one-to-one: the
+So every pattern of the station can be represented in AURA, but not one-to-one: the
 106 patterns would become roughly 250 schedules (originals, split positions
 and repetitions), entered through the API or by hand, since AURA has no
 spreadsheet import and "no official migration tool". **[judgement on the
@@ -236,9 +236,9 @@ radiobox), 17 (recurrence as a core primitive, postponed) and 28 (tiny CMS).
 
 ---
 
-## 6. If Radio Z moved to AURA
+## 6. If the station moved to AURA
 
-| Radio Z would gain                               | Radio Z would lose or have to pay for             |
+| The station would gain                           | The station would lose or have to pay for         |
 | ------------------------------------------------ | ------------------------------------------------- |
 | Web calendar with collision handling             | Publishing to WeLocal, Nextcloud and FTP          |
 | Accounts, roles, uploads by the hosts themselves | Harbor input and the lossless mount               |
@@ -251,7 +251,7 @@ Also to weigh **[judgement]**:
 
 - radiobox's schedule part and eve's Sendeplan app would both become
   redundant.
-- Radio Z would depend on the priorities of a four-person team whose funding
+- The station would depend on the priorities of a four-person team whose funding
   after mid-2026 is unclear.
 - A bridge from AURA to WeLocal would have to be written in any case, because
   AURA has no WeLocal support.
@@ -294,7 +294,7 @@ radiobox itself is open about it: commits carry a `Co-Authored-By` trailer
 
 ## 8. studiobox and AURA
 
-**The idea.** About 90 % of Radio Z's broadcasts are a few people talking, with
+**The idea.** About 90 % of the station's broadcasts are a few people talking, with
 jingles and a little music. studiobox, with radiobox, is meant to be a tablet-
 and table-friendly assistant for exactly that, so hosts can keep their
 attention on the conversation and not on a mixer, CD players and turntables.
@@ -333,7 +333,7 @@ from AURA's documentation to studiobox as a companion tool.
 
 1. **Record and document the live broadcast** in the week of 2026-10-05:
    setup, signal chain, what the hosts had to touch, what went wrong. It is
-   the best argument for studiobox, towards Radio Z and towards AURA.
+   the best argument for studiobox, towards the station and towards AURA.
 2. **Keep radiobox's core narrow**: recorder, publishing connectors,
    Liquidsoap presets, studiobox. Invest in the schedule logic only as far as
    eve needs it.
@@ -373,8 +373,8 @@ python3 -m venv /tmp/venv && /tmp/venv/bin/pip install python-dateutil
 /tmp/venv/bin/python docs/analysis/checks/aura-rrule-fifth-sunday.py
 
 # Tally of a station's schedule patterns
-python3 docs/analysis/checks/radio-z-pattern-tally.py \
-  ../eve/packages/backend/src/scripts/radio-z-programm.ts
+python3 docs/analysis/checks/pattern-tally.py \
+  <eve's transcription of the sheet>
 ```
 
 AURA's source, for re-reading the recurrence model:

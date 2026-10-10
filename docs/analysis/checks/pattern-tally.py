@@ -6,11 +6,11 @@ counts the month sets, the nth-weekday sets, the repeat offsets and the
 override / no-merge flags.
 
 Usage:
-    radio-z-pattern-tally.py <file>
+    pattern-tally.py <file>
 
 <file> is any text file containing `muster: "<pattern>"` literals. On
-2026-09-29 this was run against eve's hand transcription of the Radio Z sheet,
-`eve/packages/backend/src/scripts/radio-z-programm.ts`.
+2026-09-29 this was run against eve's hand transcription of the station's sheet
+(a script in its backend).
 """
 import collections
 import re

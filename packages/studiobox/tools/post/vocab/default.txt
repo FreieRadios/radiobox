@@ -1,0 +1,15 @@
+# Radio words Whisper tends to get wrong (one term per line; # = comment).
+# Station, region and dialect go into vocab/local.txt (git-ignored), which
+# post.py reads too when it is there.
+Moderation
+Moderatorin
+Jingle
+Trailer
+Sendeplatz
+Mediathek
+Studiogast
+Abmoderation
+Anmoderation
+Hörerinnen
+Freies Radio
+Community-Radio

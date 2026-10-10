@@ -22,7 +22,7 @@ stops when a lid closes.
 and NetworkManager, and without a desktop there is no PipeWire to grab the
 sound cards and no power manager to suspend the box. A Raspberry Pi runs
 Raspberry Pi OS Lite (64-bit), which is the same Debian. Avoid desktop
-distributions for 24 h operation; a desktop machine works (maik does) but
+distributions for 24 h operation; a desktop machine works too, but
 needs the `desktop` step.
 
 In the firmware (BIOS/UEFI): **power on after AC loss** ("Restore on AC power

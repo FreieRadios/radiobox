@@ -525,7 +525,7 @@ function resolveListeners(raw: unknown): ListenersConfig {
   return {
     enabled: !!r.enabled,
     url: str(r.url),
-    app: str(r.app, 'radio-z'),
+    app: str(r.app),
     username: str(r.username),
     password:
       process.env.STUDIOBOX_EVE_PASSWORD || (typeof r.password === 'string' ? r.password : ''),
@@ -636,6 +636,8 @@ function validate(cfg: StudioboxConfig, file: string): void {
   const lis = cfg.listeners;
   if (lis.enabled) {
     if (!/^https?:\/\/[^/]/.test(lis.url)) fail('listeners.url must be an http(s) URL of eve');
+    // The eve app's name is in every export path; there is no sensible default.
+    if (!lis.app) fail("listeners.app is required (the eve app's name, e.g. my-station)");
     if (!lis.username) fail('listeners.username is required');
     if (!lis.password) fail('listeners.password (or STUDIOBOX_EVE_PASSWORD) is required');
   }

@@ -120,7 +120,7 @@ describe('Recorder: one continuous, tagged file per recording (roadmap M1.6)', (
       tags: {
         TITLE: 'Probe',
         DATE: '2026-10-05',
-        ORGANIZATION: 'Radio Z',
+        ORGANIZATION: 'Radio Beispiel',
         COMMENT: 'processed by studiobox 0.1.0',
       },
     });
@@ -135,7 +135,7 @@ describe('Recorder: one continuous, tagged file per recording (roadmap M1.6)', (
     expect(tags).toMatchObject({
       TITLE: 'Probe',
       DATE: '2026-10-05',
-      ORGANIZATION: 'Radio Z',
+      ORGANIZATION: 'Radio Beispiel',
       COMMENT: 'processed by studiobox 0.1.0',
     });
   }, 20000);

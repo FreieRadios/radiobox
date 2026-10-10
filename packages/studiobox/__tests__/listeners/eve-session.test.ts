@@ -88,12 +88,12 @@ describe('jwtExpiryMs', () => {
 describe('EveSession', () => {
   it('signs in once and reuses the token', async () => {
     const { eve, session } = setup();
-    await session.get('/exports/radio-z/listener-hearts');
-    await session.get('/exports/radio-z/listener-hearts');
+    await session.get('/exports/station/listener-hearts');
+    await session.get('/exports/station/listener-hearts');
     expect(eve.paths()).toEqual([
       '/auth/login',
-      '/exports/radio-z/listener-hearts',
-      '/exports/radio-z/listener-hearts',
+      '/exports/station/listener-hearts',
+      '/exports/station/listener-hearts',
     ]);
     expect(eve.calls[1].auth).toMatch(/^Bearer h\./);
   });

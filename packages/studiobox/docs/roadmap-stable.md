@@ -5,8 +5,8 @@
 internal mic, M2.13) ·
 **First target:** the live session in the week of
 2026-10-05 · **Basis:** `docs/analysis/studiobox-audit-2026-09-29.md`, the
-code on branch `studiobox`, a first run on the test rig and the Radio Z
-signal chain as documented in eve (`apps/radio-z/radioz-technik/Aufbau.md`).
+code on branch `studiobox`, a first run on the test rig and the station's
+signal chain as documented in eve (the station app's technical notes).
 
 The design rules for all screens are in
 [design-guidelines.md](design-guidelines.md). Decisions taken so far are in
@@ -27,12 +27,12 @@ section 6.
 | Output     | The finished mix as analog audio from the **ESI MAYA22** into the **"extern 2× cinch"** input of the analog desk in the Großes Studio. Later: lossless to a Liquidsoap harbor.                                                                                                                              |
 | Monitoring | Headphones on the **Flow 8** (direct, zero latency)                                                                                                                                                                                                                                                         |
 | Recording  | **Processed stereo FLAC** (to share as a lossless reference, the more important one) **and** a **multichannel** file for later processing (dry by default, configurable)                                                                                                                                    |
-| Network    | The venue's Wi-Fi (Radio Z), shared with other people                                                                                                                                                                                                                                                       |
+| Network    | The venue's Wi-Fi (the station's), shared with other people                                                                                                                                                                                                                                                 |
 | UIs        | Host, technician, guest, spectator. Good-looking, mobile-first, **accessible** (German: _barrierefrei_; target WCAG 2.2 AA)                                                                                                                                                                                 |
 
 ### Where the output goes
 
-From eve's Radio Z Sendetechnik:
+From the station's Sendetechnik notes in eve:
 
 ```
             headphones ◄─ Flow 8 (direct mics + music return from studiobox)
@@ -561,13 +561,13 @@ account.
 
 ### M1c — Record in one room, air from another; listen from anywhere
 
-The recording session of 2026-10-07 runs on a strong machine (maik). Where
+The recording session of 2026-10-07 runs on a strong machine (the studio PC). Where
 it stands is open until the day:
 
-- **a) Separate room.** maik records and streams over the LAN; the Pi
+- **a) Separate room.** The studio PC records and streams over the LAN; the Pi
   studiobox in the studio, wired to a channel of the legacy desk, plays that
   stream.
-- **b) The studio itself.** maik plays the programme out over USB (sound
+- **b) The studio itself.** The studio PC plays the programme out over USB (sound
   card) straight into the desk.
 
 In both cases the technician sits in the tech room behind the glass, not
@@ -583,16 +583,16 @@ studiobox can play a stream, and nobody can listen on a tablet.
 
 **For 2026-10-07 without new code** (to try on 2026-10-06):
 
-- a) Run an Icecast on maik (`docker compose up icecast` at the repo root,
+- a) Run an Icecast on the studio PC (`docker compose up icecast` at the repo root,
   or the `icecast2` package), `output.harbor.enabled: true` with
   `url: icecast://source:<pw>@localhost:8000/live`, `format: mp3`,
   `contentType: audio/mpeg` (MP3 because Safari on the iPad plays it; Ogg/FLAC
   it may not). On the Pi stop `studiobox.service` and play the URL straight
-  into the card: `ffmpeg -i http://<maik>:8000/live -f alsa plughw:<card>`
+  into the card: `ffmpeg -i http://<studio-pc>:8000/live -f alsa plughw:<card>`
   (or `mpv --no-video`). Check that the Pi's playback does not underrun
   over an hour.
 - b) `output.monitor` to the USB card, as in the session preset.
-- Listening: the tablet opens `http://<maik>:8000/live` in Safari — the
+- Listening: the tablet opens `http://<studio-pc>:8000/live` in Safari — the
   processed programme, one air delay (10 s) plus Safari's buffer behind the
   room. There is no way to hear the unprocessed signal remotely yet.
 
@@ -604,15 +604,15 @@ Items:
    Studio-Stream with the number of connected devices, held to end. A late
    Ogg/FLAC client gets the cached header pages and then the stream. Checked
    over HTTP with ffmpeg as the client; the three-hour run on the Pi waits
-   for M1c.2. On maik's side, switching it off ends every connection and
-   later requests get 503 "stream off". The Pi's side is M1c.2. maik
+   for M1c.2. On the studio PC's side, switching it off ends every connection and
+   later requests get 503 "stream off". The Pi's side is M1c.2. The studio PC
    serves the on-air programme (behind the air-delay FIFO, like the harbor
    encoder) over HTTP, so a Pi or any player on the LAN pulls it without an
    Icecast in between. Ogg/FLAC for a box, MP3 for a browser, one encoder
    per format however many listen, started only while someone does. A
    `stream` role token (or the tech/host token), never open.
-   _Done when:_ the Pi plays `http://<maik>:4445/stream?k=…&format=flac` for
-   three hours without a gap, and stopping maik's output is said on both
+   _Done when:_ the Pi plays `http://<studio-pc>:4445/stream?k=…&format=flac` for
+   three hours without a gap, and stopping the studio PC's output is said on both
    sides.
 2. **Play a stream on every studiobox** (playout and live mode).
    **Built 2026-10-06**: `filePlayer.streams` (folder "📡 Streams"),
@@ -631,7 +631,7 @@ Items:
    ("verbunden", "verbindet neu …", "weg seit 12 s"). Reconnects with
    back-off; while the stream is gone the bed plays (or silence, by config),
    and when it is back it fades in. A jitter buffer (`bufferMs`, default 2 s)
-   that holds its fill against the drift between maik's clock and the Pi's
+   that holds its fill against the drift between the studio PC's clock and the Pi's
    sound card by slow resampling or by dropping/repeating a block in silence
    (as `AirFifo` does). An option to start the stream at boot, so a Pi wired
    to the desk needs no tablet.
@@ -868,7 +868,7 @@ Still open:
     session preset has them on.
 12. **Which eve does the session machine talk to?** Only eve dev on the
     desktop (`http://localhost:3000`) is known. The session needs an eve the
-    machine reaches from the venue's Wi-Fi, with the `radio-z` exports and a
+    machine reaches from the venue's Wi-Fi, with the station app's exports and a
     `studiodevice` account, and its public page reachable for the listeners
     (M1.16).
 13. **Do guests and spectators see the show from eve?** Today the show, the

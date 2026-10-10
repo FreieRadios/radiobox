@@ -6,9 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=tsing
+User=radiobox
 Group=audio
-WorkingDirectory=/home/tsing/radiobox/packages/studiobox
+WorkingDirectory=/home/radiobox/radiobox/packages/studiobox
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=5

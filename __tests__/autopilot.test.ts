@@ -2,7 +2,7 @@
  * Autopilot tests.
  *
  * These tests intentionally do NOT rely on .env values or on the
- * project's xlsx schema file (e.g. /app/schema/radio-z.xlsx). Instead,
+ * project's xlsx schema file (e.g. /app/schema/example.xlsx). Instead,
  * we mock `dataFromXlsx` so `BroadcastSchema` is fed an in-memory
  * worksheet, which keeps the tests hermetic and fast.
  */

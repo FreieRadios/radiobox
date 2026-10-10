@@ -10,11 +10,11 @@ import {
 const at = (y: number, mo: number, d: number, h: number, mi = 0) =>
   new Date(y, mo - 1, d, h, mi).getTime();
 
-// Wednesday 30 September 2026: Grünfunk 18–19, Frau Korn 19–20.
+// Wednesday 30 September 2026: Wochenmarkt 18–19, Stadtgeflüster 19–20.
 const RULES = [
   {
-    name: 'Grünfunk',
-    slug: 'gruenfunk',
+    name: 'Wochenmarkt',
+    slug: 'wochenmarkt',
     weekday: 3,
     startHour: 18,
     durationHours: 1,
@@ -23,8 +23,8 @@ const RULES = [
     overrides: false,
   },
   {
-    name: 'Frau Korn',
-    slug: 'frau-korn',
+    name: 'Stadtgeflüster',
+    slug: 'stadtgefluester',
     weekday: 3,
     startHour: 19,
     durationHours: 1,
@@ -43,20 +43,20 @@ function fakeEve() {
     comments: [
       {
         id: 'c1',
-        slug: 'gruenfunk',
+        slug: 'wochenmarkt',
         text: 'Grüße aus Gostenhof!',
         receivedAt: '2026-09-30T16:11:00.000Z',
       },
       {
         id: 'c2',
-        slug: 'frau-korn',
-        text: 'Nicht für Grünfunk',
+        slug: 'stadtgefluester',
+        text: 'Nicht für Wochenmarkt',
         receivedAt: '2026-09-30T16:12:00.000Z',
       },
     ],
     hearts: [
-      { slug: 'gruenfunk', hearts: 7 },
-      { slug: 'frau-korn', hearts: 2 },
+      { slug: 'wochenmarkt', hearts: 7 },
+      { slug: 'stadtgefluester', hearts: 2 },
     ],
     /** The guide's exports; null: an eve that does not have them (404). */
     episodes: null as Record<string, unknown>[] | null,
@@ -74,16 +74,16 @@ function fakeEve() {
     urls.push(path);
     if (down) throw new Error('ECONNREFUSED');
     if (path === '/auth/login') return res(200, { token: 'h.e30.s', refreshToken: 'r' });
-    if (path.startsWith('/exports/radio-z/schedule-rules')) return res(200, { rows: RULES });
-    if (path.startsWith('/exports/radio-z/listener-comments'))
+    if (path.startsWith('/exports/station/schedule-rules')) return res(200, { rows: RULES });
+    if (path.startsWith('/exports/station/listener-comments'))
       return res(200, { rows: data.comments });
-    if (path.startsWith('/exports/radio-z/listener-hearts')) return res(200, { rows: data.hearts });
+    if (path.startsWith('/exports/station/listener-hearts')) return res(200, { rows: data.hearts });
     const ep = decodeURIComponent(path.split('?episode=')[1] ?? '');
-    if (data.episodes && path === '/exports/radio-z/episodes')
+    if (data.episodes && path === '/exports/station/episodes')
       return res(200, { rows: data.episodes });
-    if (data.episodes && path.startsWith('/exports/radio-z/episode-topics?'))
+    if (data.episodes && path.startsWith('/exports/station/episode-topics?'))
       return res(200, { rows: data.topics[ep] ?? [] });
-    if (data.episodes && path.startsWith('/exports/radio-z/episode-questions?'))
+    if (data.episodes && path.startsWith('/exports/station/episode-questions?'))
       return res(200, { rows: data.questions[ep] ?? [] });
     return res(404, {});
   };
@@ -126,7 +126,7 @@ function setup(over: Partial<ListenersConfig> = {}, start = at(2026, 9, 30, 18, 
     cfg: {
       enabled: true,
       url: 'http://eve',
-      app: 'radio-z',
+      app: 'station',
       username: 'studiobox',
       password: 'demo1234',
       pollSeconds: 45,
@@ -178,8 +178,8 @@ describe('ListenerFeed', () => {
     const s = t.last();
     expect(s.state).toBe('ok');
     expect(s.show).toMatchObject({
-      slug: 'gruenfunk',
-      name: 'Grünfunk',
+      slug: 'wochenmarkt',
+      name: 'Wochenmarkt',
       startMs: at(2026, 9, 30, 18),
     });
     expect(s.hearts).toBe(7);
@@ -188,8 +188,8 @@ describe('ListenerFeed', () => {
     ]);
     const since = encodeURIComponent(new Date(at(2026, 9, 30, 18)).toISOString());
     expect(t.eve.exports()).toEqual([
-      `/exports/radio-z/listener-comments?since=${since}`,
-      `/exports/radio-z/listener-hearts?since=${since}`,
+      `/exports/station/listener-comments?since=${since}`,
+      `/exports/station/listener-hearts?since=${since}`,
     ]);
     // The socket signs in with the device token.
     expect(t.sock.s.authed).toEqual({ token: 'h.e30.s' });
@@ -228,13 +228,13 @@ describe('ListenerFeed', () => {
     t.setClock(at(2026, 9, 30, 19));
     // The screen empties on the slot check, before eve has answered.
     jest.advanceTimersByTime(5_000);
-    const cleared = t.pushed.find((s) => s.show?.slug === 'frau-korn');
+    const cleared = t.pushed.find((s) => s.show?.slug === 'stadtgefluester');
     expect(cleared).toMatchObject({ hearts: 0, comments: [] });
     await settle();
-    expect(t.last()).toMatchObject({ show: { slug: 'frau-korn' }, hearts: 2 });
+    expect(t.last()).toMatchObject({ show: { slug: 'stadtgefluester' }, hearts: 2 });
     expect(t.last().comments.map((c) => c.id)).toEqual(['c2']);
     const since = encodeURIComponent(new Date(at(2026, 9, 30, 19)).toISOString());
-    expect(t.eve.exports().slice(-1)[0]).toBe(`/exports/radio-z/listener-hearts?since=${since}`);
+    expect(t.eve.exports().slice(-1)[0]).toBe(`/exports/station/listener-hearts?since=${since}`);
     t.feed.stop();
   });
 
@@ -248,16 +248,16 @@ describe('ListenerFeed', () => {
   });
 
   it("uses eve's own window for a pinned show the plan does not have on air", async () => {
-    const t = setup({ show: 'frau-korn' });
+    const t = setup({ show: 'stadtgefluester' });
     t.feed.start();
     await settle();
     expect(t.last()).toMatchObject({
       pinned: true,
-      show: { slug: 'frau-korn', name: 'Frau Korn', startMs: null },
+      show: { slug: 'stadtgefluester', name: 'Stadtgeflüster', startMs: null },
     });
     expect(t.eve.exports()).toEqual([
-      '/exports/radio-z/listener-comments',
-      '/exports/radio-z/listener-hearts',
+      '/exports/station/listener-comments',
+      '/exports/station/listener-hearts',
     ]);
     t.feed.stop();
   });
@@ -309,8 +309,8 @@ describe('ListenerFeed — the episode guide', () => {
   const withGuide = (t: ReturnType<typeof setup>) => {
     t.eve.data.episodes = [
       {
-        id: 'ep-gruen',
-        slug: 'gruenfunk',
+        id: 'ep-markt',
+        slug: 'wochenmarkt',
         title: 'Stadtbäume',
         airDate: '2026-09-30',
         status: 'freigegeben',
@@ -318,14 +318,20 @@ describe('ListenerFeed — the episode guide', () => {
         opening: '*Jingle*',
         closing: 'Tschüss',
       },
-      { id: 'ep-korn', slug: 'frau-korn', title: 'Herbst', airDate: '2026-09-30' },
-      { id: 'ep-rerun', slug: 'frau-korn', title: 'Alt', airDate: '2026-09-30', repeat: true },
+      { id: 'ep-korn', slug: 'stadtgefluester', title: 'Herbst', airDate: '2026-09-30' },
+      {
+        id: 'ep-rerun',
+        slug: 'stadtgefluester',
+        title: 'Alt',
+        airDate: '2026-09-30',
+        repeat: true,
+      },
     ];
-    t.eve.data.topics['ep-gruen'] = [
+    t.eve.data.topics['ep-markt'] = [
       { id: 't1', title: 'Linden', cue: 'Wer kennt die Linde?', body: '> Frage' },
       { id: 't2', title: 'Wasser', cue: null, body: null },
     ];
-    t.eve.data.questions['ep-gruen'] = [{ id: 'q1', text: 'Wer gießt?', asked: false }];
+    t.eve.data.questions['ep-markt'] = [{ id: 'q1', text: 'Wer gießt?', asked: false }];
   };
 
   it('serves the episode of the show on air with its topics and questions', async () => {
@@ -336,7 +342,7 @@ describe('ListenerFeed — the episode guide', () => {
     expect(t.last()).toMatchObject({
       guide: 'ok',
       episode: {
-        id: 'ep-gruen',
+        id: 'ep-markt',
         title: 'Stadtbäume',
         opening: '<p><em>Jingle</em></p>',
         closing: '<p>Tschüss</p>',
@@ -353,9 +359,9 @@ describe('ListenerFeed — the episode guide', () => {
       },
     });
     expect(t.eve.guide()).toEqual([
-      '/exports/radio-z/episodes',
-      '/exports/radio-z/episode-topics?episode=ep-gruen',
-      '/exports/radio-z/episode-questions?episode=ep-gruen',
+      '/exports/station/episodes',
+      '/exports/station/episode-topics?episode=ep-markt',
+      '/exports/station/episode-questions?episode=ep-markt',
     ]);
     t.feed.stop();
   });
@@ -367,7 +373,7 @@ describe('ListenerFeed — the episode guide', () => {
     await settle();
     t.setClock(at(2026, 9, 30, 19));
     jest.advanceTimersByTime(5_000);
-    const cleared = t.pushed.find((s) => s.show?.slug === 'frau-korn');
+    const cleared = t.pushed.find((s) => s.show?.slug === 'stadtgefluester');
     expect(cleared).toMatchObject({ episode: null, guide: 'pending' });
     await settle();
     // The rerun is not the episode on air.
@@ -417,15 +423,15 @@ describe('ListenerFeed — the episode guide', () => {
     expect(t.eve.guide().length).toBe(n);
     // A question marked as asked in eve: the element is not the episode, so
     // it waits out the minimum age…
-    t.eve.data.questions['ep-gruen'][0].asked = true;
+    t.eve.data.questions['ep-markt'][0].asked = true;
     t.sock.s.emit('element:changed', { kind: 'updated', id: 'q-elem', aspects: ['asked'] });
     await jest.advanceTimersByTimeAsync(10_000);
     t.sock.s.emit('element:changed', { kind: 'updated', id: 'q-elem', aspects: ['asked'] });
     await jest.advanceTimersByTimeAsync(1_000);
     expect(t.last().episode?.questions[0].asked).toBe(true);
     // …while a topic added to the episode itself shows on the next fetch.
-    t.eve.data.topics['ep-gruen'].push({ id: 't3', title: 'Laub' });
-    t.sock.s.emit('relation:changed', { kind: 'created', id: 'r9', fromElementId: 'ep-gruen' });
+    t.eve.data.topics['ep-markt'].push({ id: 't3', title: 'Laub' });
+    t.sock.s.emit('relation:changed', { kind: 'created', id: 'r9', fromElementId: 'ep-markt' });
     await jest.advanceTimersByTimeAsync(1_000);
     expect(t.last().episode?.topics.map((x) => x.id)).toEqual(['t1', 't2', 't3']);
     t.feed.stop();

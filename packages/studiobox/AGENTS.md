@@ -79,7 +79,7 @@ Live meters: `http://localhost:4445`.
   Nextcloud audio folder), both fire the same file at the same second. Point
   `hasScheduled` at the one subfolder a box is responsible for and give it its
   own `dirs` entry; the share itself stays browsable with `hasScheduled: false`.
-  Seen on z-studiobox 2026-10-07: `hasScheduled` on the whole rclone target
+  Seen on a playout Pi 2026-10-07: `hasScheduled` on the whole rclone target
   made the Pi play the show folder's intro alongside the studio box.
 
 ## Hardware / runtime (the non-inferable bits)
@@ -318,7 +318,7 @@ every 5 min. `ListenerFeed` pushes `{type:'listeners', status}` to operator
 connections (technician and host; never guest/spectator) on change and on
 connect — not in the meter frames. The page's **Hörer:innen** panel (top of
 the right column, both layouts) is deliberately quiet — the earlier
-`frau-korn` experiment distracted the hosts by pushing every heart and every
+experiment distracted the hosts by pushing every heart and every
 raw message onto their screen: folded by default (remembered per browser),
 folded it shows only "n Kommentare · k neu" and "♥ n"; no animation, no
 sound, no row per heart; nothing on it writes to eve. An unreachable eve or a
@@ -355,8 +355,8 @@ the guide block in `feed.test.ts` and the Sendung block in
 load) replaces the word "studiobox" in the header of the page and the
 spectator view (`brandHtml`, `__BRAND__` in `PAGE`, `<h1 id="brand">` in
 `spectator.html`); `/logo` serves it to everybody (no token), with a CSP so
-an SVG can't run script. `meters.logoAlt` is its alt text. `config/logo-z.svg`
-is a small red Z.
+an SVG can't run script. `meters.logoAlt` is its alt text. `config/logo-example.svg`
+is a placeholder (a waveform in a circle).
 
 **Look and layout** of the page follow `docs/design-guidelines.md` and the
 Claude Design mock-ups in `docs/design/studiobox.html` (a bundled artifact —

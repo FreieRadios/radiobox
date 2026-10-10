@@ -6,7 +6,7 @@ describe('markdownToHtml', () => {
       '*Jingle: MEINE SENDUNG*',
       '',
       'Willkommen **zurück**,',
-      'heute auf Radio Z.',
+      'heute auf Radio Beispiel.',
       '',
       '### Wie funktioniert das System?',
       '',
@@ -22,7 +22,7 @@ describe('markdownToHtml', () => {
     ].join('\n');
     expect(markdownToHtml(md)).toBe(
       '<p><em>Jingle: MEINE SENDUNG</em></p>' +
-        '<p>Willkommen <strong>zurück</strong>,<br>heute auf Radio Z.</p>' +
+        '<p>Willkommen <strong>zurück</strong>,<br>heute auf Radio Beispiel.</p>' +
         '<h4>Wie funktioniert das System?</h4>' +
         '<blockquote>Wenn ich heute mit einer Frage zu euch komme:<br>Was passiert dann?</blockquote>' +
         '<ul><li>Kann das gelingen?</li><li>Wie seid Ihr dazu gekommen?</li></ul>' +

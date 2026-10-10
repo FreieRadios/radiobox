@@ -200,21 +200,21 @@ describe('MeterServer — views and what each role gets', () => {
     expect((await get(port, '/logo')).status).toBe(404);
     expect((await get(port, '/')).body).toContain('title="Quellen anzeigen">studiobox</button>');
     server.stop();
-    const logo = path.join(__dirname, '../../config/logo-z.svg');
+    const logo = path.join(__dirname, '../../config/logo-example.svg');
     server = new MeterServer(
       0,
       makeLog(),
       { enabled: true, tokens: { tech: 'T' } },
       {
         logo,
-        logoAlt: 'Radio Z <live>',
+        logoAlt: 'Radio Beispiel <live>',
       }
     );
     server.start();
     const s = (server as unknown as { server: http.Server }).server;
     await new Promise<void>((r) => (s.listening ? r() : s.once('listening', () => r())));
     port = (s.address() as AddressInfo).port;
-    const img = '<img class="brand" src="logo" alt="Radio Z &#60;live&#62;">';
+    const img = '<img class="brand" src="logo" alt="Radio Beispiel &#60;live&#62;">';
     expect((await get(port, '/tech?k=T')).body).toContain(img);
     expect((await get(port, '/')).body).toContain(`<h1 id="brand">${img}</h1>`); // spectator
     // Every view shows it, so nobody needs a token for it.

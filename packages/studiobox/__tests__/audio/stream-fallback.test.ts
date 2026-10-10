@@ -17,7 +17,7 @@ const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}
 const streams: StreamSourceConfig[] = [
   {
     label: 'Studio',
-    url: 'http://maik:4445/stream?format=flac&k=SECRET',
+    url: 'http://studio-pc:4445/stream?format=flac&k=SECRET',
     bufferMs: 500,
     fallback: 'bed',
     autoStart: true,

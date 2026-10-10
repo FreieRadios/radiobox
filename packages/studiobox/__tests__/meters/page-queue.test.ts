@@ -1944,7 +1944,7 @@ describe('meters page — roles', () => {
 
 describe('meters page — Hörer:innen (listener feedback)', () => {
   const status = (over: Record<string, unknown> = {}) => ({
-    show: { slug: 'gruenfunk', name: 'Grünfunk', startMs: 0, endMs: 0 },
+    show: { slug: 'wochenmarkt', name: 'Wochenmarkt', startMs: 0, endMs: 0 },
     pinned: false,
     hearts: 7,
     comments: [
@@ -1974,7 +1974,7 @@ describe('meters page — Hörer:innen (listener feedback)', () => {
     p.push({ type: 'listeners', status: status() });
     expect(p.byId('lisbox').style.display).toBe('');
     expect(p.bodyClasses()).toMatch(/listeners/);
-    expect(p.byId('lisShow').textContent).toBe('Grünfunk');
+    expect(p.byId('lisShow').textContent).toBe('Wochenmarkt');
     expect(p.byId('lisHearts').textContent).toBe('♥ 7');
     expect(p.byId('lisSum').textContent).toBe('2 Kommentare · 2 neu');
     expect(p.byId('lisList').style.display).toBe('none');

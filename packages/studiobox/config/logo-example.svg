@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Logo">
+  <!-- A placeholder for the header (meters.logo): a circle with a waveform.
+       Replace with the station's own logo file. -->
+  <circle cx="32" cy="32" r="28" fill="#2e6fd8"/>
+  <path fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" d="M14 32h6l4-10 6 20 6-26 6 22 4-6h4"/>
+</svg>

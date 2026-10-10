@@ -122,7 +122,7 @@ output:
   harbor:
     enabled: true
     # ffmpeg icecast:// source URL. Use a mount configured for Ogg/FLAC.
-    url: 'icecast://source:hackme@stream.radio-z.net:4444/studio-lossless'
+    url: 'icecast://source:hackme@stream.example.org:4444/studio-lossless'
     format: ogg-flac # ogg-flac (lossless) | mp3 (fallback)
     contentType: application/ogg
   # The programme as a stream from studiobox itself, on the meters port:
@@ -150,7 +150,7 @@ output:
     # of its first sample (what a session is handed out as). > 0 rolls
     # segments of that length instead (an always-on safety copy).
     segmentSeconds: 0
-    # station: 'Radio Z' # Vorbis comment ORGANIZATION
+    # station: 'Radio Beispiel' # Vorbis comment ORGANIZATION
     # Arm the recording when a scheduled file (the show's opening jingle)
     # starts and nobody has pressed the button. Default true.
     # autoArm: true
@@ -229,8 +229,8 @@ meters:
   # The station's logo in the header instead of the word "studiobox" (page
   # and spectator view): .svg, .png, .webp or .jpg, next to this file.
   # logoAlt is what a screen reader says for it.
-  # logo: logo-z.svg
-  # logoAlt: Radio Z
+  # logo: logo-example.svg
+  # logoAlt: Radio Beispiel
   roles:
     enabled: false
     # tokens: { tech: '…', host: '…', guest: '…' } # fixed; else new per start
@@ -249,11 +249,11 @@ meters:
 listeners:
   enabled: false
   url: http://localhost:3000 # eve's API; Socket.IO runs on the same host
-  app: radio-z
+  app: my-station # the eve app's name (required when enabled)
   username: studiobox # a `studiodevice` account
   password: '' # or set STUDIOBOX_EVE_PASSWORD in the environment
   pollSeconds: 45 # fallback when eve's change socket is down (30–300)
-  # show: gruenfunk # rehearsal only: pin a show slug instead of the schedule
+  # show: wochenmarkt # rehearsal only: pin a show slug instead of the schedule
 
 # Optional: a local audio file player exposed on the meters page. The configured
 # `dirs` appear in a folder dropdown; clicking a file decodes it to 48 kHz
@@ -339,7 +339,7 @@ filePlayer:
   # stream at most) starts it at boot, so the box needs no tablet.
   # streams:
   #   - label: Studio
-  #     url: 'http://maik.local:4445/stream?format=flac&k=<stream token>'
+  #     url: 'http://studio-pc.local:4445/stream?format=flac&k=<stream token>'
   #     # bufferMs: 2000
   #     # fallback: bed
   #     # autoStart: true

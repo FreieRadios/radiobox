@@ -60,7 +60,7 @@ Statements are marked the same way as in the AURA comparison:
 Notes:
 
 - **The root test failures are environmental.** The three suites read
-  `schema/radio-z.xlsx` under `RADIOBOX_BASEDIR=/app`; that file is station
+  `schema/<station>.xlsx` under `RADIOBOX_BASEDIR=/app`; that file is station
   data and git-ignored. They would pass inside the container. On a fresh clone
   `yarn test` is red, which hides real failures.
 - **The `js-yaml` advisories are CPU exhaustion on hostile YAML.** studiobox
@@ -302,7 +302,7 @@ becomes a mirror.**
 - Moving to hide costs effort and gains nothing: nobody is watching now either.
   Say "experimental" in the README.
 - For the meeting next month a link under `github.com/FreieRadios` is the
-  better address. That organisation also hosts _Comba_, the Radio Z project
+  better address. That organisation also hosts _Comba_, the station's project
   AURA's playout grew from.
 - The Gitea gives what is missing: a second copy, CI, and room for private
   branches.
@@ -341,14 +341,14 @@ What the comparison underweights **[judgement]**:
 - It counts AURA's dependence on four developers as a risk. radiobox depends
   on one. For the station that is the larger risk, and the meeting is the
   place to address it.
-- Michael Liebler of Radio Z is listed as an AURA contributor. Expect the
+- A member of the station is listed as an AURA contributor. Expect the
   question "why not AURA?" and bring the table above.
 
 ---
 
 ## 9. Open questions
 
-1. Where does the programme go: to the Radio Z harbor, into a recording, or
+1. Where does the programme go: to the station's harbor, into a recording, or
    both?
 2. Who wears headphones, and is there a loudspeaker in the room?
 3. Does the laptop run Linux, and which sound server?

@@ -47,11 +47,11 @@ describe('parseRules', () => {
 describe('slotAt', () => {
   // September 2026: Wednesdays are the 2nd, 9th, 16th, 23rd and 30th.
   it('finds the show on air, with the start and end of its slot', () => {
-    const rules = parseRules([row({ slug: 'gruenfunk', name: 'Grünfunk' })]);
+    const rules = parseRules([row({ slug: 'wochenmarkt', name: 'Wochenmarkt' })]);
     const s = slotAt(rules, at(2026, 9, 30, 18, 20));
     expect(s).toEqual({
-      slug: 'gruenfunk',
-      name: 'Grünfunk',
+      slug: 'wochenmarkt',
+      name: 'Wochenmarkt',
       startMs: at(2026, 9, 30, 18),
       endMs: at(2026, 9, 30, 19),
     });

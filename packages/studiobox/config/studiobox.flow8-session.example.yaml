@@ -106,7 +106,7 @@ output:
     enabled: true
     dir: './recordings'
     segmentSeconds: 0
-    station: 'Radio Z' # ADAPT
+    station: 'Radio Beispiel' # ADAPT
   # 4 mics dry + Zuspieler L/R + Programm L/R = 8 channels, sample-aligned
   # with the stereo file; a .json channel map is written beside it.
   multitrack:

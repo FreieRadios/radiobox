@@ -79,7 +79,9 @@ describe('Roles', () => {
     expect(r.mayStream('/stream?k=nope')).toBe(false);
     // The stream token is no role: it opens no view and sends nothing.
     expect(r.roleOf('/?k=S')).toBe('spectator');
-    expect(r.streamUrl('http://maik:4445/')).toBe('http://maik:4445/stream?format=flac&k=S');
+    expect(r.streamUrl('http://studio-pc:4445/')).toBe(
+      'http://studio-pc:4445/stream?format=flac&k=S'
+    );
     expect(r.streamPinned).toBe(true);
     expect(on().streamPinned).toBe(false);
     expect(new Roles({ enabled: false, tokens: {} }).mayStream('/stream')).toBe(true);

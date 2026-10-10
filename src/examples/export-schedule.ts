@@ -6,7 +6,7 @@ import { vd } from '../helper/helper';
 
 const schedule = new BroadcastSchedule({
   schema: new BroadcastSchema({
-    schemaFile: 'schema/radio-z.xlsx',
+    schemaFile: 'schema/example.xlsx',
   }),
   dateStart: '2024-08-12T00:00:00',
   dateEnd: '2024-08-19T00:00:00',
@@ -32,7 +32,7 @@ const exporter = new ScheduleExport({
   schedule: schedule,
   mode: 'welocal-json',
   outDir: 'json',
-  filenamePrefix: 'program_schema_radio-z',
+  filenamePrefix: 'program_schema_example',
 });
 
 exporter.write();

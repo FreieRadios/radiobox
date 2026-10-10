@@ -49,8 +49,9 @@ GPU needs the user in the `render` group — `sg render -c '…'`).
   `.multitrack.json`); unnamed mics keep their channel name. Mics without a
   signal are left out (`--mics` to choose by hand).
 - `--vocab FILE` (repeatable): names and terms of the episode, one per line,
-  given to Whisper as hotwords; `vocab/radioz.txt` (station, region,
-  Franconian words) is always included, as are the speaker names.
+  given to Whisper as hotwords; `vocab/default.txt` (radio words) and, if
+  present, `vocab/local.txt` (the station, its region and dialect; git-ignored,
+  kept per machine) are always included, as are the speaker names.
 - `--music N=LABEL` labels the Nth item of `work/items.json` in the transcript.
 - `--fix FROM=TO` replaces text in the transcript (e.g. a misheard name).
 - `--facts FILE`: the fact block for the Mediathek text — German, one line
