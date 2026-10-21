@@ -58,14 +58,18 @@ describe('MeterServer role enforcement', () => {
     ws.close();
   });
 
-  it('the host may mute the mics but not stop the recording', async () => {
+  it('the host may mute the mics and switch the recording, not the stream', async () => {
     await boot(true);
     const { ws, role } = await connect(port, 'host?k=H');
     expect(role).toBe('host');
     ws.send(JSON.stringify({ type: 'micsMuted', value: true }));
     ws.send(JSON.stringify({ type: 'recording', value: false }));
+    ws.send(JSON.stringify({ type: 'streaming', value: false }));
     await settle();
-    expect(got).toEqual([{ type: 'micsMuted', value: true }]);
+    expect(got).toEqual([
+      { type: 'micsMuted', value: true },
+      { type: 'recording', value: false },
+    ]);
     ws.close();
   });
 

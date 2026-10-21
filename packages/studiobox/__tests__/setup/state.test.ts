@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { SessionState, loadState, saveState } from '../../src/setup/state';
+import { SessionState, cleanName, loadState, saveState } from '../../src/setup/state';
 
 const tmp = () =>
   path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sbx-state-')), 'session-state.json');
@@ -70,5 +70,32 @@ describe('session state', () => {
     const f = tmp();
     fs.writeFileSync(f, 'x');
     expect(saveState(path.join(f, 'session-state.json'), state(Date.now()))).toBe(false);
+  });
+
+  it('keeps live names, colours and heard mics, and drops what is malformed', () => {
+    const file = tmp();
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        savedAt: 1000,
+        mics: {},
+        names: { 'Mikro 5': 'Lea', 'Mikro 6': 42, Host: '   ' },
+        colors: { 'Mikro 5': '#1e88e5', Host: 'url(x)' },
+        heard: ['Mikro 5'],
+      })
+    );
+    expect(loadState(file, 2000)).toEqual({
+      savedAt: 1000,
+      mics: {},
+      names: { 'Mikro 5': 'Lea' },
+      colors: { 'Mikro 5': '#1e88e5' },
+      heard: ['Mikro 5'],
+    });
+  });
+
+  it('cleans a name to one short line', () => {
+    expect(cleanName('  Lea \n  Maria ')).toBe('Lea Maria');
+    expect(cleanName('x'.repeat(40))).toHaveLength(24);
+    expect(cleanName(undefined)).toBe('');
   });
 });

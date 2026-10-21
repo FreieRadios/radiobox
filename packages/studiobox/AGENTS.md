@@ -72,6 +72,21 @@ Live meters: `http://localhost:4445`.
 - **Live settings never go into the YAML.** What the setup assistant measured
   and what was trimmed by hand lives in `session-state.json` next to the config
   (`src/setup/state.ts`; git-ignored, restored at start, ignored after 12 h).
+  So do the mics' live **names and cable colours** (`channelName {label,
+  name}`, `channelColor {label, color}`; Einstellungen → Mikrofone) and which
+  mics were **heard**: the config `label` stays the channel's id (commands,
+  state, guest links), `name` is what the views show. Configure every input
+  that may get a mic (the station's preset: 6); a mic nobody has talked into
+  reads **FREI** on the desk (`vacant` in the snapshot) until `HEARD_SEC`
+  (2 s) of talk as the active talker. It is not taken out of the mix: the
+  gate, automix and Auto-Pegel already leave a silent input alone, and a new
+  guest is on air from the first word.
+- **On a station box the YAML is generated.** `studiobox.service` renders
+  `STATE_DIR/studiobox.yaml` from `studiobox.template.yaml` at every start
+  (`station/bin/prestart.js`, which also picks the output card). Edit the
+  template; the installer makes `config/studiobox.yaml` a link to it. The
+  start log names the file (`config: … (generated from …)`), a config error
+  is logged as `cannot start: …` and the health page (:4446) shows it.
 - **`hasScheduled` arms every box that reads the folder.** It is scanned
   *recursively* (`FileDirs.scheduled()`), so putting it on a shared sync root
   arms every timestamped file anywhere beneath it — and when two boxes sync the
@@ -370,7 +385,7 @@ toggles as status chips (they say their **state** — "Aufnahme aus" /
 connection state in words (`setConn`), the server clock, Vorhören, "?" and ⋮.
 Metering (mixer mode only, `body.live`): a **Kanäle** grid — one row per
 channel with its state as a word (OFFEN / PAUSE = all mics closed / STUMM /
-AN), the channel's optional config `color` (e.g. the mic cable; named or hex,
+FREI = nobody heard yet / AN), the channel's live name and optional `color` (e.g. the mic cable; named or hex,
 normalised by `resolveChannelColor` in `config/load.ts`, carried per channel
 in the snapshot) as an outlined stripe beside the name, a −60…0 dB level meter with fixed green/yellow/red zones and a 1.5 s
 peak-hold tick (`setLevel`, `role="meter"`), gate, comp, automix and leveler
@@ -446,6 +461,10 @@ hidden where the box does not report it, so a playout box shows none of it):
     only: the return keeps its own `returnGain`. "Zurücksetzen" → 0 dB.
   - **Musik im Kopfhörer** (on `snapshot.returnGainDb`, absent without a
     return): −40…+6 dB sent as `returnGain`, the music return's level only.
+  - **Mikrofone**: per mic a name field and a cable colour (`channelName`,
+    `channelColor`; empty / "wie konfiguriert" go back to the config) and
+    whether somebody was heard yet. The desk row, the guest card and the
+    multitrack's channel map show the name; the row is not rebuilt for it.
   All of it is kept in the state file. On the desk only a header chip
   remains while a run is on or a result waits (a link to the page), and for
   the host the one line on who is up. **Trim** column on the desk: the value
@@ -471,6 +490,11 @@ hidden where the box does not report it, so a playout box shows none of it):
   that mic chosen). The codes point at the address the technician's browser
   used, or the LAN address when that was `localhost`. Unpinned tokens are
   called out: the codes then die at the next start (`Roles.pinned`).
+  Last, **Ansicht** (technician token only, `body.rtech`, so in the host
+  layout too): links to `/tech`, `/host`, `/guest`, `/spectator` with the
+  same token, for somebody who is technician and host at once; on the guest
+  and spectator view a technician gets "← Zum Pult" (`SB.techBack`, only
+  with a `k` in the URL).
 
 **Views and roles.** `MeterServer` picks the view from the request's role
 (`Roles.roleOf`, the `?k=` token — never the route alone, see `viewFor`): a
@@ -481,7 +505,9 @@ its role from the WebSocket `hello` (`setRole`): `body.host` hides everything
 marked `.techonly` / `.td` (processing meters, trims, per-mic mute, Programm,
 Vorrang, Einmessen, stream/output switches) and shows the mics as compact
 bars — the host layout is this page, not a fourth file; a technician opening
-`/host` gets it too. Hiding is convenience: the server's allowlist is the
+`/host` gets it too. The host may start and stop the recording (since
+2026-10-21: a host running a show alone has to); the stream, the outputs and
+"Sendung beenden" stay the technician's. Hiding is convenience: the server's allowlist is the
 protection, the file-tree routes (`/folders`, `/files`, `/scheduled`,
 `/preview`) answer 403 without an operator token (the page appends its `k` via
 `withK`), and guest/spectator connections get a cut-down snapshot and no queue
@@ -693,8 +719,13 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
 - **Recording** (`recording` command arms both files): stereo FLAC 24 bit as
   **one continuous file** named by the on-air time of its first sample, with
   Vorbis comments; with `output.multitrack` an N-channel FLAC (mics, stereo
-  sources, programme; ≤ 8 channels) written from the same blocks plus a
-  `.multitrack.json` channel map. `dry` taps are the raw sources delayed to
+  sources; ≤ 8 channels) written from the same blocks plus a
+  `.multitrack.json` channel map (mics: `name` = the live name at the start,
+  `label` = the config's). The programme is the stereo file; it is in the
+  multitrack only with `programme: true` — off by default since 2026-10-21,
+  when a fifth mic did not fit (5 + 2 + 2 > 8) and the service crash-looped
+  on the config check. `tools/post` reads the programme from the stereo file
+  when the multitrack has none. `dry` taps are the raw sources delayed to
   line up with the programme. A stop keeps recording for the look-ahead, so
   what was said up to the button press is in the file (`recording` stays true
   for those ~6 s). `Recorder.stop()` closes stdin and lets ffmpeg finalize.

@@ -383,6 +383,38 @@ async function git() {
   return gitInfo;
 }
 
+/** The file to edit: the template studiobox.yaml is rendered from at every
+ *  start (prestart.js says so in its header), else studiobox.yaml itself. */
+function configToEdit() {
+  try {
+    const head = fs.readFileSync(CONFIG, 'utf8').slice(0, 400);
+    const m = /^# GENERATED[^\n]*\n# Edit (\S+) instead/.exec(head);
+    if (m) return m[1];
+  } catch {
+    /* no config yet */
+  }
+  return CONFIG;
+}
+
+/** Why studiobox does not come up: its last "cannot start: …" line in the
+ *  journal of the last 2 minutes (a config error makes it restart every 3 s). */
+async function startError() {
+  const t = await run('journalctl', [
+    '-u',
+    'studiobox.service',
+    '--since',
+    '-2min',
+    '-o',
+    'cat',
+    '--no-pager',
+    '-n',
+    '60',
+  ]);
+  const lines = (t || '').split('\n').filter((l) => l.includes('cannot start: '));
+  const last = lines[lines.length - 1];
+  return last ? last.slice(last.indexOf('cannot start: ') + 'cannot start: '.length).trim() : null;
+}
+
 /** One `systemctl show` for all units: Id → {active, result, since}. */
 async function units(ids) {
   const t = await run('systemctl', [
@@ -491,6 +523,19 @@ async function collect() {
       );
     }
   }
+  if (!fresh) {
+    const why = await startError();
+    if (why) send.push(item('Start', 'Konfigurationsfehler', 'fail', why));
+  }
+  const edit = configToEdit();
+  send.push(
+    item(
+      'Konfiguration',
+      path.basename(edit),
+      'info',
+      edit === CONFIG ? edit : `${edit} · studiobox.yaml wird bei jedem Start daraus erzeugt`
+    )
+  );
   groups.push({ title: 'Sendung', items: send });
 
   // eve and the listeners: who listens (Icecast), what eve says about the show.

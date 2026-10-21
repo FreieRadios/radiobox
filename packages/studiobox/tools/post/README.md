@@ -16,8 +16,9 @@ hand on:
 
 It was built from the hand-made post-production of a show on 2026-10-07
 (`recordings/remaster-20261007/`, prototypes there, git-ignored) and produces
-the same filler cuts and talker labels on that show. The programme channels
-tell it when the mics were on air (what is left after fitting the dry music
+the same filler cuts and talker labels on that show. The programme (the
+multitrack's last two channels in recordings before 2026-10-21, else the
+stereo file beside it) tells it when the mics were on air (what is left after fitting the dry music
 channel to the programme), so chatter into muted mics — during songs, after
 the outro — never reaches the output, and the show ends with the outro.
 

@@ -71,8 +71,12 @@ Not in `all`: **`relay`**, for the receiving box at the desk (below).
 What lives where: the station settings in `station/local/<host>.env`
 (git-ignored) and their copy `/etc/studiobox/station.env`; the studiobox
 config in `STATE_DIR/studiobox.template.yaml` (edit this one;
-`studiobox.yaml` beside it is generated at every start); the live settings
-(Einmessen, trims) in `STATE_DIR/session-state.json`.
+`studiobox.yaml` beside it is generated at every start; the `config` step
+makes `packages/studiobox/config/studiobox.yaml` a link to it, so editing
+either is the same; the health page names the file and, when studiobox
+cannot start, the config error); the live settings (Einmessen, trims, live
+mic names and colours, which mics were heard) in
+`STATE_DIR/session-state.json`.
 
 ## Day to day
 

@@ -164,8 +164,9 @@ def main(argv=None):
         with open(p("items.json"), "w") as f:
             json.dump([music.item_dict(i) for i in items], f, indent=1)
         log("music: " + (", ".join(f"{i + 1}. {it.kind} {it.start:.0f}-{it.end:.0f} s" for i, it in enumerate(items)) or "none"))
-        if len(rec.programme) >= 2 and len(rec.music) >= 2:
-            pl, pr = recording.channel(work, rec.programme[0]), recording.channel(work, rec.programme[1])
+        prog = recording.programme(work, rec)
+        if prog is not None and len(rec.music) >= 2:
+            pl, pr = prog
             air = music.on_air(pl, pr, ml, mr, items)
             np.save(p("onair.npy"), air)
             log(f"music: mics on air {air.sum() / FPS / 60:.1f} min of {len(air) / FPS / 60:.1f}")

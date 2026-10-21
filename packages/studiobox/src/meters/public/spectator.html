@@ -91,7 +91,7 @@
  SB.connect({
   onState:function(st){document.body.className=st;
    put($('conn'),st==='lost'?'Verbindung weg – verbinde neu …':'Verbinde …');},
-  onHello:function(h){if(h.tz)clockFmt=SB.timeFormat(h.tz,true);},
+  onHello:function(h){if(h.tz)clockFmt=SB.timeFormat(h.tz,true);SB.techBack(h);},
   onSnapshot:onSnapshot
  });
 })();

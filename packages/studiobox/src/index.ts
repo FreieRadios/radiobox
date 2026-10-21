@@ -1,4 +1,4 @@
-import { loadConfig } from './config/load';
+import { configPathOf, editedFrom, loadConfig } from './config/load';
 import { Pipeline } from './pipeline';
 import { PlayoutPipeline } from './playout';
 import { formatDoctor, runDoctor } from './doctor';
@@ -15,7 +15,19 @@ function main(): void {
     return i >= 0 ? argv[i + 1] : undefined;
   };
 
-  const cfg = loadConfig({ configPath: getArg('--config'), profilesPath: getArg('--profiles') });
+  const opts = { configPath: getArg('--config'), profilesPath: getArg('--profiles') };
+  const file = configPathOf(opts);
+  const from = editedFrom(file);
+  // Which file this is, and — when it is generated — the one to edit.
+  if (!argv.includes('doctor'))
+    log.info(`config: ${file}${from ? ` (generated from ${from})` : ''}`);
+  let cfg;
+  try {
+    cfg = loadConfig(opts);
+  } catch (err) {
+    // The health page shows this line while the service can't start.
+    throw new Error(`cannot start: ${(err as Error).message}${from ? ` (edit ${from})` : ''}`);
+  }
 
   // `studiobox doctor`: the preflight. Checks the machine against this config
   // and exits; nothing is started.

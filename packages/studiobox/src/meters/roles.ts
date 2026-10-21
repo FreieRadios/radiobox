@@ -13,8 +13,10 @@ import { RolesConfig } from '../config/schema';
 export type ViewRole = 'tech' | 'host' | 'guest' | 'spectator';
 
 /** What the host may do: playout, the queue, the bed, the music level on air,
- *  and the mics as a whole. */
+ *  the mics as a whole, and the recording (a host running a show alone has
+ *  to be able to start it; stopping it is a held press as for everybody). */
 const HOST_COMMANDS = [
+  'recording',
   'playFile',
   'stopFile',
   'queueAdd',

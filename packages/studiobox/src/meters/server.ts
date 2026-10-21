@@ -1134,7 +1134,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  body.host .techonly,body.host .td{display:none!important}
  body.host .chgrid{grid-template-columns:minmax(88px,1fr) minmax(0,3fr);min-width:0}
  body.host .chrow .meter{height:16px;border-radius:4px}
- body.host #rec{pointer-events:none}
+ body:not(.rtech) .viewgrp{display:none!important}
+.menu .menulink[aria-current="page"]{box-shadow:inset 0 0 0 2px var(--accent)}
  /* Wide screens (tablet landscape, laptop): two columns — metering left,
     files right, each scrolling on its own so the page itself never moves. */
  @media (min-width:1000px) and (min-height:560px){
@@ -1235,6 +1236,13 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      <button id="connBtn" class="techonly">📱 Geräte verbinden</button>
      <a id="setBtn" class="menulink techonly liveonly" href="/einstellungen">⚙ Einstellungen</a>
      <a id="mesBtn" class="menulink techonly liveonly" href="/einmessen">🎤 Einmessen</a>
+    </div>
+    <div class="mgrp viewgrp" role="group" aria-labelledby="mhView">
+     <div class="mh" id="mhView">Ansicht</div>
+     <a id="vTech" class="menulink" href="/tech">🎛 Pult (Technik)</a>
+     <a id="vHost" class="menulink" href="/host">🎙 Pult (Moderation)</a>
+     <a id="vGuest" class="menulink" href="/guest">🪑 Gäste</a>
+     <a id="vSpec" class="menulink" href="/spectator">👁 Zuschauer</a>
     </div>
    </div>
   </div>
@@ -1548,6 +1556,10 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      für jede Rolle einen QR-Code (Technik, Host, Gäste — für Gäste auch einen
      je Mikro, das Tablet zeigt dann gleich dessen Pegel — und Zuschauer). Wer
      ihn scannt, bekommt genau diese Ansicht und darf nur, was sie erlaubt.</li>
+     <li class="techonly"><span class="k">⋮ → Ansicht</span> schaltet dieses Gerät
+     zwischen Pult (Technik), Pult (Moderation), Gäste und Zuschauer um — für alle,
+     die beides machen. Es bleibt der Technik-Zugang: von jeder Ansicht führt
+     <span class="k">← Zum Pult</span> zurück.</li>
      <li><span class="k">Bett aus</span> / <span class="k">Bett läuft</span>
      (unten): ein Musikbett, das in Schleife läuft und unter Sprache leiser
      wird — auch als Notnagel, wenn nichts anderes bereit ist. Im Bett-Ordner
@@ -1571,7 +1583,11 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
      <li>Unter dem Namen steht der Zustand als Wort: <span class="k">OFFEN</span>,
      <span class="k">LEISER</span> (die Moderation spricht, dieses Mikro tritt
      zurück), <span class="k">PAUSE</span> (alle Mikros zu),
-     <span class="k">STUMM</span> (von der Technik abgeschaltet).</li>
+     <span class="k">STUMM</span> (von der Technik abgeschaltet),
+     <span class="k">FREI</span> (in dieses Mikro hat noch niemand gesprochen —
+     es ist trotzdem offen, das erste Wort geht auf Sendung).</li>
+     <li class="techonly">Namen und Kabelfarben der Mikros: ⋮ →
+     <b>Einstellungen</b> → Mikrofone.</li>
      <li class="techonly"><b>Trim</b>: ein Klick auf den Wert öffnet die
      Schritt-Tasten (±1, ±3 dB) für die Eingangsverstärkung dieses Mikros.</li>
      <li class="techonly"><b>Abhören</b>: hört auf diesem Gerät (Kopfhörer, auch
@@ -1677,6 +1693,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
  const tech=()=>role==='tech';
  function setRole(r){role=r==='tech'&&location.pathname==='/host'?'host':r;
   document.body.classList.toggle('host',!tech());
+  // The technician may look at every view (⋮ → Ansicht), the host layout too.
+  document.body.classList.toggle('rtech',r==='tech');
   $('chTitle').textContent=tech()?'Kanäle':'Mikrofone';}
  // Level meters span −60…0 dB. The zone colours are a fixed gradient in the
  // bar; per frame only the cover (and the peak tick) move.
@@ -1721,7 +1739,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   rowEls=channels.map(c=>{const row=document.createElement('div');const mic=c.role==='mic';
    row.className='chgrid chrow';
    // gate / comp GR / automix are mic-only concepts — music rows leave them blank.
-   row.innerHTML='<div class="chname'+(c.color?' cc" style="--chc:'+esc(c.color):'')+'"><b title="'+esc(c.label)+'">'+esc(c.label)+'</b><span class="chstate"></span></div>'+
+   row.innerHTML='<div class="chname"><b></b><span class="chstate"></span></div>'+
     (mic?'<button class="trimbtn td" title="Trim (Eingangsverstärkung) ändern"></button>':'<span class="td"></span>')+
     stage('lvl',true)+(mic?stage('gate')+stage('comp')+stage('mix'):'<span class="td"></span><span class="td"></span><span class="td"></span>')+
     '<div class="stage s-lev td"><div class="meter bi"><div class="fill"></div></div><span class="val"></span></div>'+
@@ -1729,16 +1747,21 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    rowsEl.appendChild(row);
    const q=s=>row.querySelector(s);
    const lvl=levelMeter(q('.s-lvl .meter'),q('.s-lvl .cover'),q('.s-lvl .peak'));
-   lvl.el.setAttribute('aria-label','Pegel '+c.label);
    const trim=mic?q('.trimbtn'):null;
    if(trim)trim.onclick=()=>openTrim(trimLabel===c.label?null:c.label);
-   return {label:c.label,mic:mic,st:'',hi:{},fresh:true,state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,auto:null,
+   return {label:c.label,mic:mic,st:'',hi:{},fresh:true,name:null,color:null,nameBox:q('.chname'),nameEl:q('.chname b'),state:q('.chstate'),lvl:lvl,lvlVal:q('.s-lvl .val'),trim:trim,trimDb:null,auto:null,
     gate:q('.s-gate .cover'),gateVal:q('.s-gate .val'),comp:q('.s-comp .cover'),compVal:q('.s-comp .val'),
     mix:q('.s-mix .cover'),mixVal:q('.s-mix .val'),lev:q('.s-lev .fill'),levVal:q('.s-lev .val'),mbtn:q('.mtbtn')};});
  }
  function updateRows(channels,now,nums){
   ensureRows(channels);
   channels.forEach((c,i)=>{const r=rowEls[i];
+   // Name and cable colour can be changed live (Einstellungen): in place.
+   const nm=c.name||c.label;
+   if(nm!==r.name){r.name=nm;r.nameEl.textContent=nm;r.nameEl.title=nm===c.label?nm:nm+' ('+c.label+')';
+    r.lvl.el.setAttribute('aria-label','Pegel '+nm);if(trimLabel===c.label)showTrim();}
+   const col=c.color||'';
+   if(col!==r.color){r.color=col;r.nameBox.classList.toggle('cc',!!col);r.nameBox.style.setProperty('--chc',col);}
    setLevel(r.lvl,c.outDb,now);
    const lvlHi=hiOf(r.hi,'lvl',c.outDb),compHi=hiOf(r.hi,'comp',Math.abs(c.compGrDb));
    // A row built mid-window gets its numbers at once, not a second later.
@@ -1769,9 +1792,12 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
    // fine but all mics are closed (music only); LEISER = host priority is
    // holding it back right now. Written only on change so the mute button is
    // not re-rendered under a finger.
-   const st=c.muted?'STUMM':r.mic?(muted?'PAUSE':c.priorityDb<-1?'LEISER':'OFFEN'):'AN';
+   // FREI = nobody has talked into this mic yet (an input for a guest who
+   // isn't there); it is open all the same, the first word goes on air.
+   const st=c.muted?'STUMM':r.mic?(muted?'PAUSE':c.vacant?'FREI':c.priorityDb<-1?'LEISER':'OFFEN'):'AN';
    if(st!==r.st){r.st=st;
     r.state.textContent=st;
+    r.state.title=st==='FREI'?'Noch niemand gehört – offen, sobald jemand spricht':'';
     r.state.className='chstate'+(st==='STUMM'?'':st==='PAUSE'?' pause':st==='LEISER'?' duck':' open');
     r.mbtn.className='mtbtn td'+(c.muted?' on':'');
     r.mbtn.textContent=c.muted?'Stumm':r.mic?'Offen':'An';
@@ -1787,7 +1813,7 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
   show($('trimEd'),!!r);
   if(rowEls)rowEls.forEach(x=>{if(x.trim)x.trim.classList.toggle('on',x===r);});
   if(!r)return;
-  $('trimWho').textContent=r.label;$('trimVal').textContent=sgn(r.trimDb)+' dB';
+  $('trimWho').textContent=r.name||r.label;$('trimVal').textContent=sgn(r.trimDb)+' dB';
   // The switch only where the box has Auto-Pegel; a step makes the mic manual.
   show($('trimAuto'),r.auto!==null);setPressed($('trimAuto'),r.auto===true);
   $('trimAuto').textContent=r.auto?'Auto-Pegel an':'Auto-Pegel aus';}
@@ -1880,7 +1906,7 @@ $('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)retur
  let recEndAt=0;
  const recEnding=()=>recording===false&&Date.now()-recEndAt<5000;
  function setRec(){setTog(rbtn,'tog rec hold',recording,'● Aufnahme läuft',recEnding()?'Aufnahme endet …':'Aufnahme aus','Die lokale Aufnahme (FLAC)',true);}
- holdBtn(rbtn,()=>tech()&&recording===true,()=>{if(recording===null||!tech())return;
+ holdBtn(rbtn,()=>recording===true,()=>{if(recording===null)return;
   recording=!recording;recEndAt=recording?0:Date.now();setRec();send({type:'recording',value:recording});},setRec,'Aufnahme beenden?');
  const sbtn=document.getElementById('ship');
  function setShip(){setTog(sbtn,'tog ship hold techonly',streaming,'Stream läuft','Stream aus','Der Stream zum Server',true);}
@@ -2243,6 +2269,9 @@ $('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)retur
  su.chip.href='/einmessen'+(location.search||'');
  $('setBtn').href='/einstellungen'+(location.search||'');
  $('mesBtn').href='/einmessen'+(location.search||'');
+ [['vTech','/tech'],['vHost','/host'],['vGuest','/guest'],['vSpec','/spectator']].forEach(([id,v])=>{
+  const a=$(id);a.href=v+(location.search||'');
+  if(v===(location.pathname==='/host'?'/host':'/tech'))a.setAttribute('aria-current','page');});
  const put=(el,t)=>{if(el.textContent!==t)el.textContent=t;};
  function setSetup(s){
   const st=s.setup;

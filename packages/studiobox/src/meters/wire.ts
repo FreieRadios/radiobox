@@ -52,6 +52,7 @@ const pick = <T extends object>(o: T, keys: readonly string[]): Partial<T> => {
  *  the processing chain. */
 const GUEST_MIC = [
   'label',
+  'name',
   'role',
   'muted',
   'active',

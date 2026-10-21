@@ -152,6 +152,16 @@ step_config() {
     install -o "$RUN_USER" -m 0600 "$from" "$tpl"
     warn "config: check the lines marked ADAPT in $tpl (devices, folders)"
   fi
+  # config/studiobox.yaml in the package is where everybody looks first: make
+  # it the template, so an edit there is the edit that counts.
+  local own="$APP_DIR/packages/studiobox/config/studiobox.yaml"
+  if [ ! -L "$own" ]; then
+    if [ -e "$own" ]; then
+      mv "$own" "$own.bak-$(date +%Y%m%d)"
+      warn "config: $own moved aside (.bak-$(date +%Y%m%d)), it is a link to $tpl now"
+    fi
+    as_user ln -s "$tpl" "$own"
+  fi
   local url=""
   if [ "$STREAM_ENABLED" = yes ]; then
     if [ "$STREAM_SERVER" = local ]; then

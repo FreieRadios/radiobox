@@ -32,6 +32,14 @@ export interface ChannelMeter extends StripMeters {
   /** Mics: Auto-Pegel sets this mic's trim (false: the technician's hand
    *  trim). Null where Auto-Pegel is not configured, and for music. */
   autoTrim?: boolean | null;
+  /** The name the views show; the `label` stays the channel's id (commands,
+   *  state file, guest links). Set live under Einstellungen, else the label. */
+  name?: string;
+  /** Mics: nobody has talked into it yet ("FREI" on the desk) — an input
+   *  configured for a guest who isn't there. It runs through the chain like
+   *  any other (a new voice is on air from its first word); `HEARD_SEC` of
+   *  talk as the talker make it taken, and it stays taken. */
+  vacant?: boolean;
 }
 
 /** Air-delay state, filled in by the pipeline (the graph has no clock). */
@@ -131,6 +139,7 @@ interface MicNode {
   actEnv: EnvelopeFollower; // pre-leveler level, to tell the talker from bleed
   voice: VoiceDetector; // noise floor, speech level, voiced frames
   active: boolean;
+  heard: number; // samples as the active talker, counted up to `heardN`
   mixDelay: DelayLine | null; // audio delay of the mix look-ahead
   gainLead: DelayLine | null; // automix gain, delayed to line up with the audio
   prioritised: boolean; // gives way to the priority mic
@@ -175,7 +184,8 @@ export interface GraphAux {
   retL?: Float32Array;
   retR?: Float32Array;
   /** Multitrack channels, sample-aligned with outL/outR: one per mic, two per
-   *  music source, then the programme L/R (see `Graph.tapLayout`). Only
+   *  music source, then (with `programme`) the programme L/R (see
+   *  `Graph.tapLayout`). Only
    *  written when the graph was built with `output.multitrack.enabled`. */
   taps?: Float32Array[];
   /** One per mic: the raw input, sample-aligned with outL/outR (listening,
@@ -203,6 +213,8 @@ export interface GraphOptions {
 
 /** A mic counts as the talker only within this many dB of the loudest mic … */
 const DOMINANCE_DB = 10;
+/** Seconds of talk as the active talker that turn a free mic into a taken one. */
+export const HEARD_SEC = 2;
 /** … and above this absolute level (linear; -60 dBFS). */
 const ACTIVE_FLOOR = 1e-3;
 /** Loudness of a mono signal sent to both channels, over the signal itself. */
@@ -235,6 +247,10 @@ export class Graph {
   private mics: MicNode[] = [];
   /** Channel label -> configured marker colour, for the snapshot. */
   private colors = new Map<string, string>();
+  /** Live names (Einstellungen), by label. */
+  private names = new Map<string, string>();
+  private readonly heardN: number;
+  private heardChanges = 0;
   private music: MusicNode[] = [];
   private automix: Automix | null = null;
   private automixBuf: Float32Array;
@@ -322,6 +338,8 @@ export class Graph {
   /** Samples the music runs behind its input in the programme. */
   readonly musicLatencySamples: number;
   private readonly tapSource: 'dry' | 'processed' | null;
+  /** The programme as the last two taps (`output.multitrack.programme`). */
+  private readonly tapProgramme: boolean;
 
   constructor(
     private cfg: StudioboxConfig,
@@ -339,8 +357,10 @@ export class Graph {
     this.latencySamples = this.mixLatency + limN;
     this.musicLatencySamples = this.mixLatency + musicExtra + limN;
     const musicN = this.mixLatency + musicExtra;
+    this.heardN = Math.round(HEARD_SEC * sr);
     const mt = cfg.output?.multitrack;
     this.tapSource = mt?.enabled ? mt.source : null;
+    this.tapProgramme = !!mt?.enabled && mt.programme === true;
     const dry = this.tapSource === 'dry';
     const processed = this.tapSource === 'processed';
     const micDry = dry || !!opts.dryTaps;
@@ -362,6 +382,7 @@ export class Graph {
           actEnv: new EnvelopeFollower(sr, 5, 200),
           voice: new VoiceDetector(sr),
           active: false,
+          heard: 0,
           mixDelay: mixN > 0 ? new DelayLine(mixN) : null,
           gainLead: mixN > 0 ? new DelayLine(mixN) : null,
           prioritised: priOn && pri.attenuate.includes(ch.label),
@@ -520,8 +541,7 @@ export class Graph {
     return [
       ...this.mics.map((m) => m.label),
       ...this.music.flatMap((m) => [`${m.label} L`, `${m.label} R`]),
-      'Programm L',
-      'Programm R',
+      ...(this.tapProgramme ? ['Programm L', 'Programm R'] : []),
     ];
   }
 
@@ -595,6 +615,7 @@ export class Graph {
         const talker = !off && m.strip.gateIsOpen && m.actEnv.value >= need;
         if (m.voice.process(m.strip.input, talker)) m.strip.setNoiseFloor(m.voice.floorDb);
         m.active = talker && m.voice.voiced;
+        if (m.active && m.heard < this.heardN && ++m.heard === this.heardN) this.heardChanges++;
         if (frameDone) {
           this.voiced[i] = !off && m.voice.voiced;
           this.strong[i] = !off && m.voice.strong;
@@ -801,7 +822,7 @@ export class Graph {
       this.limiter.process(stereoOut, mL, mR);
       outL[n] = stereoOut[0];
       outR[n] = stereoOut[1];
-      if (taps) {
+      if (taps && this.tapProgramme) {
         taps[tapIdx][n] = stereoOut[0];
         taps[tapIdx + 1][n] = stereoOut[1];
       }
@@ -835,6 +856,8 @@ export class Graph {
         priorityDb: m.prioritised ? this.priorityDb : 0,
         trimDb: m.processing.trimDb ?? 0,
         autoTrim: this.autoTrims ? this.autoTrims[this.mics.indexOf(m)].on : null,
+        name: this.names.get(m.label) ?? m.label,
+        vacant: m.heard < this.heardN,
       });
     }
     for (const mu of this.music) {
@@ -855,6 +878,7 @@ export class Graph {
         active: false,
         priorityDb: 0,
         trimDb: 0,
+        name: mu.label,
       });
     }
     return {
@@ -911,6 +935,62 @@ export class Graph {
     }
     const mu = this.music.find((m) => m.label === label);
     if (mu) mu.muted = muted;
+  }
+
+  /** The mics somebody has talked into (see `ChannelMeter.vacant`). */
+  get heardMics(): string[] {
+    return this.mics.filter((m) => m.heard >= this.heardN).map((m) => m.label);
+  }
+
+  /** Counts mics that became taken (the pipeline persists on change). */
+  get heardMicChanges(): number {
+    return this.heardChanges;
+  }
+
+  /** Take a mic as heard (restored after a restart). False for an unknown label. */
+  markHeard(label: string): boolean {
+    const m = this.mics.find((x) => x.label === label);
+    if (!m) return false;
+    m.heard = this.heardN;
+    this.patchSnapshot(label, { vacant: false });
+    return true;
+  }
+
+  /** The name a channel is shown by: the live name, else its label. */
+  nameOf(label: string): string {
+    return this.names.get(label) ?? label;
+  }
+
+  /** Show a channel under another name; empty goes back to the label. False
+   *  for an unknown label. */
+  setName(label: string, name: string): boolean {
+    if (!this.hasChannel(label)) return false;
+    const n = name.trim();
+    if (n && n !== label) this.names.set(label, n);
+    else this.names.delete(label);
+    this.patchSnapshot(label, { name: this.nameOf(label) });
+    return true;
+  }
+
+  /** A channel's marker colour (CSS hex); null goes back to the configured
+   *  one. False for an unknown label. */
+  setColor(label: string, color: string | null): boolean {
+    if (!this.hasChannel(label)) return false;
+    const c = color ?? this.cfg.channels.find((ch) => ch.label === label)?.color;
+    if (c) this.colors.set(label, c);
+    else this.colors.delete(label);
+    this.patchSnapshot(label, { color: c ?? null });
+    return true;
+  }
+
+  private hasChannel(label: string): boolean {
+    return this.mics.some((m) => m.label === label) || this.music.some((m) => m.label === label);
+  }
+
+  /** Visible at once, not only with the next audio block. */
+  private patchSnapshot(label: string, patch: Partial<ChannelMeter>): void {
+    const ch = this.snapshot.channels.find((c) => c.label === label);
+    if (ch) Object.assign(ch, patch);
   }
 
   /** Labels of the mic channels, in channel order. */

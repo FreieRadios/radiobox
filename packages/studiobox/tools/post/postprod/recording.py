@@ -87,6 +87,13 @@ def load(json_path: str) -> Recording:
         Channel(index=int(c["channel"]) - 1, name=str(c["name"]), kind=str(c["kind"]))
         for c in meta["channels"]
     ]
+    # Mics carry their live name (two guests may have been given the same
+    # one); a speaker has to be unique, so a repeat gets its config label.
+    labels = {int(c["channel"]) - 1: str(c.get("label") or f"Kanal {c['channel']}") for c in meta["channels"]}
+    seen = [c.name for c in channels if c.kind == "mic"]
+    for c in channels:
+        if c.kind == "mic" and seen.count(c.name) > 1:
+            c.name = f"{c.name} ({labels[c.index]})"
     sr = int(meta.get("sampleRate", SR))
     if sr != SR:
         raise ValueError(f"the tool assumes {SR} Hz, the recording says {sr}")
@@ -107,21 +114,13 @@ def raw_path(work: str, ch: Channel) -> str:
     return os.path.join(work, f"c{ch.index + 1}.raw")
 
 
-def decode(rec: Recording, work: str, seconds: tuple[float, float] | None = None, force=False) -> None:
-    """Decode the multitrack FLAC into one `<work>/c<n>.raw` (f32 mono) per channel.
-    `seconds=(a, b)` decodes only that span (for trying the pipeline on a piece)."""
-    paths = [raw_path(work, c) for c in rec.channels]
-    marker = os.path.join(work, "decode.json")
-    want = {"flac": rec.flac, "seconds": list(seconds) if seconds else None}
-    if not force and os.path.exists(marker) and all(os.path.exists(p) for p in paths):
-        with open(marker) as f:
-            if json.load(f) == want:
-                return
-    n = len(rec.channels)
-    cmd = ["ffmpeg", "-v", "error", "-nostdin"]
-    if seconds:
-        cmd += ["-ss", f"{seconds[0]:.3f}", "-t", f"{seconds[1] - seconds[0]:.3f}"]
-    cmd += ["-i", rec.flac, "-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(SR), "-"]
+def _programme_paths(work: str) -> list[str]:
+    return [os.path.join(work, f"programme{s}.raw") for s in ("L", "R")]
+
+
+def _split(cmd: list[str], paths: list[str], what: str) -> None:
+    """Run an ffmpeg that writes interleaved f32 to stdout, one file per channel."""
+    n = len(paths)
     outs = [open(p, "wb") for p in paths]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     chunk = SR * 10 * n * 4  # 10 s
@@ -138,7 +137,28 @@ def decode(rec: Recording, work: str, seconds: tuple[float, float] | None = None
         for f in outs:
             f.close()
         if proc.wait() != 0:
-            raise RuntimeError("ffmpeg failed decoding " + rec.flac)
+            raise RuntimeError("ffmpeg failed decoding " + what)
+
+
+def decode(rec: Recording, work: str, seconds: tuple[float, float] | None = None, force=False) -> None:
+    """Decode the multitrack FLAC into one `<work>/c<n>.raw` (f32 mono) per channel.
+    `seconds=(a, b)` decodes only that span (for trying the pipeline on a piece)."""
+    paths = [raw_path(work, c) for c in rec.channels]
+    marker = os.path.join(work, "decode.json")
+    want = {"flac": rec.flac, "seconds": list(seconds) if seconds else None}
+    from_stereo = not rec.programme and rec.stereo
+    every = paths + (_programme_paths(work) if from_stereo else [])
+    if not force and os.path.exists(marker) and all(os.path.exists(p) for p in every):
+        with open(marker) as f:
+            if json.load(f) == want:
+                return
+    span = ["-ss", f"{seconds[0]:.3f}", "-t", f"{seconds[1] - seconds[0]:.3f}"] if seconds else []
+    pcm = ["-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(SR), "-"]
+    _split(["ffmpeg", "-v", "error", "-nostdin", *span, "-i", rec.flac, *pcm], paths, rec.flac)
+    if from_stereo:
+        # Recordings since 2026-10-21 leave the programme out of the
+        # multitrack: it is the stereo file, written from the same blocks.
+        _split(["ffmpeg", "-v", "error", "-nostdin", *span, "-i", rec.stereo, *pcm], _programme_paths(work), rec.stereo)
     with open(marker, "w") as f:
         json.dump(want, f)
 
@@ -146,6 +166,17 @@ def decode(rec: Recording, work: str, seconds: tuple[float, float] | None = None
 def channel(work: str, ch: Channel) -> np.ndarray:
     """Memory-mapped f32 samples of one decoded channel."""
     return np.memmap(raw_path(work, ch), dtype="<f4", mode="r")
+
+
+def programme(work: str, rec: Recording) -> tuple[np.ndarray, np.ndarray] | None:
+    """The programme L/R: from the multitrack when it carries it, else from
+    the stereo file `decode` wrote beside the channels; None without either."""
+    if len(rec.programme) >= 2:
+        return channel(work, rec.programme[0]), channel(work, rec.programme[1])
+    paths = _programme_paths(work)
+    if all(os.path.exists(p) for p in paths):
+        return tuple(np.memmap(p, dtype="<f4", mode="r") for p in paths)
+    return None
 
 
 def length(work: str, rec: Recording) -> int:

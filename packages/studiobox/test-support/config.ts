@@ -79,7 +79,7 @@ export function config(
       harbor: { enabled: false, url: '', format: 'ogg-flac', contentType: '' },
       serve: { enabled: false, mp3Kbps: 320, latencyMs: 2600 },
       backup: { enabled: false, dir: './recordings', segmentSeconds: 0 },
-      multitrack: { enabled: false, source: 'dry' },
+      multitrack: { enabled: false, source: 'dry', programme: false },
       monitor: { enabled: false, backend: 'alsa', device: '' },
       return: { enabled: false, backend: 'alsa', device: '' },
     },

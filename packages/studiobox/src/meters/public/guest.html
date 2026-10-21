@@ -183,11 +183,15 @@
    name.onclick=function(){if(all&&all.length>1){picking=true;sel=chosen.slice();render();}};
    q('.bar').setAttribute('aria-label',chosen.length>1?'Pegel '+label:'Pegel an deinem Mikro');
    micsEl.appendChild(el);
-   return {label:label,chip:q('.state'),sw:q('.sw'),sub:q('.sub'),level:q('.level'),bar:q('.bar'),
+   return {label:label,nameEl:name,shown:label,chip:q('.state'),sw:q('.sw'),sub:q('.sub'),level:q('.level'),bar:q('.bar'),
     fill:q('.fill'),zw:q('.zw'),zh:q('.zh'),state:null,zone:null};});
  }
  function update(card){
   var c=(last.channels||[]).filter(function(x){return x.label===card.label;})[0];
+  // The technician can rename a mic live (Einstellungen); the label stays its id.
+  var nm=c&&c.name||card.label;
+  if(nm!==card.shown){card.shown=nm;card.nameEl.textContent=nm;
+   card.nameEl.setAttribute('aria-label',nm+' – anderes Mikro wählen');}
   var m=SB.guestMic(c,last);
   if(m.state!==card.state){card.state=m.state;
    card.chip.className='state '+(m.state==='—'?'none':m.state);card.sw.textContent=m.state;
@@ -222,7 +226,8 @@
    $('pickOk').hidden=true;return;}
   all.forEach(function(label){
    var b=document.createElement('button');
-   b.textContent=label;b.setAttribute('aria-pressed',sel.indexOf(label)>=0?'true':'false');
+   var c=last&&(last.channels||[]).filter(function(x){return x.label===label;})[0];
+   b.textContent=c&&c.name||label;b.setAttribute('aria-pressed',sel.indexOf(label)>=0?'true':'false');
    b.onclick=function(){var i=sel.indexOf(label);
     if(i>=0)sel.splice(i,1);else{sel.push(label);if(sel.length>2)sel.shift();}
     render();};
@@ -275,7 +280,7 @@
  SB.connect({
   onState:function(st){document.body.className=st;
    put($('conn'),st==='lost'?'Verbindung weg – verbinde neu …':'Verbinde …');},
-  onHello:function(h){if(h.tz)clockFmt=SB.timeFormat(h.tz,true);},
+  onHello:function(h){if(h.tz)clockFmt=SB.timeFormat(h.tz,true);SB.techBack(h);},
   onSnapshot:onSnapshot
  });
 

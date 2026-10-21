@@ -24,7 +24,8 @@ import { ListenerFeed } from './listeners/feed';
 import { Scheduler } from './schedule';
 import { SetupSession, SetupStatus } from './setup/session';
 import { applySettings, settingsOf } from './setup/measure';
-import { SessionState, loadState, saveState } from './setup/state';
+import { SessionState, cleanName, loadState, saveState } from './setup/state';
+import { resolveChannelColor } from './config/load';
 import { makeLog } from './util/log';
 
 const log = makeLog('pipeline');
@@ -108,6 +109,7 @@ export class Pipeline {
   private tailFree = false;
   private trimTimer: NodeJS.Timeout | null = null;
   private savedTrimChanges = 0;
+  private savedHeard = 0;
   private monitor: Monitor | null;
   private ret: Monitor | null;
   private graph: Graph;
@@ -460,6 +462,10 @@ export class Pipeline {
     if (s.queueMode && this.playQueue) this.playQueue.autoAdvance = s.queueMode === 'chain';
     if (s.havarie !== undefined) this.bed?.setHavarieWatch(s.havarie);
     for (const label of s.manualTrim ?? []) this.graph.setAutoTrim(label, false);
+    for (const [label, name] of Object.entries(s.names ?? {})) this.graph.setName(label, name);
+    for (const [label, color] of Object.entries(s.colors ?? {})) this.graph.setColor(label, color);
+    for (const label of s.heard ?? []) this.graph.markHeard(label);
+    this.savedHeard = this.graph.heardMicChanges;
     this.state = s;
     this.setupApplied = n > 0;
     log.info(
@@ -565,6 +571,34 @@ export class Pipeline {
     } else if (type === 'trim') {
       const req = isObj(value) ? value : {};
       this.setTrim(String(req.label ?? ''), Number(req.trimDb));
+    } else if (type === 'channelName') {
+      // {label, name}: the name the views show; empty = the label again.
+      const req = isObj(value) ? value : {};
+      const label = String(req.label ?? '');
+      const name = cleanName(req.name);
+      if (!this.graph.setName(label, name)) return;
+      const names = { ...(this.state.names ?? {}) };
+      if (name && name !== label) names[label] = name;
+      else delete names[label];
+      this.state.names = names;
+      this.persist();
+      log.info(`channel ${label} is shown as "${this.graph.nameOf(label)}"`);
+    } else if (type === 'channelColor') {
+      // {label, color}: a name from the colour list or #rrggbb; null = the config's.
+      const req = isObj(value) ? value : {};
+      const label = String(req.label ?? '');
+      let color: string | null = null;
+      try {
+        color = resolveChannelColor(req.color, label) ?? null;
+      } catch {
+        return;
+      }
+      if (!this.graph.setColor(label, color)) return;
+      const colors = { ...(this.state.colors ?? {}) };
+      if (color) colors[label] = color;
+      else delete colors[label];
+      this.state.colors = colors;
+      this.persist();
     } else if (type === 'autoTrim') {
       // {label?, on}: one mic, or every mic without a label.
       const req = isObj(value) ? value : { on: value };
@@ -710,7 +744,10 @@ export class Pipeline {
     const b = this.cfg.output.backup;
     const base = `studiobox-${stamp(startMs)}`;
     const mics = this.graph.micLabels.length;
-    const source = this.cfg.output.multitrack.source;
+    const { source, programme } = this.cfg.output.multitrack;
+    const where = programme
+      ? 'the last two channels = the stereo file'
+      : `the programme is the stereo file, ${base}.flac`;
     const map = {
       file: `${base}.multitrack.flac`,
       stereo: `${base}.flac`,
@@ -721,13 +758,16 @@ export class Pipeline {
       note:
         source === 'dry'
           ? 'Mics and music are the unprocessed sources, delayed so that every channel is ' +
-            'sample-aligned with the programme (the last two channels = the stereo file).'
+            `sample-aligned with the programme (${where}).`
           : 'Mics and music are as they enter the mix (strip, leveler, automix, priority, ' +
-            'ducking), sample-aligned with the programme (the last two channels = the stereo file).',
-      channels: layout.map((name, i) => ({
+            `ducking), sample-aligned with the programme (${where}).`,
+      // Mics carry the name the desk showed at the start (the transcript's
+      // speakers); `label` is the channel's id in the config.
+      channels: layout.map((label, i) => ({
         channel: i + 1,
-        name,
-        kind: i < mics ? 'mic' : i >= layout.length - 2 ? 'programme' : 'music',
+        name: i < mics ? this.graph.nameOf(label) : label,
+        ...(i < mics ? { label } : {}),
+        kind: i < mics ? 'mic' : programme && i >= layout.length - 2 ? 'programme' : 'music',
       })),
     };
     try {
@@ -847,6 +887,12 @@ export class Pipeline {
 
   /** Keep what Auto-Pegel found, so a restart mid-show comes back with it. */
   private persistAutoTrims(): void {
+    const heard = this.graph.heardMicChanges;
+    if (heard !== this.savedHeard) {
+      this.savedHeard = heard;
+      this.state.heard = this.graph.heardMics;
+      this.persist();
+    }
     const n = this.graph.autoTrimChanges;
     if (n === this.savedTrimChanges) return;
     this.savedTrimChanges = n;

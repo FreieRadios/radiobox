@@ -167,14 +167,16 @@ output:
   #   mp3Kbps: 192
   #   minCutSec: 2 # music-only stretches at least this long are cut
   # Multitrack next to the stereo file, written from the same blocks so both
-  # are sample-aligned: every mic, every stereo music source, the programme.
-  # One FLAC holds at most 8 channels (e.g. 4 mics + file player + programme).
+  # are sample-aligned: every mic and every stereo music source (with
+  # `programme: true` also the programme, which is the stereo file anyway).
+  # One FLAC holds at most 8 channels (e.g. 6 mics + file player).
   # `dry` = raw sources, delayed to line up with the programme (to remix
   # from); `processed` = each source as it enters the mix. A .json channel map
   # is written beside it. About 0.3 GB per channel and hour.
   multitrack:
     enabled: false
     source: dry # dry | processed
+    programme: false # true: the programme as the last two channels
   # Direct local hardware playout: send the finished program to a locally
   # plugged audio device (sound card / USB interface, e.g. a Focusrite
   # Scarlett) for monitoring or to feed a transmitter/PA. Independent of the

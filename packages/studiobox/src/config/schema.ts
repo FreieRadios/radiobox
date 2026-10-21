@@ -237,9 +237,9 @@ export interface MusicFreeConfig {
 }
 
 /** Multitrack recording next to the processed stereo file: one FLAC holding
- *  every mic, every stereo music source and the programme, sample-aligned
- *  with the stereo recording (both are written from the same block). FLAC
- *  carries at most 8 channels. */
+ *  every mic and every stereo music source (and, with `programme`, the
+ *  programme), sample-aligned with the stereo recording (both are written
+ *  from the same block). FLAC carries at most 8 channels. */
 export interface MultitrackConfig {
   enabled: boolean;
   /** `dry`: the raw mic capture and the undecorated music, delayed to line up
@@ -247,6 +247,10 @@ export interface MultitrackConfig {
    *  as it enters the mix bus (strip, leveler, automix, priority) and the
    *  music after leveling and ducking. */
   source: 'dry' | 'processed';
+  /** Also write the programme as the last two channels (default false). It
+   *  is the stereo file, sample for sample, so it costs two of the eight
+   *  channels for nothing — off, six mics and a file player fit. */
+  programme: boolean;
 }
 
 /** Direct local hardware playout: the finished program stream is sent to a

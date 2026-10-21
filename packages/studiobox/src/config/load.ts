@@ -420,7 +420,11 @@ function resolveServe(raw: unknown): ServeConfig {
 
 function resolveMultitrack(raw: unknown): MultitrackConfig {
   const r = isObj(raw) ? raw : {};
-  return { enabled: !!r.enabled, source: r.source === 'processed' ? 'processed' : 'dry' };
+  return {
+    enabled: !!r.enabled,
+    source: r.source === 'processed' ? 'processed' : 'dry',
+    programme: r.programme === true,
+  };
 }
 
 /** Resolve the output block, filling in the sub-config defaults so every
@@ -584,13 +588,35 @@ export interface LoadOptions {
   profilesPath?: string;
 }
 
-export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
+/** The config file `loadConfig` reads for these options. */
+export function configPathOf(opts: LoadOptions = {}): string {
   const configDir = path.resolve(__dirname, '../../config');
-  const configPath =
+  return (
     opts.configPath ??
     (fs.existsSync(path.join(configDir, 'studiobox.yaml'))
       ? path.join(configDir, 'studiobox.yaml')
-      : path.join(configDir, 'studiobox.example.yaml'));
+      : path.join(configDir, 'studiobox.example.yaml'))
+  );
+}
+
+/** The file to edit when `configPath` is generated: a station's service
+ *  renders studiobox.yaml from a template at every start and says so in its
+ *  first lines (`# Edit <template> instead`). Null for a hand-written file. */
+export function editedFrom(configPath: string): string | null {
+  let head = '';
+  try {
+    head = fs.readFileSync(configPath, 'utf8').slice(0, 400);
+  } catch {
+    return null;
+  }
+  if (!/^# GENERATED/.test(head)) return null;
+  const m = /^# Edit (\S+) instead/m.exec(head);
+  return m ? m[1] : null;
+}
+
+export function loadConfig(opts: LoadOptions = {}): StudioboxConfig {
+  const configDir = path.resolve(__dirname, '../../config');
+  const configPath = configPathOf(opts);
   const profilesPath = opts.profilesPath ?? path.join(configDir, 'profiles.yaml');
 
   const root = readYaml(configPath);
@@ -692,15 +718,17 @@ function validate(cfg: StudioboxConfig, file: string): void {
     }
   }
   if (cfg.output.multitrack.enabled) {
-    // FLAC carries at most 8 channels: mics + 2 per music source + programme.
+    // FLAC carries at most 8 channels: mics + 2 per music source (+ programme).
     const mics = cfg.channels.filter((c) => c.role === 'mic').length;
     const music =
       cfg.channels.filter((c) => c.role === 'music').length + (cfg.filePlayer?.enabled ? 1 : 0);
-    const total = mics + 2 * music + 2;
+    const prog = cfg.output.multitrack.programme;
+    const total = mics + 2 * music + (prog ? 2 : 0);
     if (total > 8) {
       fail(
-        `output.multitrack: ${mics} mics + ${music} stereo sources + programme = ${total} ` +
-          `channels, but one FLAC holds at most 8`
+        `output.multitrack: ${mics} mics + ${music} stereo sources` +
+          `${prog ? ' + programme' : ''} = ${total} channels, but one FLAC holds at most 8` +
+          (prog ? ' (programme: false frees two; the stereo file has it anyway)' : '')
       );
     }
   }

@@ -345,7 +345,10 @@ describe('Graph ducking with look-ahead', () => {
       lookahead: { seconds: 1, gateMs: 10, mixMs: 100 },
       filePlayer: player(),
       duck: { ...duck, holdMs: 400, releaseMs: 600 },
-      output: { ...config([]).output, multitrack: { enabled: true, source: 'processed' } },
+      output: {
+        ...config([]).output,
+        multitrack: { enabled: true, source: 'processed', programme: false },
+      },
     });
     // A 100 ms bump on the mic at 1 s, then 1.5 s of talk at 3 s.
     const room = concat(
@@ -383,7 +386,10 @@ describe('Graph host priority (roadmap M1.8)', () => {
   const cfg = () =>
     config([mic(1, 'Gast'), mic(2, 'Host')], {
       automix: { enabled: false, members: [], responseMs: 120, floorDb: -60, priority },
-      output: { ...config([]).output, multitrack: { enabled: true, source: 'processed' } },
+      output: {
+        ...config([]).output,
+        multitrack: { enabled: true, source: 'processed', programme: false },
+      },
     });
 
   it('turns the guest down by the depth while the host talks, never to silence', () => {
@@ -409,11 +415,11 @@ describe('Graph host priority (roadmap M1.8)', () => {
 });
 
 describe('Graph multitrack taps (roadmap M1.6)', () => {
-  const mt = (source: 'dry' | 'processed') =>
+  const mt = (source: 'dry' | 'processed', programme = true) =>
     config([mic(1, 'A', bypass({ gainDb: 6 })), mic(2, 'B')], {
       lookahead: LOOK,
       filePlayer: player({ ducked: false }),
-      output: { ...config([]).output, multitrack: { enabled: true, source } },
+      output: { ...config([]).output, multitrack: { enabled: true, source, programme } },
     });
 
   it('has no taps unless multitrack is configured', () => {
@@ -429,6 +435,11 @@ describe('Graph multitrack taps (roadmap M1.6)', () => {
       'Programm L',
       'Programm R',
     ]);
+    // Without `programme` the stereo file is the only copy of it.
+    expect(new Graph(mt('dry', false)).tapLayout).toEqual(['A', 'B', 'Zuspieler L', 'Zuspieler R']);
+    const graph = new Graph(mt('dry', false));
+    const out = run(graph, [silence(0.5), silence(0.5)], tone(-20, 0.5, 440));
+    expect(out.taps.length).toBe(4);
   });
 
   it('dry: raw sources, sample-aligned with the programme', () => {
@@ -481,7 +492,10 @@ describe('Graph live retune', () => {
   it('applies new processing to a running strip', () => {
     const graph = new Graph(
       config([mic(1, 'A')], {
-        output: { ...config([]).output, multitrack: { enabled: true, source: 'processed' } },
+        output: {
+          ...config([]).output,
+          multitrack: { enabled: true, source: 'processed', programme: false },
+        },
       })
     );
     expect(rmsDb(run(graph, [tone(-30, 1)]).taps[0], SR / 2)).toBeCloseTo(-30, 0);
@@ -490,5 +504,47 @@ describe('Graph live retune', () => {
     expect(graph.getMeters().channels[0].trimDb).toBe(10);
     expect(graph.getProcessing('A')!.trimDb).toBe(10);
     expect(graph.retune('nope', bypass())).toBe(false);
+  });
+});
+
+describe('Graph: free mics, live names and colours', () => {
+  const two = () =>
+    config([mic(1, 'A'), { ...mic(2, 'B'), color: '#e53935' }], { lookahead: LOOK });
+  const mics = (g: Graph) => g.getMeters().channels.filter((c) => c.role === 'mic');
+
+  it('calls a mic free until someone has talked into it, and taken from then on', () => {
+    const graph = new Graph(two());
+    expect(mics(graph).map((c) => c.vacant)).toEqual([true, true]);
+    run(graph, [concat(silence(1), voice({ rmsDb: -25, seconds: 4 })), silence(5)]);
+    expect(mics(graph).map((c) => c.vacant)).toEqual([false, true]);
+    expect(graph.heardMics).toEqual(['A']);
+    expect(graph.heardMicChanges).toBe(1);
+    // A free mic still reaches the programme: nothing waits for the verdict.
+    const out = run(graph, [silence(2), concat(silence(0.5), voice({ rmsDb: -25, seconds: 1 }))]);
+    expect(rmsDb(out.l)).toBeGreaterThan(-60);
+    // Restored after a restart.
+    const again = new Graph(two());
+    expect(again.markHeard('B')).toBe(true);
+    expect(again.markHeard('nope')).toBe(false);
+    expect(mics(again).map((c) => c.vacant)).toEqual([true, false]);
+  });
+
+  it('shows a channel under a live name and colour, the label staying its id', () => {
+    const graph = new Graph(two());
+    expect(mics(graph).map((c) => c.name)).toEqual(['A', 'B']);
+    expect(graph.setName('A', '  Lea ')).toBe(true);
+    expect(graph.setName('nope', 'x')).toBe(false);
+    expect(graph.setColor('A', '#1e88e5')).toBe(true);
+    expect(graph.setColor('B', null)).toBe(true); // back to the configured red
+    expect(mics(graph).map((c) => [c.label, c.name, c.color])).toEqual([
+      ['A', 'Lea', '#1e88e5'],
+      ['B', 'B', '#e53935'],
+    ]);
+    run(graph, [silence(0.2), silence(0.2)]);
+    expect(mics(graph)[0]).toMatchObject({ label: 'A', name: 'Lea', color: '#1e88e5' });
+    graph.setName('A', '');
+    graph.setColor('A', null);
+    expect(mics(graph)[0]).toMatchObject({ name: 'A', color: null });
+    expect(graph.nameOf('A')).toBe('A');
   });
 });

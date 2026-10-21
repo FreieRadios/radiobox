@@ -39,7 +39,7 @@ describe('Roles', () => {
     }
   });
 
-  it('gives the host playout, the queue, the bed, the music level and the mics as a whole — not the rest', () => {
+  it('gives the host playout, the queue, the bed, the music level, the mics as a whole and the recording — not the rest', () => {
     const r = on();
     for (const cmd of [
       'playFile',
@@ -50,11 +50,11 @@ describe('Roles', () => {
       'micsMuted',
       'bed',
       'musicGain',
+      'recording',
     ]) {
       expect(r.allows('host', cmd)).toBe(true);
     }
     for (const cmd of [
-      'recording',
       'streaming',
       'monitor',
       'channelMuted',

@@ -107,7 +107,7 @@ function rig(over: Partial<StudioboxConfig> = {}): StudioboxConfig {
     output: {
       ...base.output,
       backup: { enabled: true, dir: '/rec', segmentSeconds: 0 },
-      multitrack: { enabled: true, source: 'dry' },
+      multitrack: { enabled: true, source: 'dry', programme: false },
       monitor: { enabled: true, backend: 'alsa', device: 'plughw:CARD=USB' },
       return: { enabled: true, backend: 'alsa', device: 'plughw:CARD=F8,DEV=0', channels: 4 },
     },

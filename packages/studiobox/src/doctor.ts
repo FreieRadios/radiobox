@@ -331,7 +331,8 @@ function diskCheck(cfg: StudioboxConfig, env: Env): Check[] {
   const mics = cfg.channels.filter((c) => c.role === 'mic').length;
   const music =
     cfg.channels.filter((c) => c.role === 'music').length + (cfg.filePlayer?.enabled ? 1 : 0);
-  const perHour = 0.5 + (cfg.output.multitrack.enabled ? 0.3 * (mics + 2 * music + 2) : 0);
+  const mt = cfg.output.multitrack;
+  const perHour = 0.5 + (mt.enabled ? 0.3 * (mics + 2 * music + (mt.programme ? 2 : 0)) : 0);
   const hours = free / GB / perHour;
   const detail = `${(free / GB).toFixed(0)} GB free in ${b.dir} — about ${Math.floor(hours)} h of recording`;
   return [

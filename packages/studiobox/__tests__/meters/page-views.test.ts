@@ -289,3 +289,30 @@ describe('formatting', () => {
     expect(SB.midName('kurz.mp3')).toBe('kurz.mp3');
   });
 });
+
+describe('techBack', () => {
+  const fakeDoc = () => {
+    const added: Record<string, string>[] = [];
+    return {
+      added,
+      getElementById: (id: string) => added.find((a) => a.id === id) ?? null,
+      createElement: () => ({}) as Record<string, string>,
+      body: { appendChild: (a: Record<string, string>) => added.push(a) },
+    };
+  };
+
+  it('gives a technician on a guest or spectator view one way back to the desk', () => {
+    const d = fakeDoc();
+    SB.techBack({ role: 'tech' }, d, '?k=T&mic=Host');
+    SB.techBack({ role: 'tech' }, d, '?k=T&mic=Host'); // a reconnect adds no second one
+    expect(d.added).toHaveLength(1);
+    expect(d.added[0].href).toBe('/tech?k=T&mic=Host');
+  });
+
+  it('adds nothing for a guest, nor without a token (roles off)', () => {
+    const d = fakeDoc();
+    SB.techBack({ role: 'guest' }, d, '?k=G');
+    SB.techBack({ role: 'tech' }, d, '');
+    expect(d.added).toHaveLength(0);
+  });
+});

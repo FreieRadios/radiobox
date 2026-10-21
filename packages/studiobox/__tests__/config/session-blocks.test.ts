@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadConfig, streamFormat } from '../../src/config/load';
+import { editedFrom, loadConfig, streamFormat } from '../../src/config/load';
 
 /** A minimal live config; `extra` lines are appended, `over` replaces blocks. */
 function load(extra: string[] = [], over: Record<string, string> = {}) {
@@ -68,7 +68,7 @@ describe('config: buffered-design blocks and their defaults', () => {
     expect(o.harbor.enabled).toBe(false);
     expect(o.monitor).toEqual({ enabled: false, backend: 'alsa', device: '' });
     expect(o.return).toEqual({ enabled: false, backend: 'alsa', device: '' });
-    expect(o.multitrack).toEqual({ enabled: false, source: 'dry' });
+    expect(o.multitrack).toEqual({ enabled: false, source: 'dry', programme: false });
   });
 
   it('reads the music return with its channel count, buffer and latency', () => {
@@ -111,9 +111,24 @@ describe('config: buffered-design blocks and their defaults', () => {
         '  - { source: [7, 8], role: music, label: Deck }',
       ].join('\n'),
       automix: 'automix: { enabled: false, members: [] }',
-      output: 'output:\n  multitrack: { enabled: true }',
+      output: 'output:\n  multitrack: { enabled: true, programme: true }',
     });
     expect(l.cfg).toThrow(/5 mics \+ 1 stereo sources \+ programme = 9 channels/);
+  });
+
+  it('fits six mics and a file player once the programme stays out', () => {
+    const six = (programme: boolean) =>
+      load([], {
+        channels: [
+          'channels:',
+          ...[1, 2, 3, 4, 5, 6].map((n) => `  - { source: ${n}, role: mic, label: M${n} }`),
+        ].join('\n'),
+        automix: 'automix: { enabled: false, members: [] }',
+        output: `output:\n  multitrack: { enabled: true, programme: ${programme} }`,
+        filePlayer: 'filePlayer: { enabled: true, dirs: [] }',
+      });
+    expect(six(false).cfg().output.multitrack.programme).toBe(false);
+    expect(six(true).cfg).toThrow(/6 mics \+ 1 stereo sources \+ programme = 10 channels/);
   });
 
   it('host priority: off without a label, gentle defaults with one, validated', () => {
@@ -257,5 +272,23 @@ describe('config: buffered-design blocks and their defaults', () => {
     expect(a.cfg().stateFile).toBe(path.join(a.dir, 'session-state.json'));
     const b = load(['stateFile: state/live.json']);
     expect(b.cfg().stateFile).toBe(path.join(b.dir, 'state', 'live.json'));
+  });
+});
+
+describe('config: generated files name their template', () => {
+  it('finds the template in the header the station writes, nothing in a hand-written file', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcfg-'));
+    const gen = path.join(dir, 'studiobox.yaml');
+    fs.writeFileSync(
+      gen,
+      '# GENERATED at every start of studiobox.service by station/bin/prestart.js.\n' +
+        '# Edit /var/lib/studiobox/studiobox.template.yaml instead; changes here are overwritten.\n' +
+        'mode: live\n'
+    );
+    expect(editedFrom(gen)).toBe('/var/lib/studiobox/studiobox.template.yaml');
+    const own = path.join(dir, 'own.yaml');
+    fs.writeFileSync(own, '# my config\n# Edit me instead\nmode: live\n');
+    expect(editedFrom(own)).toBeNull();
+    expect(editedFrom(path.join(dir, 'missing.yaml'))).toBeNull();
   });
 });

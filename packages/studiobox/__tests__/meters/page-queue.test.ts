@@ -31,7 +31,12 @@ const SB = require('../../src/meters/public/meter.js');
 class El {
   tagName: string;
   dataset: Record<string, string> = {};
-  style: Record<string, string> = {};
+  /** Inline styles; `setProperty` for custom properties such as `--chc`. */
+  style = Object.assign({} as Record<string, string>, {
+    setProperty(this: Record<string, string>, k: string, v: string): void {
+      this[k] = v;
+    },
+  }) as unknown as Record<string, string>;
   children: El[] = [];
   textContent = '';
   hidden = false;
@@ -786,6 +791,28 @@ describe('meters page — states in words, not only colour', () => {
     expect(p.byId('rec').attrs['aria-pressed']).toBe('true');
   });
 
+  it('calls a mic nobody has talked into FREI and shows live names and colours', async () => {
+    const p = boot(LISTINGS);
+    await p.flush();
+    const frame = (host: Record<string, unknown>) => {
+      const f = liveFrame();
+      f.channels[0] = { ...f.channels[0], ...host };
+      return f;
+    };
+    p.push(frame({ vacant: true }));
+    const row = () => p.byId('rows').children[0];
+    expect(row().querySelector('.chstate').textContent).toBe('FREI');
+    expect(row().querySelector('.chname b').textContent).toBe('Host');
+    p.push(frame({ vacant: false, name: 'Lea', color: '#1e88e5' }));
+    expect(row().querySelector('.chstate').textContent).toBe('OFFEN');
+    expect(row().querySelector('.chname b').textContent).toBe('Lea');
+    expect(row().querySelector('.chname').has('cc')).toBe(true);
+    expect(row().querySelector('.chname').style['--chc']).toBe('#1e88e5');
+    // The row is the same one (the label is the id): nothing rebuilt under a finger.
+    p.push(frame({ name: 'Host', color: null }));
+    expect(row().querySelector('.chname').has('cc')).toBe(false);
+  });
+
   it('names each channel state and the global mic switch', async () => {
     const p = boot(LISTINGS);
     await p.flush();
@@ -1410,6 +1437,42 @@ describe('meters page — Abhören', () => {
   });
 });
 
+describe('Einstellungen — Mikrofone', () => {
+  it('lists the mics with name and colour and sends what is changed', async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=T', undefined, 'einstellungen');
+    await p.flush();
+    p.push({ type: 'hello', role: 'tech' });
+    const f = liveFrame();
+    const chans = f.channels as Record<string, unknown>[];
+    chans[0] = { ...chans[0], name: 'Lea', color: '#1e88e5', vacant: false };
+    chans[1] = { ...chans[1], vacant: true };
+    p.push(f);
+    expect(p.byId('micBox').hidden).toBe(false);
+    const rows = p.byId('micRows').children;
+    expect(rows.length).toBe(2); // the mics, not the player
+    const field = (i: number, sel: string) =>
+      rows[i].querySelector(sel) as unknown as { value: string; onchange: () => void };
+    expect(field(0, 'input').value).toBe('Lea');
+    expect(field(0, 'select').value).toBe('blau');
+    expect(field(1, 'input').value).toBe(''); // its label is its name
+    expect(rows[1].querySelector('small').textContent).toBe('noch niemand gehört');
+    field(1, 'input').value = 'Maria';
+    field(1, 'input').onchange();
+    field(1, 'select').value = 'grün';
+    field(1, 'select').onchange();
+    field(0, 'select').value = '';
+    field(0, 'select').onchange();
+    expect(p.sent).toEqual([
+      { type: 'channelName', value: { label: 'Gast', name: 'Maria' } },
+      { type: 'channelColor', value: { label: 'Gast', color: 'grün' } },
+      { type: 'channelColor', value: { label: 'Host', color: null } },
+    ]);
+    // An echo from before the edit does not undo it.
+    p.push(f);
+    expect(field(1, 'input').value).toBe('Maria');
+  });
+});
+
 describe('Einstellungen — host priority and music levels', () => {
   const settingsPage = async () => {
     const p = boot(LISTINGS, FOLDERS, '?k=T', undefined, 'einstellungen');
@@ -1869,15 +1932,30 @@ describe('meters page — roles', () => {
     await p.flush();
     p.push({ type: 'hello', role: 'host' });
     expect(p.bodyClasses()).toContain('host');
+    expect(p.bodyClasses()).not.toContain('rtech'); // no ⋮ → Ansicht
     expect(p.byId('chTitle').textContent).toBe('Mikrofone');
     p.push(liveFrame({ recording: true, air: air('live'), onAir: true }));
-    p.press('rec', 800);
     p.press('ship', 800);
     p.press('endShow', 800);
     expect(p.sent).toEqual([]);
-    // What a host is for still works.
+    // What a host is for still works, the recording included (held to stop).
     p.byId('mute').click();
-    expect(p.sent).toEqual([{ type: 'micsMuted', value: true }]);
+    p.press('rec', 800);
+    expect(p.sent).toEqual([
+      { type: 'micsMuted', value: true },
+      { type: 'recording', value: false },
+    ]);
+  });
+
+  it('lets the technician switch to every view with their token', async () => {
+    const p = boot(LISTINGS, FOLDERS, '?k=T');
+    await p.flush();
+    p.push({ type: 'hello', role: 'tech' });
+    expect(p.bodyClasses()).toContain('rtech');
+    expect(p.byId('vHost').href).toBe('/host?k=T');
+    expect(p.byId('vGuest').href).toBe('/guest?k=T');
+    expect(p.byId('vSpec').href).toBe('/spectator?k=T');
+    expect(p.byId('vTech').attrs['aria-current']).toBe('page');
   });
 
   it('tells a host who is up while the technician measures', async () => {

@@ -196,7 +196,10 @@ describe('Pipeline: air delay and Sendezeit (roadmap M1.2)', () => {
 describe('Pipeline: recording (roadmap M1.6)', () => {
   it('writes stereo + multitrack from the same blocks: aligned, programme identical', async () => {
     const { pipeline, p, dir, feed } = make({
-      output: { ...config([]).output, multitrack: { enabled: true, source: 'dry' } },
+      output: {
+        ...config([]).output,
+        multitrack: { enabled: true, source: 'dry', programme: true },
+      },
     });
     expect(pipeline.snapshot().multitrack).toBe(false);
     p.onCommand('recording', true);
@@ -438,6 +441,46 @@ describe('Pipeline: Auto-Pegel', () => {
     // Without a label: every mic.
     p.onCommand('autoTrim', { on: false });
     expect([ch('Gast').autoTrim, ch('Host').autoTrim]).toEqual([false, false]);
+  });
+
+  it('names and colours a mic live, keeps both, and records the name', async () => {
+    const { pipeline, p, cfg, dir, feed } = make({
+      output: {
+        ...config([]).output,
+        multitrack: { enabled: true, source: 'dry', programme: false },
+      },
+    });
+    const ch = (l: string) => pipeline.snapshot().channels.find((c) => c.label === l)!;
+    p.onCommand('channelName', { label: 'Gast', name: ' Lea ' });
+    p.onCommand('channelColor', { label: 'Gast', color: 'blau' });
+    p.onCommand('channelColor', { label: 'Host', color: 'url(x)' }); // refused
+    p.onCommand('channelName', { label: 'Nope', name: 'x' }); // no such mic
+    expect([ch('Gast').name, ch('Gast').color, ch('Host').color]).toEqual(['Lea', '#1e88e5', null]);
+    const saved = JSON.parse(fs.readFileSync(cfg.stateFile, 'utf8'));
+    expect(saved.names).toEqual({ Gast: 'Lea' });
+    expect(saved.colors).toEqual({ Gast: '#1e88e5' });
+    // After a restart: the same name and colour.
+    const again = new Pipeline(cfg).snapshot().channels.find((c) => c.label === 'Gast')!;
+    expect([again.name, again.color]).toEqual(['Lea', '#1e88e5']);
+
+    // The multitrack's channel map carries the name; the programme stays out.
+    const done = exited(p.multitrack);
+    p.onCommand('recording', true);
+    feed([silence(1), silence(1)]);
+    p.onCommand('recording', false);
+    feed([silence(1.5), silence(1.5)]);
+    await done;
+    const mapFile = fs.readdirSync(dir).find((f) => f.endsWith('.multitrack.json'))!;
+    const map = JSON.parse(fs.readFileSync(path.join(dir, mapFile), 'utf8'));
+    expect(map.channels).toEqual([
+      { channel: 1, name: 'Lea', label: 'Gast', kind: 'mic' },
+      { channel: 2, name: 'Host', label: 'Host', kind: 'mic' },
+    ]);
+    expect(map.note).toMatch(/the programme is the stereo file/);
+
+    p.onCommand('channelName', { label: 'Gast', name: '' });
+    expect(ch('Gast').name).toBe('Gast');
+    expect(JSON.parse(fs.readFileSync(cfg.stateFile, 'utf8')).names).toEqual({});
   });
 });
 

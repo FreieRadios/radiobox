@@ -41,3 +41,7 @@ body.lost .stale{opacity:.35}
 .meter .cover{position:absolute;top:0;bottom:0;right:0;width:100%;background:var(--surface)}
 /* For a screen reader only. */
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+/* "← Zum Pult": only for a technician looking at this view (SB.techBack). */
+.techback{position:fixed;left:12px;bottom:12px;z-index:5;display:inline-flex;align-items:center;min-height:44px;
+ padding:0 16px;border-radius:8px;background:var(--raised);color:var(--text);text-decoration:none;font-weight:600}
+@media (prefers-contrast:more){.techback{border:2px solid var(--text)}}

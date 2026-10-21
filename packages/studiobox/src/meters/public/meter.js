@@ -272,6 +272,22 @@
     open();
   }
 
+  // A technician who opened the guest or spectator view (⋮ → Ansicht) gets a
+  // way back to the desk. Only with a token in the URL: with roles off
+  // everybody is the technician, and a guest tablet needs no such link.
+  function techBack(h, doc, search) {
+    var d = doc || document;
+    if (!h || h.role !== 'tech' || d.getElementById('techBack')) return;
+    var q = (search === undefined ? location.search : search) || '';
+    if (!/[?&]k=/.test(q)) return;
+    var a = d.createElement('a');
+    a.id = 'techBack';
+    a.className = 'techback';
+    a.href = '/tech' + q;
+    a.textContent = '← Zum Pult';
+    d.body.appendChild(a);
+  }
+
   var SB = {
     fmt: fmt,
     mmss: mmss,
@@ -288,6 +304,7 @@
     History: History,
     spectator: spectator,
     connect: connect,
+    techBack: techBack,
   };
   root.SB = SB;
   if (typeof module !== 'undefined' && module.exports) module.exports = SB;
