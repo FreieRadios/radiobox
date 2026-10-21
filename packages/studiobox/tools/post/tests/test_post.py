@@ -8,7 +8,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from postprod import fillers, music, transcript  # noqa: E402
-from postprod.timeline import Segment, Timeline, split_segment  # noqa: E402
+from postprod.timeline import Piece, Segment, Timeline, split_segment  # noqa: E402
 
 
 class FillerTests(unittest.TestCase):
@@ -131,6 +131,14 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual([(u.speaker, u.text) for u in utts], [("A", "Hallo Welt hier"), ("B", "ja genau")])
         self.assertIn("[? Welt ?]", utts[0].marked)
         self.assertEqual(review, [])  # one short word is marked but not listed
+
+    def test_cut_takes_its_words(self):
+        cls = np.zeros(20 * 20, int)
+        open_ = np.ones(20 * 20, bool)
+        words = {"A": [{"w": f" w{i}", "s": 1.0 + i * 0.5, "e": 1.3 + i * 0.5, "p": 0.9} for i in range(6)]}
+        tl = Timeline([Piece(0.0, 2.0, 0.0, 2.0), Piece(3.0, 20.0, 2.0, 19.0)], 19.0)  # 2-3 s cut out
+        utts, _, _ = transcript.build(words, cls, open_, {"A": 0}, log=lambda m: None, keep=lambda t: tl.kept(t, t + 1e-3))
+        self.assertEqual([u.text for u in utts], ["w0 w1", "w4 w5"])
 
     def test_vtt_split(self):
         cues = transcript.split_cue(0.0, 10.0, " ".join(["wort"] * 40))

@@ -39,10 +39,12 @@ class Utterance:
         self.text = self.marked = ""
 
 
-def build(words_by_speaker, cls, open_frames, speakers, log=print):
+def build(words_by_speaker, cls, open_frames, speakers, log=print, keep=None):
     """`words_by_speaker`: {name: [{w,s,e,p}]} in recording seconds;
-    `speakers`: {name: talker index in cls}. Returns utterances and the
-    review list [(time, speaker, text)]."""
+    `speakers`: {name: talker index in cls}; `keep(t)`: whether recording
+    time `t` is in the version (a word goes with its middle, so a cut through
+    an utterance takes its words along). Returns utterances and the review
+    list [(time, speaker, text)]."""
     F = len(cls)
 
     def share(name, a, b):
@@ -59,7 +61,9 @@ def build(words_by_speaker, cls, open_frames, speakers, log=print):
         allw[name] = [
             (w["s"], w["e"], w["w"], w.get("p", 1.0))
             for w in ws
-            if is_open(w["s"], w["e"]) and "Untertitelung" not in w["w"] and w["w"].strip()
+            if is_open(w["s"], w["e"])
+            and (keep is None or keep((w["s"] + w["e"]) / 2))
+            and "Untertitelung" not in w["w"] and w["w"].strip()
         ]
     index = {n: [(s, norm(t)) for s, e, t, p in ws] for n, ws in allw.items()}
     removed = 0

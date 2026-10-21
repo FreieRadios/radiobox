@@ -337,12 +337,13 @@ def main(argv=None):
                 with open(p(f"asr-{k}.json")) as f:
                     words_by[names[k]] = json.load(f)
             mz = np.load(p("mix.npz"))
-            utts, review, dropped = transcript.build(words_by, cls, mz["open"], {names[k]: k for k in have}, log)
+            ref_mode = "full" if "full" in modes else modes[0]
+            tl, _ = Timeline.load(p(f"render-{ref_mode}.json"))
+            keep = lambda t: tl.kept(t, t + 1e-3)
+            utts, review, dropped = transcript.build(words_by, cls, mz["open"], {names[k]: k for k in have}, log, keep=keep)
             transcript.apply_fixes(utts, review, fixes)
             with open(p("dropped-fragments.txt"), "w") as f:
                 f.write("\n".join(dropped) + "\n")
-            ref_mode = "full" if "full" in modes else modes[0]
-            tl, _ = Timeline.load(p(f"render-{ref_mode}.json"))
             rows = transcript.rows_for(utts, items, labels, tl)
             d = dt.date.fromisoformat(date) if date else None
             header = f"{title} – {d:%-d.%-m.%Y}" if d else title
