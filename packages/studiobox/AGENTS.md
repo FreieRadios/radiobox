@@ -96,6 +96,32 @@ Live meters: `http://localhost:4445`.
   own `dirs` entry; the share itself stays browsable with `hasScheduled: false`.
   Seen on a playout Pi 2026-10-07: `hasScheduled` on the whole rclone target
   made the Pi play the show folder's intro alongside the studio box.
+- **Multitrack: 8 channels at most** (FLAC's limit). Mics + the file
+  player's pair (+ the programme's pair with `output.multitrack.programme`,
+  default false) must fit, or the config check fails and the service
+  crash-loops. A fifth mic once hit exactly this.
+
+## During a show (operating rules)
+
+Agents are asked for help while a show is on air. Before suggesting
+anything, look at a snapshot (`recording`, `air.state`):
+
+- **Once a recording runs, nothing is restarted.** That rules out a
+  service restart, a `yarn build` (the service runs from `dist/`, so a
+  build is picked up at the next restart, a broken one too) and any config
+  change. Fixes go through the live WebSocket commands, e.g. `trim {label,
+  trimDb}`, `autoTrim`, `musicGain`, `returnGain`, `priorityDepth`, with
+  the technician token from the generated YAML (`STATE_DIR/studiobox.yaml`).
+  Code and config changes go on a list for after the show, even when a
+  restart looks like the obvious fix.
+- **Offline analysis during a show runs short and under `nice`**: the air
+  chain shares the CPU (see the buffer note below).
+- The recording is armed by the scheduler's first cue (`autoArm`), by the
+  technician and by the host (a host running a show alone has to). Check
+  that it runs in the first minute anyway: a forgotten recording once cost
+  a show its first minutes, rebuilt afterwards from the station stream.
+- Recorded levels are no proof of the aired level: the station's chain
+  after the box has its own gain stages.
 
 ## Hardware / runtime (the non-inferable bits)
 
@@ -103,8 +129,12 @@ Live meters: `http://localhost:4445`.
   `*.analog-stereo` PulseAudio node (that one carries only the 2-channel main
   mix). Find it with `arecord -l`. The device name varies by machine/profile —
   the README example is `hw:CARD=FLOW8`; this reference machine exposes it as
-  `hw:CARD=F8,DEV=0` (10 channels @ 48 kHz). On PipeWire, set the card to its
-  **"Pro Audio"** profile to expose all inputs.
+  `hw:CARD=F8,DEV=0` (10 channels @ 48 kHz; the station boxes use
+  `plughw:CARD=F8,DEV=0`). On a machine with a desktop, PipeWire grabs
+  the cards studiobox needs: hide them from it (`PIPEWIRE_IGNORE_CARDS`
+  plus a wireplumber drop-in, the `desktop` step of `station/install.sh`).
+  Setting the card to the **"Pro Audio"** profile only helps for a test
+  run that shares the card with PipeWire.
 - **Sample rate is 48 kHz, fixed.** The BS.1770 K-weighting coefficients are
   calibrated for it (and guarded at construction). Don't introduce other rates
   without recalibrating loudness.
@@ -142,6 +172,18 @@ Live meters: `http://localhost:4445`.
   the Flow 8's USB playback is implicit-feedback synced to its capture).
   Open all of its playback channels (`channels: 4` on the Flow 8); the return
   is on 1/2.
+- **Gain staging.** Set each Flow 8 input so that the loudest thing that
+  mic will see (a shout, a laugh) peaks around −6 dBFS, and let the trim do
+  the rest. Children shout 20–38 dB over their speech, so their channels
+  have little room upward even when their speech sits at −57 dBFS. Noise
+  is no reason for more gain: the raw floor (−88 dBFS) plus +36 dB of trim
+  stays under the leveler's noise ceiling. Hence `autoTrim.maxDb: 36` in
+  the station preset rather than more gain. The Flow 8's **gain is
+  settable over USB MIDI** (CC 8 on the input's MIDI channel, 0…127 =
+  −20…+60 dB; Quick Start Guide, "MIDI Implementation"). studiobox doesn't
+  use that yet (see the TODO), and the mixer reports nothing back.
+  Details: `docs/analysis/studiobox-live-sessions-2026-10-28.md` at the
+  repo root.
 
 ## DSP code map (`src/dsp/`)
 
@@ -214,6 +256,13 @@ speaker on the gated dry mic, CrisperWhisper per token for the "äh" cuts
 every version. Own venv (`tools/post/setup.sh`), own tests
 (`python -m unittest discover -s tools/post/tests`); not part of the Node
 build. Runs on the workstation, not on the Pi.
+
+**Replay** (`tools/replay/`, TypeScript, ts-node): feeds a show's dry
+multitrack through the real `Graph` and logs per 40 ms what Auto-Pegel, the
+automix and the levelers did. It answers "does this DSP change hold up on a
+real show?" with production code (see its README; first used in
+`docs/analysis/studiobox-live-sessions-2026-10-28.md` at the repo root). It
+reads private graph members, so a refactor of `graph.ts` may break it.
 
 ## Status
 
@@ -870,6 +919,23 @@ The milestone plan toward a stable version (session-ready M1, stable M2) is in
       path-traversal-safe resolution in `src/pipeline.ts`; config in
       `src/config/schema.ts`/`load.ts` + `studiobox.example.yaml`. Covered by
       `__tests__/audio/file-player.test.ts`.
+- [ ] **Auto-Pegel: a shout is not a new level.** A shout or laugh 20–38 dB
+      over a child's speech dominates the 10 s power mean and trips the
+      knob-turn rule: the trim drops 6–17 dB for up to a minute (seen seven
+      times in one replayed show). Clip each talk frame at the running
+      estimate + 10 dB before it enters the mean (`src/dsp/auto-trim.ts`).
+      _Done when:_ a test with a 0.5 s burst 30 dB over the speech moves the
+      trim by < 2 dB, a real 10 dB gain change is still followed within
+      ~3 s, and a replay (`tools/replay/`) shows no such drops.
+- [ ] **The Flow 8's gain over USB MIDI.** The mixer takes CC 8 per input
+      (−20…+60 dB) on the USB port the audio uses. Step 1: `gainDb` per
+      channel in the config, sent at start (a known mixer state every
+      time). Step 2: Einmessen sets gain for the peaks and trim for the
+      speech instead of advising a knob turn. No gain riding during a
+      show; the mixer sends no feedback, so the box must be the only one
+      setting it. First verify on the hardware that `amidi -l` lists the
+      port and what a gain change sounds like. _Done when:_ a session needs
+      no hand on the Flow 8's gain.
 - [ ] **True-peak (oversampled) limiting.** The limiter is currently sample-peak
       only — see the note at `src/dsp/limiter.ts:55`. Add oversampled inter-sample
       peak detection so true peaks stay under the ceiling. _Done when:_ a unit

@@ -97,6 +97,31 @@ version without filler cuts.
 `render-<mode>.json` holds the timeline (kept pieces of the recording →
 output seconds), so any recording time can be mapped to the MP3.
 
+## Editorial cuts
+
+Cuts beyond the "äh"s, i.e. a passage the editor wants out, go into the same
+`cuts.json` as `[from, to]` pairs in recording seconds. Make them in a copy
+of the work dir so the uncut version stays:
+
+```sh
+cp -a recordings/post/<name> recordings/post/<name>-gekuerzt   # never cp -al
+# add the cuts to recordings/post/<name>-gekuerzt/work/cuts.json, then
+.venv/bin/python -I post.py <name>.multitrack.json \
+  --out recordings/post/<name>-gekuerzt --steps render,encode,transcript
+```
+
+- **Never copy the work dir with hardlinks** (`cp -al`): numpy's `tofile`
+  writes through them into the original.
+- Whisper's word times are good to about ±0.5 s only. Put a cut's edges in
+  a pause measured on `bus.f32` (10 ms levels), not on a word time, and
+  listen to every cut point in the result.
+- **Checklist before publishing:** names of third parties (people talked
+  about who are not in the room: classmates, neighbours, colleagues) and
+  accusations against them come out, above all in a show with children;
+  the uncut transcript is labelled "not for publication". Check the rendered
+  length against the slot: a closing song added after the cuts pushed one
+  show past the hour.
+
 ## Tests
 
 ```sh
