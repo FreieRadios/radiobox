@@ -275,7 +275,9 @@ share mounted read-only via `/etc/fstab` and pointed at by its mountpoint,
 see `studiobox.example.yaml`; the selected folder's files decode to
 48 kHz stereo and route into the music path; folders are browsable
 recursively — subdirectory rows descend, a breadcrumb shows/changes the
-current position; the listing is served async (non-blocking readdir, so a
+current position, and every folder tab remembers the subfolder it was left in
+(per browser, `sb.sub.<label>` in localStorage; a remembered subfolder that
+lists nothing any more falls back to the root); the listing is served async (non-blocking readdir, so a
 slow network mount can't stall metering) by `FileDirs.list` and, unless a dir
 sets `hideEmpty: false`, subfolders with no audio anywhere within a bounded
 depth are hidden (short-circuit probe, per-dir TTL-cached, with bounded readdir
@@ -851,7 +853,11 @@ cards; **not yet run on the Flow 8 / MAYA22** (see the roadmap's status table).
   ffmpeg decodes the URL, a jitter buffer of `bufferMs` (default 2000) fills
   before playback, and a `FillServo` (EMA 10 s, 5e-4 per second of error,
   ±500 ppm) resamples with a 32-tap Kaiser-windowed sinc (512 phases) so
-  the buffer holds against the sender's clock. Nothing is ever dropped or
+  the buffer holds against the sender's clock. A connection starts playing
+  exactly `bufferMs` behind its newest sample (its first audio comes in one
+  lump, ffmpeg's analysis; kept, the lump would be extra delay for the whole
+  connection, different at every connect: 2026-11-04 the Pi sat 1.2–1.5 s
+  over target an hour long). After that nothing is ever dropped or
   repeated, except a burst beyond target + 3 s, which is skipped with a fade.
   When the buffer runs dry it fades out (20 ms) and says 'lost'. It
   reconnects with back-off (1, 2, 3, 5 s), and a watchdog ends a connection

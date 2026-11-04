@@ -156,6 +156,7 @@ export class StreamPlayer extends EventEmitter {
   private lastData = 0;
   private spawnedAt = 0;
   private flowing = false; // this connection has delivered audio
+  private fresh = false; // this connection has not started playing yet
   private stopped = false;
   private attempt = 0;
   private retry: NodeJS.Timeout | null = null;
@@ -248,6 +249,7 @@ export class StreamPlayer extends EventEmitter {
     this.proc = proc;
     this.spawnedAt = this.now();
     this.flowing = false;
+    this.fresh = true;
     let flowedAt = 0;
     proc.stdout.on('data', (chunk: Buffer) => {
       if (this.proc !== proc) return;
@@ -328,6 +330,18 @@ export class StreamPlayer extends EventEmitter {
       if (fill >= this.target) {
         const back = this.state !== 'connecting';
         this.state = 'playing';
+        // A connection's first audio comes in one lump (ffmpeg's stream
+        // analysis, the server's first pages), so the fill crosses the
+        // target by up to that lump. Left in the buffer it would be that
+        // much extra delay for the rest of the connection (the servo needs
+        // an hour per second), and a different delay at every connect.
+        // Start exactly the buffer behind the newest sample instead: nobody
+        // has heard the rest yet. Data resuming on the same connection
+        // after a stall is kept (it is programme the listener missed).
+        if (this.fresh) {
+          this.fresh = false;
+          this.pos = this.written - this.target;
+        }
         this.servo.reset();
         this.ratio = 1;
         this.gain = 0;

@@ -260,6 +260,41 @@ describe('StreamPlayer', () => {
     sp2.stop();
   });
 
+  it('starts exactly the buffer behind the newest sample, however big the first lump', () => {
+    const { sp, decoders, read } = setup(2000);
+    sp.start();
+    const ph = { v: 0 };
+    decoders[0].sine(Math.round(3.5 * SR), ph); // ffmpeg's analysis, all at once
+    read(1);
+    expect(sp.status().state).toBe('playing');
+    expect(sp.status().bufferMs).toBeGreaterThan(1900);
+    expect(sp.status().bufferMs).toBeLessThanOrEqual(2000);
+    // The same after a reconnect: the new connection's lump is not kept.
+    decoders[0].kill();
+    jest.useFakeTimers();
+    sp.stop();
+    sp.start();
+    decoders[1].sine(Math.round(3.5 * SR), ph);
+    read(1);
+    expect(sp.status().bufferMs).toBeGreaterThan(1900);
+    expect(sp.status().bufferMs).toBeLessThanOrEqual(2000);
+    sp.stop();
+  });
+
+  it('keeps what arrives late on the same connection after a stall', () => {
+    const { sp, decoders, out, read } = setup(500);
+    sp.start();
+    const ph = { v: 0 };
+    decoders[0].sine(SR / 2, ph);
+    read(1);
+    read(30); // runs dry
+    expect(out.events).toEqual(['lost']);
+    decoders[0].sine(2 * SR, ph); // 2 s arrive at once: delayed programme, kept
+    read(1);
+    expect(sp.status().bufferMs).toBeGreaterThan(1900);
+    sp.stop();
+  });
+
   it('skips a burst that would push it far behind, without a click', () => {
     const { sp, decoders, out, read } = setup(500);
     sp.start();
