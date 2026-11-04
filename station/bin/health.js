@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The box's health at a glance, for the kiosk screen and any tablet on the
-// studio WLAN: studiobox (on air, recording, stream), eve and the listeners,
+// studio WLAN: studiobox (on air, recording, stream), blyxa and the listeners,
 // the signal, the WLAN (which card, which devices), sound cards, network
 // ports, temperatures, load, memory, disk, the software, services.
 //
@@ -106,12 +106,25 @@ function studioboxConfig() {
   }
 }
 
+/** The `blyxa:` block of the file to edit, not of the rendered config: it is
+ *  what the box is set up for, even before the next start renders it. Its
+ *  `name` is what the station calls its blyxa; the page says that. */
+function blyxaBlock() {
+  try {
+    const c = yaml.load(fs.readFileSync(configToEdit(), 'utf8')) || {};
+    return c.blyxa || {};
+  } catch {
+    return {};
+  }
+}
+
 /** Connect as a page would, with the technician's token (the recording state
  *  is not in the spectator's cut). Reconnects every 3 s while studiobox is
  *  away; the config is read again each time, it is rendered at every start. */
 function watchStudiobox() {
   const cfg = studioboxConfig();
   box.config = cfg;
+  box.blyxa = blyxaBlock();
   const m = cfg.meters || {};
   const tok = m.roles && m.roles.enabled && m.roles.tokens ? m.roles.tokens.tech : '';
   const url = `ws://127.0.0.1:${m.port || 4445}/${tok ? `?k=${encodeURIComponent(tok)}` : ''}`;
@@ -135,7 +148,7 @@ function watchStudiobox() {
       box.snap = msg;
       box.at = Date.now();
     } else if (msg && msg.type === 'listeners') {
-      // eve's feed, only sent when `listeners` is on in studiobox's config.
+      // blyxa's feed, only sent when `listeners` is on in studiobox's config.
       box.listeners = msg.status;
     }
   });
@@ -538,24 +551,35 @@ async function collect() {
   );
   groups.push({ title: 'Sendung', items: send });
 
-  // eve and the listeners: who listens (Icecast), what eve says about the show.
+  // blyxa and the listeners: who listens (Icecast), what blyxa says about the show.
   const cfg = box.config || {};
+  const planned = box.blyxa || {};
+  const blyxaName = planned.name || 'blyxa';
   const ev = [];
   for (const m of ice || [])
     ev.push(item('Hörer im Stream', String(m.listeners), 'info', `${m.mount} · Spitze ${m.peak}`));
   if (!ice) ev.push(item('Icecast-Statistik', 'keine Antwort', 'info'));
   const L = box.listeners;
-  const eveHost = (() => {
+  const hostOf = (url) => {
     try {
-      return new URL(cfg.listeners.url).host;
+      return new URL(url).host;
     } catch {
       return '';
     }
-  })();
+  };
+  const blyxaHost = hostOf(cfg.listeners && cfg.listeners.url);
   if (!cfg.listeners || !cfg.listeners.enabled) {
-    ev.push(item('eve', 'nicht eingerichtet', 'info', '`listeners` in studiobox.yaml'));
+    const plannedHost = hostOf(planned.url);
+    ev.push(
+      item(
+        blyxaName,
+        'nicht eingerichtet',
+        'info',
+        plannedHost ? `${plannedHost} · noch nicht angebunden` : '`listeners` in studiobox.yaml'
+      )
+    );
   } else if (!L) {
-    ev.push(item('eve', box.connected ? 'wartet' : '–', 'info', eveHost));
+    ev.push(item(blyxaName, box.connected ? 'wartet' : '–', 'info', blyxaHost));
   } else {
     const word = {
       ok: ['verbunden', 'ok'],
@@ -565,10 +589,10 @@ async function collect() {
     }[L.state] || [L.state, 'info'];
     ev.push(
       item(
-        'eve',
+        blyxaName,
         word[0],
         word[1],
-        [eveHost, L.updatedMs ? `zuletzt ${ago(Date.now() - L.updatedMs)}` : '']
+        [blyxaHost, L.updatedMs ? `zuletzt ${ago(Date.now() - L.updatedMs)}` : '']
           .filter(Boolean)
           .join(' · ')
       )
@@ -603,7 +627,7 @@ async function collect() {
       )
     );
   }
-  groups.push({ title: 'eve & Hörer', items: ev });
+  groups.push({ title: `${blyxaName} & Hörer`, items: ev });
 
   // Signal: the programme's meters and the capture card as ALSA runs it.
   const sg = [];
