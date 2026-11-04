@@ -1390,7 +1390,8 @@ const PAGE = `<!doctype html><html lang="de"><head><meta charset="utf-8">
     links auf <span class="k">studiobox</span> (oder das Logo) klicken (Kachelübersicht der
     Quellen).</li>
     <li>Zeilen mit <span class="k">📁</span> sind Unterordner — Klick öffnet
-    sie, die Pfadzeile darüber führt wieder zurück.</li>
+    sie, die Pfadzeile darüber führt wieder zurück. Jeder Ordner merkt sich,
+    wo du zuletzt warst: nach einem Wechsel landest du wieder dort.</li>
     <li><b>Klick auf eine Datei startet sie sofort</b> — im Normalbetrieb also
     on air. Läuft schon etwas, wird es ersetzt.</li>
     <li>Unten stehen der laufende Titel und groß die Restzeit
@@ -1958,6 +1959,14 @@ $('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)retur
  const filesBox=document.getElementById('files'),flist=document.getElementById('flist'),folderList=document.getElementById('folderList');
  const crumbs=document.getElementById('crumbs');
  let folder=0,subPath='',folderLabels=[],folders=[];
+ // Where the operator last was inside each folder, by its label (stable across
+ // a reordering of the config), kept per browser: switching Musik -> Jingles
+ // and back lands on the subfolder left, not on the root again.
+ const lastSub={};let subRestored=false;
+ const subKey=i=>'sb.sub.'+(folderLabels[i]||i);
+ function rememberSub(){const k=subKey(folder);lastSub[k]=subPath;sset(k,subPath);}
+ function restoreSub(i){const k=subKey(i);const v=k in lastSub?lastSub[k]:sget(k);
+  subRestored=!!v;return v||'';}
  const tiles=document.getElementById('tiles'),welcome=document.getElementById('welcome');
  const stopBtn=document.getElementById('stop');
  // Stop only makes sense while a file is playing — but it keeps its place
@@ -1973,7 +1982,7 @@ $('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)retur
  // Reflect the active folder in the tab row (highlight the current one).
  function markFolderActive(){[...folderList.children].forEach(b=>{const on=Number(b.dataset.i)===folder;
   b.classList.toggle('on',on);setPressed(b,on);});}
- function selectFolder(i){folder=i;subPath='';menu.style.display='none';markFolderActive();
+ function selectFolder(i){folder=i;subPath=restoreSub(i);menu.style.display='none';markFolderActive();
   [...tiles.children].forEach(t=>t.classList.toggle('on',Number(t.dataset.i)===folder));loadFiles();}
  const npbox=document.getElementById('nowplaying'),nowbox=document.getElementById('nowbox');
  // A long name is cut in its middle: head (ellipsized by CSS) + fixed tail.
@@ -2024,6 +2033,8 @@ $('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)retur
    b.className='fbtn';b.dataset.i=i;b.textContent=(f.icon||'📁')+' '+f.label;
    b.onclick=()=>selectFolder(i);folderList.appendChild(b);});
   if(folder>=fl.length)folder=0;
+  // A fresh page resumes where the first folder was left, too.
+  if(!subPath&&fl.length)subPath=restoreSub(folder);
   // Nothing to browse (file player off) -> nothing to pre-listen to either.
   cueBtn.style.display=fl.length?'':'none';
   renderQueue();
@@ -2128,6 +2139,10 @@ $('trimAuto').onclick=()=>{const r=trimRow();if(!r||!tech()||r.auto===null)retur
  function loadFiles(focus){fetch(withK('files?folder='+folder+'&path='+encodeURIComponent(subPath))).then(r=>r.json()).then(d=>{
   const fs=d.files||[];
   if(typeof d.now==='number')clockSkew=d.now-Date.now();
+  // A remembered subfolder that lists nothing any more (renamed, unmounted,
+  // emptied) is no place to come back to: start that folder at its root.
+  if(subRestored){subRestored=false;if(!fs.length&&subPath){subPath='';loadFiles(focus);return;}}
+  rememberSub();
   filesBox.style.display='';
   renderCrumbs();
   addall.style.display='none';

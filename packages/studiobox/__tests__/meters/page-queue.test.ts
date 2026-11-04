@@ -635,6 +635,43 @@ describe('meters page — jump to where a file is playing from', () => {
   });
 });
 
+describe('meters page — each folder keeps its place', () => {
+  const listings: Record<string, FileRow[]> = {
+    ...LISTINGS,
+    '1/': [{ name: 'Sub', dir: true }, { name: 'a.mp3' }],
+  };
+
+  it('comes back to the subfolder that was open when switching folders', async () => {
+    const p = boot(listings);
+    await p.flush();
+    await p.selectFolder(1);
+    p.byId('flist').children[0].click(); // descend into Sub
+    await p.flush();
+    expect(p.crumb()).toBe('Musik / Sub');
+    await p.selectFolder(0);
+    expect(p.crumb()).toBe('Programm');
+    await p.selectFolder(1);
+    expect(p.crumb()).toBe('Musik / Sub');
+    expect(p.fileRows()).toEqual(['Sub/deep.mp3']);
+    expect(p.sent).toEqual([]);
+  });
+
+  it('starts at the root again when the remembered subfolder has gone', async () => {
+    const p = boot(listings);
+    await p.flush();
+    await p.selectFolder(1);
+    p.byId('flist').children[0].click();
+    await p.flush();
+    expect(p.crumb()).toBe('Musik / Sub');
+    await p.selectFolder(0);
+    delete listings['1/Sub']; // unmounted or renamed meanwhile
+    await p.selectFolder(1);
+    expect(p.crumb()).toBe('Musik');
+    expect(p.fileRows().filter((r) => r !== 'undefined')).toEqual(['a.mp3']); // the Sub row has no rel
+    listings['1/Sub'] = LISTINGS['1/Sub'];
+  });
+});
+
 describe('meters page — Reinhören (listen in to what is on air)', () => {
   /** Let the stub <audio> report a duration, the way a browser does once it
    *  has parsed the file it is streaming from /preview. */
