@@ -109,8 +109,10 @@
       }
       .row {
         display: grid;
-        /* A long value (an address) wraps instead of running over the edge. */
-        grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
+        /* A long value (an address) wraps instead of running over the edge. The
+           label keeps its longest word: 1fr's minimum is its min-content, which
+           `overflow-wrap: anywhere` would shrink to one letter per line. */
+        grid-template-columns: 1fr minmax(0, max-content);
         column-gap: 0.8em;
         padding: 0.45em 0;
         border-top: 1px solid var(--line);
@@ -120,7 +122,7 @@
       }
       .label {
         color: var(--muted);
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
       }
       .value {
         overflow-wrap: anywhere;
@@ -130,6 +132,8 @@
       }
       .detail {
         grid-column: 1/-1;
+        /* It spans the 1fr column too: an unbreakable path would widen the row. */
+        overflow-wrap: anywhere;
         color: var(--muted);
         font-size: 0.85em;
       }
